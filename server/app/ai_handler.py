@@ -122,19 +122,9 @@ class AIHandler:
     "response": "Copy of the narrative response above",
     "updates": {
         "player": {
-            "current_room": "new_room_id",
-            "inventory": ["item1", "item2"]
-        },
-        "room": {
-            "id": "room_id",
-            "title": "Room Title",
-            "description": "Room description",
-            "connections": {},
-            "npcs": [],
-            "items": [],
-            "players": [],
-            "visited": true,
-            "properties": {}
+            "direction": "optional, possible values: north, south, east, west, up, down",
+            "inventory": ["item1", "item2"],
+            "memory_log": ["memory entry"]
         },
         "npcs": [
             {
@@ -151,6 +141,11 @@ class AIHandler:
         prompt = f"""Process this player action in a fantasy MUD game.
         Context: {json.dumps(context)}
 
+        IMPORTANT RULES:
+        1. You handle ONLY narrative responses and simple state changes
+        2. Determine if the player is inputting a movement command, if so add it to updates.player.direction
+        3. Focus on movement direction, inventory changes, quest progress, and NPC interactions
+
         IMPORTANT: Your response MUST follow this EXACT format:
         1. First, write a narrative response describing what happens.
         2. Then, add TWO newlines.
@@ -166,7 +161,7 @@ class AIHandler:
             stream = client.chat.completions.create(
                 model="gpt-4.1-nano-2025-04-14",
                 messages=[
-                    {"role": "system", "content": "You are the game master of a fantasy MUD game. Always format responses exactly as requested, with clean JSON and no comments."},
+                    {"role": "system", "content": "You are the game master of a fantasy MUD game. You handle narrative responses and simple state changes only."},
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0.7,
@@ -186,11 +181,11 @@ class AIHandler:
                     # Check if we've hit the JSON part (after two newlines)
                     if not narrative_complete and "\n\n{" in buffer:
                         narrative_complete = True
-                        # Split at the JSON start and yield the narrative
+                        # Split at the JSON start - don't yield the narrative since it was already streamed
                         parts = buffer.split("\n\n{", 1)
                         if len(parts) == 2:
                             narrative = parts[0].strip()
-                            yield narrative
+                            # Don't yield narrative here - it was already streamed character by character
                             buffer = "{" + parts[1]
                     elif not narrative_complete:
                         # Still in narrative part, yield the content
@@ -198,28 +193,16 @@ class AIHandler:
                         yield content
 
                     # Try to parse as JSON to see if it's complete
-                    if narrative_complete:
+                    if buffer.strip().startswith('{') and buffer.count('{') == buffer.count('}'):
                         try:
                             result = json.loads(buffer)
-                            # Validate the JSON structure
-                            if "response" not in result or "updates" not in result:
-                                raise ValueError("Invalid response format: missing required fields")
-
-                            # Validate room updates if present
+                            
+                            # Validate that no room updates are included
                             if "updates" in result and "room" in result["updates"]:
-                                room_updates = result["updates"]["room"]
-                                required_fields = ["id", "title", "description"]
-                                missing_fields = [field for field in required_fields if field not in room_updates]
-                                if missing_fields:
-                                    raise ValueError(f"Room update missing required fields: {', '.join(missing_fields)}")
-
-                            logger.debug(f"[Stream Action] Final parsed result: {json.dumps(result, indent=2)}")
-
-                            # If we successfully parsed JSON, this is the final message
-                            yield {
-                                "response": narrative,  # Use the stored narrative
-                                "updates": result.get("updates", {})
-                            }
+                                logger.warning("[Stream Action] AI tried to include room updates - removing them")
+                                del result["updates"]["room"]
+                            
+                            yield result
                             break
                         except json.JSONDecodeError:
                             continue
@@ -239,100 +222,6 @@ class AIHandler:
         except Exception as e:
             logger.error(f"[Stream Action] Error processing action: {str(e)}")
             yield {"error": f"Error processing action: {str(e)}"}
-
-    @staticmethod
-    async def process_action(
-        action: str,
-        player: Player,
-        room: Room,
-        game_state: GameState,
-        npcs: List[NPC]
-    ) -> Tuple[str, Dict[str, any]]:
-        """Process a player's action"""
-        json_template = '''
-{
-    "response": "The narrative response to show the player",
-    "updates": {
-        "player": {
-            "current_room": "new_room_id",
-            "inventory": ["item1", "item2"]
-        },
-        "room": {
-            "id": "room_id",
-            "title": "Room Title",
-            "description": "Room description",
-            "connections": {},
-            "npcs": [],
-            "items": [],
-            "players": [],
-            "visited": true,
-            "properties": {}
-        },
-        "npcs": [
-            {
-                "id": "npc_id",
-                "name": "NPC Name",
-                "dialogue_history": [],
-                "memory_log": []
-            }
-        ]
-    }
-}
-'''
-        context = {
-            "player": player.dict(),
-            "room": room.dict(),
-            "game_state": game_state.dict(),
-            "npcs": [npc.dict() for npc in npcs],
-            "action": action,
-            "timestamp": datetime.utcnow().isoformat()
-        }
-
-        prompt = f"""Process this player action in a fantasy MUD game.
-        Context: {json.dumps(context)}
-
-        IMPORTANT RULES:
-        1. If the player is moving to a new room that doesn't exist yet, ONLY include the player's new room ID in updates.player.current_room
-        2. DO NOT include any details about the new room in the updates - it will be generated separately
-        3. Only include updates for existing rooms, players, and NPCs that need to be changed
-        4. When moving to a new room, ONLY generate ONE new room ID - do not create or reference multiple new rooms
-        5. The new room ID should follow the format: room_<descriptive_name> (e.g., room_cave, room_forest)
-
-        Return a JSON object with this exact structure:
-        {json_template}
-
-        Only include fields in updates that need to be changed. The updates object is optional.
-        Do not include any comments in the JSON.
-        """
-
-        logger.debug(f"[Process Action] Sending prompt to OpenAI: {prompt}")
-        try:
-            response = client.chat.completions.create(
-                model="gpt-4.1-nano-2025-04-14",
-                messages=[
-                    {"role": "system", "content": "You are the game master of a fantasy MUD game. Always format responses exactly as requested, with clean JSON and no comments. When moving to a new room, only generate ONE new room."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.7
-            )
-
-            content = response.choices[0].message.content
-            logger.debug(f"[Process Action] Received response from OpenAI: {content}")
-
-            result = json.loads(content)
-
-            # Validate room updates if present
-            if "updates" in result and "room" in result["updates"]:
-                room_updates = result["updates"]["room"]
-                required_fields = ["id", "title", "description"]
-                missing_fields = [field for field in required_fields if field not in room_updates]
-                if missing_fields:
-                    raise ValueError(f"Room update missing required fields: {', '.join(missing_fields)}")
-
-            return result["response"], result["updates"]
-        except Exception as e:
-            logger.error(f"[Process Action] Error processing action: {str(e)}")
-            raise
 
     @staticmethod
     async def process_npc_interaction(

@@ -54,7 +54,9 @@ const GameLayout: React.FC<GameLayoutProps> = ({ playerId }) => {
                     timestamp: new Date().toISOString(),
                     title: roomInfo.room.title,
                     description: roomInfo.room.description,
-                    players: roomInfo.players
+                    players: roomInfo.players,
+                    x: roomInfo.room.x,
+                    y: roomInfo.room.y
                 };
                 useGameStore.getState().addMessage(roomMessage);
 

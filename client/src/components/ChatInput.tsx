@@ -77,9 +77,6 @@ const ChatInput: React.FC = () => {
                 streamMessageIdRef.current = `stream-${Date.now()}`;
                 console.log('[ChatInput] Processing action:', trimmedInput);
 
-                // Send action to websocket
-                websocketService.sendAction(trimmedInput);
-
                 // Add initial streaming message
                 const streamingMessage: ChatMessage = {
                     id: streamMessageIdRef.current,
@@ -119,6 +116,19 @@ const ChatInput: React.FC = () => {
                                 isStreaming: false
                             }));
                         }
+
+                        // CRITICAL: Process player updates from the response
+                        if (response.updates?.player) {
+                            console.log('[ChatInput] Processing player updates:', response.updates.player);
+                            const store = useGameStore.getState();
+                            
+                            // Update player state with any changes
+                            const updatedPlayer = { ...store.player, ...response.updates.player };
+                            store.setPlayer(updatedPlayer);
+                            
+                            console.log('[ChatInput] Updated player state, new current_room:', updatedPlayer.current_room);
+                        }
+
                         setIsStreaming(false);
                         streamMessageIdRef.current = null;
                     },

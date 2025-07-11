@@ -69,8 +69,13 @@ const ChatDisplay: React.FC = () => {
             case 'room_description':
                 return (
                     <div className="mb-6 font-mono">
-                        <div className="text-xl font-bold text-amber-500 mb-3">
-                            {message.title}
+                        <div className="flex items-center justify-between mb-3">
+                            <div className="text-xl font-bold text-amber-500">
+                                {message.title}
+                            </div>
+                            <div className="text-sm text-amber-300 bg-amber-900 bg-opacity-30 px-2 py-1 rounded">
+                                ({message.x ?? 0}, {message.y ?? 0})
+                            </div>
                         </div>
                         <div className="text-green-400 text-lg mb-5">
                             {message.description}

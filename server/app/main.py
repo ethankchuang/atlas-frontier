@@ -127,24 +127,10 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, player_id: str)
             message = json.loads(data)
 
             if message.get('type') == 'action':
-                logger.info(f"[WebSocket] Processing action from player {player_id}: {message['action']}")
-                # Process action through game manager
-                response, updates = await game_manager.process_action(
-                    player_id=message['player_id'],
-                    action=message['action']
-                )
-                # Broadcast action result with updates
-                await manager.broadcast_to_room(
-                    room_id=room_id,
-                    message={
-                        'type': 'action',
-                        'player_id': message['player_id'],
-                        'action': message['action'],
-                        'message': response,
-                        'updates': updates
-                    },
-                    exclude_player=player_id
-                )
+                logger.info(f"[WebSocket] Received action from player {player_id}: {message['action']}")
+                # Actions are now processed only through the streaming endpoint
+                # WebSocket just acknowledges receipt but doesn't process
+                logger.info(f"[WebSocket] Action will be processed via streaming endpoint")
             else:
                 logger.info(f"[WebSocket] Broadcasting message type {message.get('type')} from player {player_id}")
                 # For other message types (chat, etc.), just broadcast
@@ -224,129 +210,114 @@ async def process_action_stream(
                 npcs=npcs
             ):
                 if isinstance(chunk, dict):
-                    # This is the final message with updates
+                    # Initialize room generation info
+                    room_generation_info = None
+                    
+                    # Apply updates BEFORE yielding the final response
+                    if "player" in chunk["updates"]:
+                        player_updates = chunk["updates"]["player"]
+                        if "direction" in player_updates:
+                            direction = player_updates["direction"]
+                            
+                            logger.info(f"[Stream] Player attempting to move {direction} from {player.current_room}")
+                            
+                            # CRITICAL: Use GameManager's coordinate-based room movement logic to prevent duplicate coordinates
+                            actual_room_id, new_room = await game_manager.handle_room_movement_by_direction(
+                                player, room, direction
+                            )
+                            
+                            # Update player's destination to the actual room ID
+                            player_updates["current_room"] = actual_room_id
+                            new_room_id = actual_room_id
+                            
+                            logger.info(f"[Stream] Player moving to room: {new_room_id}")
+                            
+                            # Only schedule room generation for newly created rooms (those with placeholder content)
+                            # Check if this is a new room that needs generation
+                            if new_room.title.startswith("Unexplored Area"):
+                                # Store the info we need for background generation
+                                room_generation_info = {
+                                    "room_id": new_room_id,
+                                    "current_room": room,
+                                    "direction": direction,
+                                    "player": player
+                                }
+                                logger.info(f"[Stream] Scheduled background generation for new room {new_room_id}")
+                            else:
+                                logger.info(f"[Stream] Skipping background generation for existing room {new_room_id}")
+                            
+                            # Room movement is now handled entirely by GameManager
+                            # Remove the direction from updates since it's been processed
+                            del player_updates["direction"]
+                            
+                            # CRITICAL: Move the WebSocket connection to the new room
+                            old_room_id = player.current_room
+                            if manager.active_connections.get(old_room_id) and \
+                               action_request.player_id in manager.active_connections[old_room_id]:
+                                # Get the WebSocket connection
+                                websocket_connection = manager.active_connections[old_room_id][action_request.player_id]
+                                
+                                # Notify old room that player is leaving
+                                await manager.broadcast_to_room(
+                                    room_id=old_room_id,
+                                    message={
+                                        "type": "presence", 
+                                        "player_id": action_request.player_id, 
+                                        "status": "left"
+                                    },
+                                    exclude_player=action_request.player_id
+                                )
+                                
+                                # Remove from old room
+                                manager.disconnect(old_room_id, action_request.player_id)
+                                # Add to new room
+                                if new_room_id not in manager.active_connections:
+                                    manager.active_connections[new_room_id] = {}
+                                manager.active_connections[new_room_id][action_request.player_id] = websocket_connection
+                                logger.info(f"[Stream] Moved WebSocket connection from {old_room_id} to {new_room_id}")
+                                
+                                # Immediately send the new room state to the client
+                                await manager.broadcast_to_room(
+                                    room_id=new_room_id,
+                                    message={
+                                        "type": "room_update", 
+                                        "room": new_room.dict()
+                                    }
+                                )
+                                logger.info(f"[Stream] Sent new room state to client for room {new_room_id}")
+                                
+                                # Notify new room that player has joined
+                                await manager.broadcast_to_room(
+                                    room_id=new_room_id,
+                                    message={
+                                        "type": "presence", 
+                                        "player_id": action_request.player_id, 
+                                        "status": "joined"
+                                    },
+                                    exclude_player=action_request.player_id
+                                )
+
+                    # NOW yield the final response with updated player data
                     yield json.dumps({
                         "type": "final",
                         "content": chunk["response"],
                         "updates": chunk["updates"]
                     })
 
-                    # Apply updates
+                    # Trigger room generation after streaming response is complete
+                    if room_generation_info is not None:
+                        logger.info(f"[Stream] Triggering background room generation for {room_generation_info['room_id']}")
+                        asyncio.create_task(game_manager._generate_room_details_async(
+                            room_generation_info['room_id'],
+                            room_generation_info['current_room'],
+                            room_generation_info['direction'],
+                            room_generation_info['player']
+                        ))
+
+                    # Continue with remaining updates
                     if "player" in chunk["updates"]:
                         player_updates = chunk["updates"]["player"]
-                        if "current_room" in player_updates and player_updates["current_room"] != player.current_room:
-                            new_room_id = player_updates["current_room"]
-                            new_room_data = await game_manager.db.get_room(new_room_id)
-
-                            if not new_room_data:
-                                # Generate the new room
-                                title, description, image_prompt = await game_manager.ai.generate_room_description(
-                                    context={
-                                        "previous_room": room.dict(),
-                                        "action": action_request.action,
-                                        "player": player.dict()
-                                    }
-                                )
-
-                                # Determine directions based on action
-                                action_lower = action_request.action.lower()
-                                if "north" in action_lower:
-                                    forward_dir = Direction.NORTH
-                                    back_dir = Direction.SOUTH
-                                elif "south" in action_lower:
-                                    forward_dir = Direction.SOUTH
-                                    back_dir = Direction.NORTH
-                                elif "east" in action_lower:
-                                    forward_dir = Direction.EAST
-                                    back_dir = Direction.WEST
-                                elif "west" in action_lower:
-                                    forward_dir = Direction.WEST
-                                    back_dir = Direction.EAST
-                                elif "up" in action_lower or "climb" in action_lower:
-                                    forward_dir = Direction.UP
-                                    back_dir = Direction.DOWN
-                                elif "down" in action_lower or "descend" in action_lower:
-                                    forward_dir = Direction.DOWN
-                                    back_dir = Direction.UP
-                                else:
-                                    # Default to north/south if no direction is specified
-                                    forward_dir = Direction.NORTH
-                                    back_dir = Direction.SOUTH
-
-                                # Create new room with a placeholder image first
-                                new_room = Room(
-                                    id=new_room_id,
-                                    title=title,
-                                    description=description,
-                                    image_url="",  # Start with empty image URL
-                                    connections={
-                                        # Add connection back to the previous room
-                                        back_dir: player.current_room
-                                    },
-                                    npcs=[],
-                                    items=[],
-                                    players=[action_request.player_id],  # Initialize with the moving player
-                                    visited=True,
-                                    properties={}
-                                )
-
-                                # Update the current room's connections
-                                room.connections[forward_dir] = new_room_id
-                                await game_manager.db.set_room(room.id, room.dict())
-
-                                # Generate the image first
-                                image_url = await game_manager.ai.generate_room_image(image_prompt)
-                                new_room.image_url = image_url
-
-                                # Save the new room with the generated image
-                                await game_manager.db.set_room(new_room_id, new_room.dict())
-
-                                # First update WebSocket connection to new room
-                                logger.info(f"[WebSocket] Attempting to update connection - Current room: {player.current_room}, New room: {new_room_id}")
-                                logger.info(f"[WebSocket] Active connections before update: {manager.get_connection_summary()}")
-
-                                if action_request.player_id in manager.active_connections.get(player.current_room, {}):
-                                    websocket = manager.active_connections[player.current_room].pop(action_request.player_id)
-                                    if not manager.active_connections[player.current_room]:
-                                        manager.active_connections.pop(player.current_room)
-                                    if new_room_id not in manager.active_connections:
-                                        manager.active_connections[new_room_id] = {}
-                                    manager.active_connections[new_room_id][action_request.player_id] = websocket
-                                    logger.info(f"[WebSocket] Updated connection for player {action_request.player_id} from room {player.current_room} to {new_room_id}")
-                                    logger.info(f"[WebSocket] Active connections after update: {manager.get_connection_summary()}")
-                                else:
-                                    logger.warning(f"[WebSocket] Could not find connection for player {action_request.player_id} in room {player.current_room}")
-                                    logger.warning(f"[WebSocket] Available connections: {manager.get_connection_summary()}")
-
-                                # Now broadcast room updates
-                                logger.info(f"[WebSocket] Broadcasting new room update for {new_room_id}")
-                                await manager.broadcast_to_room(
-                                    room_id=new_room_id,
-                                    message={
-                                        "type": "room_update",
-                                        "room": new_room.dict()
-                                    }
-                                )
-
-                                # Also broadcast update to the previous room
-                                logger.info(f"[WebSocket] Broadcasting update for previous room {room.id}")
-                                await manager.broadcast_to_room(
-                                    room_id=room.id,
-                                    message={
-                                        "type": "room_update",
-                                        "room": room.dict()
-                                    }
-                                )
-
-                                # Now update player location in database
-                                await game_manager.db.remove_from_room_players(player.current_room, player.id)
-                                await game_manager.db.add_to_room_players(new_room_id, player.id)
-
-                                # Add the new room info to the updates, but remove room data to prevent double updates
-                                chunk["updates"]["player"] = player_updates
-                                chunk["updates"]["room"] = {}
-                                chunk["updates"]["new_room"] = {}
-
+                        
                         # Update last_action timestamp and text
                         current_time = datetime.utcnow()
                         player_updates["last_action"] = current_time.isoformat()
@@ -424,6 +395,17 @@ async def get_room(
         return room_info
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
+
+# World structure endpoint for debugging
+@app.get("/world/structure")
+async def get_world_structure(
+    game_manager: GameManager = Depends(get_game_manager)
+):
+    try:
+        world_structure = await game_manager.get_world_structure()
+        return world_structure
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 # Player presence update endpoint
 @app.post("/presence")

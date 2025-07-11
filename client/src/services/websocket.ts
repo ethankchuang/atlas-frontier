@@ -1,4 +1,3 @@
-import { io, Socket } from 'socket.io-client';
 import useGameStore from '@/store/gameStore';
 import { ChatMessage, Player, Room } from '@/types/game';
 
@@ -207,7 +206,9 @@ class WebSocketService {
                             timestamp: new Date().toISOString(),
                             title: data.updates.room.title,
                             description: data.updates.room.description,
-                            players: store.playersInRoom
+                            players: store.playersInRoom,
+                            x: data.updates.room.x,
+                            y: data.updates.room.y
                         };
                         store.addMessage(roomMessage);
                     }
@@ -281,7 +282,9 @@ class WebSocketService {
                 timestamp: new Date().toISOString(),
                 title: room.title,
                 description: room.description,
-                players: store.playersInRoom
+                players: store.playersInRoom,
+                x: room.x,
+                y: room.y
             };
             store.addMessage(roomMessage);
             return;
@@ -307,7 +310,9 @@ class WebSocketService {
                     timestamp: new Date().toISOString(),
                     title: room.title,
                     description: room.description,
-                    players: store.playersInRoom
+                    players: store.playersInRoom,
+                    x: room.x,
+                    y: room.y
                 };
                 store.addMessage(roomMessage);
             }
@@ -346,25 +351,7 @@ class WebSocketService {
         this.socket.send(JSON.stringify(chatMessage));
     }
 
-    sendAction(action: string) {
-        if (!this.socket || !this.roomId || !this.playerId) {
-            console.log('[WebSocket] Cannot send action - not connected:', {
-                socket: !!this.socket,
-                roomId: this.roomId,
-                playerId: this.playerId
-            });
-            return;
-        }
-
-        const message = {
-            type: 'action',
-            player_id: this.playerId,
-            room_id: this.roomId,
-            action
-        };
-        console.log('[WebSocket] Sending action:', message);
-        this.socket.send(JSON.stringify(message));
-    }
+    // sendAction method removed - actions now only go through streaming endpoint
 }
 
 // Create a singleton instance

@@ -166,13 +166,8 @@ class APIService {
         }
     }
 
-    // Legacy action processing
-    async processAction(action: ActionRequest): Promise<ActionResponse> {
-        return this.request<ActionResponse>('/action', {
-            method: 'POST',
-            body: JSON.stringify(action),
-        });
-    }
+    // Legacy action processing - REMOVED
+    // Now only using streaming endpoint for all actions
 
     // Player presence
     async updatePresence(playerId: string, roomId: string): Promise<{ success: boolean }> {

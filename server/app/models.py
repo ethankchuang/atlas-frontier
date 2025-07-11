@@ -32,6 +32,8 @@ class Room(BaseModel):
     id: str
     title: str
     description: str
+    x: int = 0  # X coordinate
+    y: int = 0  # Y coordinate
     image_url: Optional[str] = None
     image_status: Optional[str] = "pending"  # "pending", "generating", "ready", "error"
     image_prompt: Optional[str] = None

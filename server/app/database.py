@@ -205,12 +205,125 @@ class Database:
             raise
 
     @staticmethod
+    async def get_room_by_coordinates(x: int, y: int) -> Optional[Dict[str, Any]]:
+        """Get room at specific coordinates"""
+        try:
+            room_id = redis_client.get(f"coord:{x}:{y}")
+            if room_id:
+                if isinstance(room_id, bytes):
+                    room_id = room_id.decode('utf-8')
+                return await Database.get_room(room_id)
+            return None
+        except Exception as e:
+            logger.error(f"Error getting room at coordinates ({x}, {y}): {str(e)}")
+            raise
+
+    @staticmethod
+    async def set_room_coordinates(room_id: str, x: int, y: int) -> bool:
+        """Set coordinate mapping for a room"""
+        try:
+            logger.debug(f"Setting coordinates ({x}, {y}) for room {room_id}")
+            return redis_client.set(f"coord:{x}:{y}", room_id)
+        except Exception as e:
+            logger.error(f"Error setting coordinates ({x}, {y}) for room {room_id}: {str(e)}")
+            raise
+
+    @staticmethod
+    async def get_adjacent_rooms(x: int, y: int) -> Dict[str, Optional[str]]:
+        """Get adjacent room IDs at coordinates around (x, y)"""
+        try:
+            adjacent = {}
+            directions = [
+                ("north", x, y + 1),
+                ("south", x, y - 1),
+                ("east", x + 1, y),
+                ("west", x - 1, y)
+            ]
+            
+            for direction, adj_x, adj_y in directions:
+                room_id = redis_client.get(f"coord:{adj_x}:{adj_y}")
+                if room_id:
+                    if isinstance(room_id, bytes):
+                        room_id = room_id.decode('utf-8')
+                    adjacent[direction] = room_id
+                else:
+                    adjacent[direction] = None
+            
+            return adjacent
+        except Exception as e:
+            logger.error(f"Error getting adjacent rooms for coordinates ({x}, {y}): {str(e)}")
+            raise
+
+    @staticmethod
+    async def remove_room_coordinates(x: int, y: int) -> bool:
+        """Remove coordinate mapping"""
+        try:
+            return redis_client.delete(f"coord:{x}:{y}")
+        except Exception as e:
+            logger.error(f"Error removing coordinates ({x}, {y}): {str(e)}")
+            raise
+
+    @staticmethod
+    async def is_coordinate_discovered(x: int, y: int) -> bool:
+        """Check if a coordinate has been discovered/explored"""
+        try:
+            discovered = redis_client.get(f"discovered:{x}:{y}")
+            return discovered is not None
+        except Exception as e:
+            logger.error(f"Error checking if coordinate ({x}, {y}) is discovered: {str(e)}")
+            return False
+
+    @staticmethod
+    async def mark_coordinate_discovered(x: int, y: int, room_id: str) -> bool:
+        """Mark a coordinate as discovered and associate it with a room"""
+        try:
+            logger.debug(f"Marking coordinate ({x}, {y}) as discovered with room {room_id}")
+            # Set both the discovery flag and the room mapping
+            redis_client.set(f"discovered:{x}:{y}", room_id)
+            redis_client.set(f"coord:{x}:{y}", room_id)
+            return True
+        except Exception as e:
+            logger.error(f"Error marking coordinate ({x}, {y}) as discovered: {str(e)}")
+            return False
+
+    @staticmethod
+    async def get_discovered_coordinates() -> Dict[str, str]:
+        """Get all discovered coordinates and their associated room IDs"""
+        try:
+            discovered_coords = {}
+            discovered_keys = redis_client.keys("discovered:*")
+            
+            for key in discovered_keys:
+                key_str = key.decode('utf-8') if isinstance(key, bytes) else key
+                coord_part = key_str.replace("discovered:", "")
+                room_id = redis_client.get(key)
+                if room_id:
+                    room_id = room_id.decode('utf-8') if isinstance(room_id, bytes) else room_id
+                    discovered_coords[coord_part] = room_id
+            
+            return discovered_coords
+        except Exception as e:
+            logger.error(f"Error getting discovered coordinates: {str(e)}")
+            return {}
+
+    @staticmethod
+    async def remove_coordinate_discovery(x: int, y: int) -> bool:
+        """Remove discovery status for a coordinate"""
+        try:
+            redis_client.delete(f"discovered:{x}:{y}")
+            redis_client.delete(f"coord:{x}:{y}")
+            return True
+        except Exception as e:
+            logger.error(f"Error removing discovery for coordinate ({x}, {y}): {str(e)}")
+            return False
+
+    @staticmethod
     async def reset_world() -> None:
         """Reset the entire game world by clearing all data"""
         try:
-            # Clear all Redis data
+            # Clear all Redis data (includes coordinate mappings)
             redis_client.flushall()
-            logger.info("Redis data cleared")
+            logger.info("Redis data cleared (including coordinate mappings)")
 
             # Clear ChromaDB collections
             try:

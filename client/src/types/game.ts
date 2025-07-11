@@ -23,6 +23,8 @@ export interface Room {
     id: string;
     title: string;
     description: string;
+    x: number;
+    y: number;
     image_url: string;
     image_status: 'pending' | 'generating' | 'ready' | 'error';
     image_prompt?: string;
@@ -78,6 +80,8 @@ export interface ChatMessage {
     title?: string;
     description?: string;
     players?: Player[];
+    x?: number;
+    y?: number;
 }
 
 export interface NPCInteraction {
