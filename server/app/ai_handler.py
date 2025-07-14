@@ -1,4 +1,4 @@
-from openai import OpenAI
+from openai import AsyncOpenAI
 from typing import Dict, List, Optional, Tuple, AsyncGenerator, Union
 import json
 from datetime import datetime
@@ -12,7 +12,7 @@ from .logger import setup_logging
 setup_logging()
 logger = logging.getLogger(__name__)
 
-client = OpenAI(api_key=settings.OPENAI_API_KEY)
+client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
 
 class AIHandler:
     @staticmethod
@@ -38,7 +38,7 @@ class AIHandler:
 
         logger.debug(f"[Room Description] Sending prompt to OpenAI: {prompt}")
         try:
-            response = client.chat.completions.create(
+            response = await client.chat.completions.create(
                 model="gpt-4.1-nano-2025-04-14",
                 messages=[
                     {"role": "system", "content": "You are a creative writer for a fantasy MUD game. Always return clean JSON without any comments. Focus on describing ONLY the immediate room the player is entering."},
@@ -70,7 +70,7 @@ class AIHandler:
             max_retries = 3
             for attempt in range(max_retries):
                 try:
-                    response = client.images.generate(
+                    response = await client.images.generate(
                         model="dall-e-3",
                         prompt=f"A detailed, atmospheric fantasy game scene: {prompt}",
                         size="1024x1024",
@@ -158,7 +158,7 @@ class AIHandler:
 
         logger.debug(f"[Stream Action] Sending prompt to OpenAI: {prompt}")
         try:
-            stream = client.chat.completions.create(
+            stream = await client.chat.completions.create(
                 model="gpt-4.1-nano-2025-04-14",
                 messages=[
                     {"role": "system", "content": "You are the game master of a fantasy MUD game. You handle narrative responses and simple state changes only."},
@@ -172,7 +172,7 @@ class AIHandler:
             narrative = ""
             narrative_complete = False
 
-            for chunk in stream:
+            async for chunk in stream:
                 if chunk.choices[0].delta.content is not None:
                     content = chunk.choices[0].delta.content
                     buffer += content
@@ -255,7 +255,7 @@ class AIHandler:
         {json_template}
         """
 
-        response = client.chat.completions.create(
+        response = await client.chat.completions.create(
             model="gpt-4.1-nano-2025-04-14",
             messages=[
                 {"role": "system", "content": "You are an NPC in a fantasy MUD game. Always return clean JSON without any comments."},
@@ -288,7 +288,7 @@ class AIHandler:
         {json_template}
         """
 
-        response = client.chat.completions.create(
+        response = await client.chat.completions.create(
             model="gpt-4.1-nano-2025-04-14",
             messages=[
                 {"role": "system", "content": "You are a fantasy world creator. Always return clean JSON without any comments."},

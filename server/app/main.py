@@ -201,7 +201,75 @@ async def process_action_stream(
                 if npc_data:
                     npcs.append(NPC(**npc_data))
 
-            # Start streaming the response
+            # Check if this is a movement action first
+            is_movement = any(direction in action_request.action.lower() for direction in ['north', 'south', 'east', 'west', 'up', 'down', 'move'])
+            
+            if is_movement:
+                # Fast path for movement - process immediately without AI
+                logger.info(f"[Stream] Fast movement path for: {action_request.action}")
+                
+                # Extract direction from action
+                direction = None
+                for dir_name in ['north', 'south', 'east', 'west', 'up', 'down']:
+                    if dir_name in action_request.action.lower():
+                        direction = dir_name
+                        break
+                
+                if direction:
+                    # Process movement immediately
+                    actual_room_id, new_room = await game_manager.handle_room_movement_by_direction(
+                        player, room, direction
+                    )
+                    
+                    # Create simple response
+                    response_content = f"You move {direction} from {room.title}."
+                    
+                    # Create updates
+                    updates = {
+                        "player": {
+                            "current_room": actual_room_id,
+                            "memory_log": [f"Moved {direction} from {room.title}"]
+                        }
+                    }
+                    
+                    # Trigger preloading in background
+                    asyncio.create_task(game_manager.preload_adjacent_rooms(
+                        new_room.x, new_room.y, new_room, player
+                    ))
+                    
+                    # Handle WebSocket connection move
+                    old_room_id = player.current_room
+                    if manager.active_connections.get(old_room_id) and \
+                       action_request.player_id in manager.active_connections[old_room_id]:
+                        websocket_connection = manager.active_connections[old_room_id][action_request.player_id]
+                        
+                        # Move connection
+                        manager.disconnect(old_room_id, action_request.player_id)
+                        if actual_room_id not in manager.active_connections:
+                            manager.active_connections[actual_room_id] = {}
+                        manager.active_connections[actual_room_id][action_request.player_id] = websocket_connection
+                        
+                        # Send room update immediately
+                        await manager.broadcast_to_room(
+                            room_id=actual_room_id,
+                            message={"type": "room_update", "room": new_room.dict()}
+                        )
+                    
+                    # Update player in database
+                    player.current_room = actual_room_id
+                    player.memory_log.append(f"Moved {direction} from {room.title}")
+                    await game_manager.db.set_player(player.id, player.dict())
+                    
+                    # Yield immediate response
+                    yield json.dumps({
+                        "type": "final",
+                        "content": response_content,
+                        "updates": updates
+                    })
+                    
+                    return  # Exit early for movement
+                
+            # For non-movement actions, use AI processing
             async for chunk in game_manager.ai.stream_action(
                 action=action_request.action,
                 player=player,
@@ -231,6 +299,22 @@ async def process_action_stream(
                             new_room_id = actual_room_id
                             
                             logger.info(f"[Stream] Player moving to room: {new_room_id}")
+                            
+                            # Trigger preloading of adjacent rooms in the background
+                            logger.info(f"[Stream] Starting background preload for room {new_room_id} at ({new_room.x}, {new_room.y})")
+                            preload_task = asyncio.create_task(game_manager.preload_adjacent_rooms(
+                                new_room.x, new_room.y, new_room, player
+                            ))
+                            
+                            # Add error handling for the background task
+                            def handle_preload_error(task):
+                                try:
+                                    task.result()
+                                    logger.info(f"[Stream] Background preload completed successfully for room {new_room_id}")
+                                except Exception as e:
+                                    logger.error(f"[Stream] Background preload failed for room {new_room_id}: {str(e)}")
+                            
+                            preload_task.add_done_callback(handle_preload_error)
                             
                             # Only schedule room generation for newly created rooms (those with placeholder content)
                             # Check if this is a new room that needs generation
