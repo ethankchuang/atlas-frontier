@@ -145,6 +145,9 @@ class AIHandler:
         1. You handle ONLY narrative responses and simple state changes
         2. Determine if the player is inputting a movement command, if so add it to updates.player.direction
         3. Focus on movement direction, inventory changes, quest progress, and NPC interactions
+        4. For movement actions, create rich, atmospheric descriptions of the journey and arrival
+        5. Describe the transition between rooms, the path taken, and the feeling of entering the new area
+        6. Make movement feel immersive and cinematic, not just "you move north"
 
         IMPORTANT: Your response MUST follow this EXACT format:
         1. First, write a narrative response describing what happens.
@@ -161,7 +164,7 @@ class AIHandler:
             stream = await client.chat.completions.create(
                 model="gpt-4.1-nano-2025-04-14",
                 messages=[
-                    {"role": "system", "content": "You are the game master of a fantasy MUD game. You handle narrative responses and simple state changes only."},
+                    {"role": "system", "content": "You are the game master of a fantasy MUD game. You create immersive, atmospheric narratives for all player actions. Make every action feel cinematic and engaging."},
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0.7,

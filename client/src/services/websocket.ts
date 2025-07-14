@@ -197,6 +197,9 @@ class WebSocketService {
                         console.log('[WebSocket] Storing room data for after reconnect');
                         this.pendingRoomUpdate = data.updates.room;
 
+                        // Mark room as visited on minimap
+                        store.addVisitedCoordinate(data.updates.room.x, data.updates.room.y);
+
                         // Add room description to chat
                         const roomMessage: ChatMessage = {
                             player_id: 'system',
@@ -228,6 +231,9 @@ class WebSocketService {
                     isReconnecting: this.isReconnecting
                 });
                 store.setCurrentRoom(data.updates.room);
+                
+                // Mark room as visited on minimap
+                store.addVisitedCoordinate(data.updates.room.x, data.updates.room.y);
             }
 
             if (data.updates.new_room && data.updates.new_room.image_url) {
@@ -273,6 +279,9 @@ class WebSocketService {
             this.pendingRoomUpdate = null;
             this.isReconnecting = false;
 
+            // Mark room as visited on minimap
+            store.addVisitedCoordinate(room.x, room.y);
+
             // Add room description to chat
             const roomMessage: ChatMessage = {
                 player_id: 'system',
@@ -299,6 +308,9 @@ class WebSocketService {
                 newImage: room.image_url
             });
             store.setCurrentRoom(room);
+
+            // Mark room as visited on minimap
+            store.addVisitedCoordinate(room.x, room.y);
 
             // Add room description to chat if this is a new room
             if (store.currentRoom?.id !== room.id) {

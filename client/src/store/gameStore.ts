@@ -33,6 +33,11 @@ interface GameStore {
     addMessage: (message: ExtendedChatMessage) => void;
     updateMessage: (id: string, updater: (prev: ExtendedChatMessage) => ExtendedChatMessage) => void;
 
+    // Minimap state - track visited coordinates
+    visitedCoordinates: Set<string>;
+    addVisitedCoordinate: (x: number, y: number) => void;
+    isCoordinateVisited: (x: number, y: number) => boolean;
+
     // Connection state
     isConnected: boolean;
     setIsConnected: (connected: boolean) => void;
@@ -46,7 +51,7 @@ interface GameStore {
     setError: (error: string | null) => void;
 }
 
-const useGameStore = create<GameStore>((set) => ({
+const useGameStore = create<GameStore>((set, get) => ({
     // Initial states
     player: null,
     currentRoom: null,
@@ -54,6 +59,7 @@ const useGameStore = create<GameStore>((set) => ({
     playersInRoom: [],
     gameState: null,
     messages: [],
+    visitedCoordinates: new Set<string>(),
     isConnected: false,
     isLoading: false,
     error: null,
@@ -72,6 +78,20 @@ const useGameStore = create<GameStore>((set) => ({
             msg.id === id ? updater(msg) : msg
         )
     })),
+    
+    // Minimap functions
+    addVisitedCoordinate: (x: number, y: number) => set((state) => {
+        const coordKey = `${x},${y}`;
+        const newVisitedCoordinates = new Set(state.visitedCoordinates);
+        newVisitedCoordinates.add(coordKey);
+        return { visitedCoordinates: newVisitedCoordinates };
+    }),
+    isCoordinateVisited: (x: number, y: number) => {
+        const state = get();
+        const coordKey = `${x},${y}`;
+        return state.visitedCoordinates.has(coordKey);
+    },
+    
     setIsConnected: (connected) => set({ isConnected: connected }),
     setIsLoading: (loading) => set({ isLoading: loading }),
     setError: (error) => set({ error })

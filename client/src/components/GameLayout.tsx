@@ -3,6 +3,7 @@ import useGameStore from '@/store/gameStore';
 import RoomDisplay from './RoomDisplay';
 import ChatDisplay from './ChatDisplay';
 import ChatInput from './ChatInput';
+import Minimap from './Minimap';
 import apiService from '@/services/api';
 import websocketService from '@/services/websocket';
 import { ChatMessage } from '@/types/game';
@@ -21,7 +22,8 @@ const GameLayout: React.FC<GameLayoutProps> = ({ playerId }) => {
         setPlayersInRoom,
         setIsLoading,
         setError,
-        setGameState
+        setGameState,
+        addVisitedCoordinate
     } = useGameStore();
 
     // Initialize game state
@@ -44,6 +46,9 @@ const GameLayout: React.FC<GameLayoutProps> = ({ playerId }) => {
                 setCurrentRoom(roomInfo.room);
                 setNPCs(roomInfo.npcs);
                 setPlayersInRoom(roomInfo.players);
+
+                // Mark initial room as visited on minimap
+                addVisitedCoordinate(roomInfo.room.x, roomInfo.room.y);
 
                 // Add initial room description to chat
                 const roomMessage: ChatMessage = {
@@ -119,6 +124,9 @@ const GameLayout: React.FC<GameLayoutProps> = ({ playerId }) => {
                     console.log('[GameLayout] Skipping room update - already have newer data');
                 }
 
+                // Mark the room as visited on minimap
+                addVisitedCoordinate(roomInfo.room.x, roomInfo.room.y);
+
                 setIsLoading(false);
             } catch (error) {
                 console.error('[GameLayout] Failed to update room data:', error);
@@ -145,6 +153,11 @@ const GameLayout: React.FC<GameLayoutProps> = ({ playerId }) => {
                 {/* Retro border overlay */}
                 <div className="absolute inset-0 border-8 border-double border-amber-900 pointer-events-none z-10" />
                 <RoomDisplay />
+            </div>
+
+            {/* Minimap - positioned in top-right corner */}
+            <div className="absolute top-4 right-4 z-20 bg-black bg-opacity-80 p-3 border border-green-700 rounded">
+                <Minimap />
             </div>
 
             {/* Chat Display (bottom 35%) */}

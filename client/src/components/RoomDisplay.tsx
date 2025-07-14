@@ -169,15 +169,7 @@ const RoomDisplay: React.FC = () => {
                 )}
             </div>
             
-            {/* Coordinate Display Overlay */}
-            <div className="absolute top-4 left-4 bg-black bg-opacity-75 border-2 border-amber-500 px-3 py-2 rounded font-mono text-amber-400 text-lg z-10">
-                <div className="text-center">
-                    <div className="text-sm text-amber-300">COORDINATES</div>
-                    <div className="text-xl font-bold">
-                        ({currentRoom.x ?? 0}, {currentRoom.y ?? 0})
-                    </div>
-                </div>
-            </div>
+
         </div>
     );
 };

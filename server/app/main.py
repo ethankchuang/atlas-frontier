@@ -201,75 +201,10 @@ async def process_action_stream(
                 if npc_data:
                     npcs.append(NPC(**npc_data))
 
-            # Check if this is a movement action first
-            is_movement = any(direction in action_request.action.lower() for direction in ['north', 'south', 'east', 'west', 'up', 'down', 'move'])
+            # All actions go through AI processing for rich narrative responses
+            logger.info(f"[Stream] Processing action with AI: {action_request.action}")
             
-            if is_movement:
-                # Fast path for movement - process immediately without AI
-                logger.info(f"[Stream] Fast movement path for: {action_request.action}")
-                
-                # Extract direction from action
-                direction = None
-                for dir_name in ['north', 'south', 'east', 'west', 'up', 'down']:
-                    if dir_name in action_request.action.lower():
-                        direction = dir_name
-                        break
-                
-                if direction:
-                    # Process movement immediately
-                    actual_room_id, new_room = await game_manager.handle_room_movement_by_direction(
-                        player, room, direction
-                    )
-                    
-                    # Create simple response
-                    response_content = f"You move {direction} from {room.title}."
-                    
-                    # Create updates
-                    updates = {
-                        "player": {
-                            "current_room": actual_room_id,
-                            "memory_log": [f"Moved {direction} from {room.title}"]
-                        }
-                    }
-                    
-                    # Trigger preloading in background
-                    asyncio.create_task(game_manager.preload_adjacent_rooms(
-                        new_room.x, new_room.y, new_room, player
-                    ))
-                    
-                    # Handle WebSocket connection move
-                    old_room_id = player.current_room
-                    if manager.active_connections.get(old_room_id) and \
-                       action_request.player_id in manager.active_connections[old_room_id]:
-                        websocket_connection = manager.active_connections[old_room_id][action_request.player_id]
-                        
-                        # Move connection
-                        manager.disconnect(old_room_id, action_request.player_id)
-                        if actual_room_id not in manager.active_connections:
-                            manager.active_connections[actual_room_id] = {}
-                        manager.active_connections[actual_room_id][action_request.player_id] = websocket_connection
-                        
-                        # Send room update immediately
-                        await manager.broadcast_to_room(
-                            room_id=actual_room_id,
-                            message={"type": "room_update", "room": new_room.dict()}
-                        )
-                    
-                    # Update player in database
-                    player.current_room = actual_room_id
-                    player.memory_log.append(f"Moved {direction} from {room.title}")
-                    await game_manager.db.set_player(player.id, player.dict())
-                    
-                    # Yield immediate response
-                    yield json.dumps({
-                        "type": "final",
-                        "content": response_content,
-                        "updates": updates
-                    })
-                    
-                    return  # Exit early for movement
-                
-            # For non-movement actions, use AI processing
+            # Use AI processing for all actions (including movement)
             async for chunk in game_manager.ai.stream_action(
                 action=action_request.action,
                 player=player,
