@@ -80,19 +80,6 @@ const ChatDisplay: React.FC = () => {
                         <div className="text-green-400 text-lg mb-5">
                             {message.description}
                         </div>
-                        {message.players && message.players.length > 0 && (
-                            <div className="flex items-center gap-4 text-lg">
-                                <span className="text-amber-500">Also here:</span>
-                                <div className="flex flex-wrap gap-3">
-                                    {message.players.map(player => (
-                                        <div key={player.id} className="flex items-center bg-amber-900 bg-opacity-50 rounded px-3 py-1">
-                                            <UserCircleIcon className="h-4 w-4 mr-2 text-amber-500" />
-                                            <span className="text-amber-100">{player.name}</span>
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
-                        )}
                     </div>
                 );
 

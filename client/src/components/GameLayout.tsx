@@ -4,6 +4,7 @@ import RoomDisplay from './RoomDisplay';
 import ChatDisplay from './ChatDisplay';
 import ChatInput from './ChatInput';
 import Minimap from './Minimap';
+import PlayersInRoom from './PlayersInRoom';
 import apiService from '@/services/api';
 import websocketService from '@/services/websocket';
 import { ChatMessage } from '@/types/game';
@@ -159,6 +160,9 @@ const GameLayout: React.FC<GameLayoutProps> = ({ playerId }) => {
             <div className="absolute top-4 right-4 z-20 bg-black bg-opacity-80 p-3 border border-green-700 rounded">
                 <Minimap />
             </div>
+
+            {/* Players in Room - positioned below minimap */}
+            <PlayersInRoom />
 
             {/* Chat Display (bottom 35%) */}
             <div className="h-[50%] flex flex-col relative">

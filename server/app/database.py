@@ -406,3 +406,72 @@ class Database:
         except Exception as e:
             logger.error(f"Error resetting world: {str(e)}")
             raise
+
+    @staticmethod
+    async def set_coordinate_lock(x: int, y: int, lock_duration: int = 300) -> bool:
+        """Set a lock to prevent concurrent operations on a specific coordinate"""
+        try:
+            # Use Redis SET with NX (only if not exists) and EX (expiration)
+            result = redis_client.set(f"coord_lock:{x}:{y}", "1", ex=lock_duration, nx=True)
+            return result is True
+        except Exception as e:
+            logger.error(f"Error setting coordinate lock for ({x}, {y}): {str(e)}")
+            return False
+
+    @staticmethod
+    async def release_coordinate_lock(x: int, y: int) -> bool:
+        """Release the coordinate lock"""
+        try:
+            return redis_client.delete(f"coord_lock:{x}:{y}") > 0
+        except Exception as e:
+            logger.error(f"Error releasing coordinate lock for ({x}, {y}): {str(e)}")
+            return False
+
+    @staticmethod
+    async def is_coordinate_locked(x: int, y: int) -> bool:
+        """Check if a coordinate is locked (being operated on by another process)"""
+        try:
+            lock_exists = redis_client.exists(f"coord_lock:{x}:{y}")
+            return lock_exists > 0
+        except Exception as e:
+            logger.error(f"Error checking coordinate lock for ({x}, {y}): {str(e)}")
+            return False
+
+    @staticmethod
+    async def atomic_create_room_at_coordinates(room_id: str, x: int, y: int, room_data: Dict[str, Any]) -> bool:
+        """Atomically create a room at specific coordinates, ensuring no race conditions"""
+        try:
+            # Use Redis transaction to ensure atomicity
+            pipe = redis_client.pipeline()
+            
+            # Check if coordinate is already discovered
+            pipe.get(f"discovered:{x}:{y}")
+            pipe.get(f"coord:{x}:{y}")
+            
+            # Execute the check
+            results = pipe.execute()
+            discovered_flag = results[0]
+            existing_room_id = results[1]
+            
+            if discovered_flag is not None:
+                logger.warning(f"Coordinate ({x}, {y}) already discovered with room {existing_room_id}")
+                return False
+            
+            if existing_room_id is not None:
+                logger.warning(f"Coordinate ({x}, {y}) already has room {existing_room_id}")
+                return False
+            
+            # Atomically set the room and coordinate mapping
+            pipe.set(f"room:{room_id}", json.dumps(Database._serialize_data(room_data)))
+            pipe.set(f"discovered:{x}:{y}", room_id)
+            pipe.set(f"coord:{x}:{y}", room_id)
+            
+            # Execute the transaction
+            pipe.execute()
+            
+            logger.info(f"Atomically created room {room_id} at coordinates ({x}, {y})")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error atomically creating room {room_id} at ({x}, {y}): {str(e)}")
+            return False

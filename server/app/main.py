@@ -33,7 +33,7 @@ app = FastAPI(title="AI MUD Game Server")
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=["http://localhost:3000", "http://localhost:3001"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -269,14 +269,19 @@ async def process_action_stream(
                             # Remove the direction from updates since it's been processed
                             del player_updates["direction"]
                             
-                            # CRITICAL: Move the WebSocket connection to the new room
+                            # CRITICAL: Update player data in database BEFORE broadcasting
+                            updated_player = Player(**{**player.dict(), **player_updates})
+                            await game_manager.db.set_player(action_request.player_id, updated_player.dict())
+                            
+                            # CRITICAL: Update room player lists in database
                             old_room_id = player.current_room
-                            if manager.active_connections.get(old_room_id) and \
-                               action_request.player_id in manager.active_connections[old_room_id]:
-                                # Get the WebSocket connection
-                                websocket_connection = manager.active_connections[old_room_id][action_request.player_id]
-                                
-                                # Notify old room that player is leaving
+                            await game_manager.db.remove_from_room_players(old_room_id, action_request.player_id)
+                            await game_manager.db.add_to_room_players(new_room_id, action_request.player_id)
+                            logger.info(f"[Stream] Updated room player lists: removed from {old_room_id}, added to {new_room_id}")
+                            
+                            # CRITICAL: Handle presence updates for room movement
+                            # Notify old room that player is leaving BEFORE they disconnect
+                            if manager.active_connections.get(old_room_id):
                                 await manager.broadcast_to_room(
                                     room_id=old_room_id,
                                     message={
@@ -286,35 +291,10 @@ async def process_action_stream(
                                     },
                                     exclude_player=action_request.player_id
                                 )
-                                
-                                # Remove from old room
-                                manager.disconnect(old_room_id, action_request.player_id)
-                                # Add to new room
-                                if new_room_id not in manager.active_connections:
-                                    manager.active_connections[new_room_id] = {}
-                                manager.active_connections[new_room_id][action_request.player_id] = websocket_connection
-                                logger.info(f"[Stream] Moved WebSocket connection from {old_room_id} to {new_room_id}")
-                                
-                                # Immediately send the new room state to the client
-                                await manager.broadcast_to_room(
-                                    room_id=new_room_id,
-                                    message={
-                                        "type": "room_update", 
-                                        "room": new_room.dict()
-                                    }
-                                )
-                                logger.info(f"[Stream] Sent new room state to client for room {new_room_id}")
-                                
-                                # Notify new room that player has joined
-                                await manager.broadcast_to_room(
-                                    room_id=new_room_id,
-                                    message={
-                                        "type": "presence", 
-                                        "player_id": action_request.player_id, 
-                                        "status": "joined"
-                                    },
-                                    exclude_player=action_request.player_id
-                                )
+                                logger.info(f"[Stream] Sent 'left' presence to room {old_room_id} for player {action_request.player_id}")
+                            
+                            # The client will handle disconnecting from old room and connecting to new room
+                            # We don't need to manually move WebSocket connections since they're tied to room endpoints
 
                     # NOW yield the final response with updated player data
                     yield json.dumps({
@@ -377,6 +357,7 @@ async def process_action_stream(
                                 await game_manager.db.set_npc(npc_id, npc.dict())
 
                     # Notify other players in the room about the action
+                    # CRITICAL: Only broadcast to OTHER players, not the player who performed the action
                     await manager.broadcast_to_room(
                         room_id=action_request.room_id,
                         message={
@@ -426,6 +407,20 @@ async def get_world_structure(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+# Get player data endpoint
+@app.get("/players/{player_id}")
+async def get_player(
+    player_id: str,
+    game_manager: GameManager = Depends(get_game_manager)
+):
+    try:
+        player_data = await game_manager.db.get_player(player_id)
+        if not player_data:
+            raise HTTPException(status_code=404, detail="Player not found")
+        return player_data
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
 # Player presence update endpoint
 @app.post("/presence")
 async def update_presence(
@@ -451,7 +446,12 @@ async def update_presence(
         # Notify other players
         await manager.broadcast_to_room(
             room_id=request.room_id,
-            message={"type": "presence", "player_id": request.player_id, "status": "joined"},
+            message={
+                "type": "presence", 
+                "player_id": request.player_id, 
+                "player_data": player.dict(),
+                "status": "joined"
+            },
             exclude_player=request.player_id
         )
 
