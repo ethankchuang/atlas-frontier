@@ -45,6 +45,14 @@ interface GameStore {
     // Loading states
     isLoading: boolean;
     setIsLoading: (loading: boolean) => void;
+    
+    // Movement loading state
+    isMovementLoading: boolean;
+    setIsMovementLoading: (loading: boolean) => void;
+    
+    // Room generation loading state (for rooms that aren't preloaded yet)
+    isRoomGenerating: boolean;
+    setIsRoomGenerating: (generating: boolean) => void;
 
     // Error state
     error: string | null;
@@ -62,6 +70,8 @@ const useGameStore = create<GameStore>((set, get) => ({
     visitedCoordinates: new Set<string>(),
     isConnected: false,
     isLoading: false,
+    isMovementLoading: false,
+    isRoomGenerating: false,
     error: null,
 
     // Setters
@@ -94,6 +104,8 @@ const useGameStore = create<GameStore>((set, get) => ({
     
     setIsConnected: (connected) => set({ isConnected: connected }),
     setIsLoading: (loading) => set({ isLoading: loading }),
+    setIsMovementLoading: (loading) => set({ isMovementLoading: loading }),
+    setIsRoomGenerating: (generating) => set({ isRoomGenerating: generating }),
     setError: (error) => set({ error })
 }));
 

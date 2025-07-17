@@ -83,6 +83,13 @@ const ChatDisplay: React.FC = () => {
                     </div>
                 );
 
+            case 'item_obtained':
+                return (
+                    <div className="mb-3 text-purple-400 font-mono text-xl font-bold bg-purple-900 bg-opacity-30 px-4 py-2 rounded border border-purple-500">
+                        {message.message}
+                    </div>
+                );
+
             default:
                 return null;
         }

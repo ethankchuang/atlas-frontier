@@ -103,26 +103,28 @@ class GameManager:
         content_time = time.time() - content_start
         logger.info(f"[Performance] Starting room content generation took {content_time:.2f}s")
 
-        logger.info(f"[Performance] Generating starting room image")
-        image_start = time.time()
-        image_url = await self.ai.generate_room_image(image_prompt)
-        image_time = time.time() - image_start
-        logger.info(f"[Performance] Starting room image generation took {image_time:.2f}s")
-
         # Get current players in the room from Redis set
         players_in_room = await self.db.get_room_players(room_id)
 
-        # Create room using coordinate system and mark as discovered
+        # Create room with title and description immediately (progressive loading)
         room = await self.create_room_with_coordinates(
             room_id=room_id,
             x=x,
             y=y,
             title=title,
             description=description,
-            image_url=image_url,
+            image_url="",  # No image yet
             players=players_in_room,
             mark_discovered=True  # Starting room is always discovered
         )
+
+        # Set generation status to content_ready (image still pending)
+        await self.db.set_room_generation_status(room_id, "content_ready")
+        
+        logger.info(f"[Performance] Created starting room with title and description in {content_time:.2f}s")
+
+        # Generate image in background
+        asyncio.create_task(self._generate_room_image_background(room_id, image_prompt))
 
         # Trigger preloading of adjacent rooms for the starting room
         # Create a dummy player for context since we don't have the actual player yet
@@ -141,7 +143,7 @@ class GameManager:
         ))
 
         elapsed = time.time() - start_time
-        logger.info(f"[Performance] Starting room creation completed in {elapsed:.2f}s (content: {content_time:.2f}s, image: {image_time:.2f}s)")
+        logger.info(f"[Performance] Starting room creation completed in {elapsed:.2f}s (content: {content_time:.2f}s, image generation in background)")
         return room
 
     async def process_action(
@@ -217,7 +219,18 @@ class GameManager:
             updates["player"]["current_room"] = actual_room_id
             new_room_id = actual_room_id
             
-            logger.info(f"[GameManager] Player moving to room: {new_room_id}")
+            # Check if the room is still being generated
+            room_data = await self.db.get_room(new_room_id)
+            is_room_generating = room_data and room_data.get('image_status') == 'generating'
+            
+            # Add room generation status to updates
+            updates["room_generation"] = {
+                "is_generating": is_room_generating,
+                "room_id": new_room_id,
+                "image_status": room_data.get('image_status') if room_data else 'unknown'
+            }
+            
+            logger.info(f"[GameManager] Player moving to room: {new_room_id} (generating: {is_room_generating})")
             logger.info(f"[GameManager] About to trigger preloading for room {new_room_id} at ({new_room.x}, {new_room.y})")
 
             # Note: Room updates are now handled by the streaming endpoint
@@ -237,7 +250,7 @@ class GameManager:
             logger.info(f"[GameManager] Starting background preload for room {new_room_id} at ({new_room.x}, {new_room.y})")
             preload_start = time.time()
             preload_task = asyncio.create_task(self.preload_adjacent_rooms(
-                new_room.x, new_room.y, new_room, player
+                new_room.x, new_room.y, new_room, updated_player
             ))
             
             # Add error handling for the background task
@@ -263,7 +276,8 @@ class GameManager:
     ) -> Tuple[str, Room]:
         """
         Handle player movement to a new room using discovery system based on direction.
-        Each coordinate has two states: discovered and undiscovered.
+        Rooms should only be created during world creation and preloading.
+        This function only loads existing rooms or waits for preloading to complete.
         Returns (actual_room_id, room_object)
         """
         start_time = time.time()
@@ -302,6 +316,13 @@ class GameManager:
                 room_load_time = time.time() - room_load_start
                 total_time = time.time() - start_time
                 logger.info(f"[Performance] Discovered room loaded in {room_load_time:.2f}s (total: {total_time:.2f}s)")
+                
+                # Trigger preloading of adjacent rooms for this discovered room
+                logger.info(f"[Discovery] Triggering preload for discovered room {existing_room_id} at ({new_x}, {new_y})")
+                asyncio.create_task(self.preload_adjacent_rooms(
+                    new_x, new_y, room, player
+                ))
+                
                 return existing_room_id, room
             else:
                 logger.error(f"[Discovery] Coordinate ({new_x}, {new_y}) marked as discovered but no room found!")
@@ -309,177 +330,55 @@ class GameManager:
                 is_discovered = False
         
         if not is_discovered:
-            # UNDISCOVERED COORDINATE: Generate new room and mark as discovered
-            logger.info(f"[Discovery] Discovering new coordinate ({new_x}, {new_y})")
+            # UNDISCOVERED COORDINATE: Wait for preloading to complete or create placeholder
+            logger.info(f"[Discovery] Coordinate ({new_x}, {new_y}) not discovered - waiting for preloading")
+            room_id = f"room_{new_x}_{new_y}"
             
-            # Check if coordinate is already being operated on
-            if await self.db.is_coordinate_locked(new_x, new_y):
-                logger.info(f"[Discovery] Coordinate ({new_x}, {new_y}) is locked - waiting for other process")
-                # Wait a bit and check if room was created by another process
-                await asyncio.sleep(0.1)
-                is_discovered = await self.db.is_coordinate_discovered(new_x, new_y)
-                if is_discovered:
-                    # Another process created the room, load it
-                    existing_room_data = await self.db.get_room_by_coordinates(new_x, new_y)
-                    if existing_room_data:
-                        existing_room_id = existing_room_data["id"]
-                        logger.info(f"[Discovery] Room {existing_room_id} was created by another process at ({new_x}, {new_y})")
-                        players_in_room = await self.db.get_room_players(existing_room_id)
-                        existing_room_data["players"] = players_in_room
-                        room = Room(**existing_room_data)
-                        return existing_room_id, room
+            # Wait for room to be generated by preloading (with longer timeout)
+            timeout = 60  # 60 seconds timeout (increased from 30)
+            start_wait = time.time()
+            while time.time() - start_wait < timeout:
+                # Check if room exists and has content ready
+                room_data = await self.db.get_room(room_id)
+                if room_data and room_data.get('image_status') in ['content_ready', 'ready']:
+                    logger.info(f"[Discovery] Room {room_id} is ready after waiting for preloading")
+                    players_in_room = await self.db.get_room_players(room_id)
+                    room_data["players"] = players_in_room
+                    room = Room(**room_data)
+                    return room_id, room
+                
+                # Check if room is still being generated
+                if room_data and room_data.get('image_status') == 'generating':
+                    logger.info(f"[Discovery] Room {room_id} is still generating, waiting...")
+                    await asyncio.sleep(1.0)  # Increased wait time
+                    continue
+                
+                # Room doesn't exist yet, wait a bit more
+                await asyncio.sleep(0.5)  # Increased wait time
             
-            # Try to acquire coordinate lock
-            coordinate_lock_acquired = await self.db.set_coordinate_lock(new_x, new_y)
-            if not coordinate_lock_acquired:
-                logger.info(f"[Discovery] Could not acquire coordinate lock for ({new_x}, {new_y}) - waiting")
-                # Wait a bit and check if room was created
-                await asyncio.sleep(0.1)
-                is_discovered = await self.db.is_coordinate_discovered(new_x, new_y)
-                if is_discovered:
-                    # Another process created the room, load it
-                    existing_room_data = await self.db.get_room_by_coordinates(new_x, new_y)
-                    if existing_room_data:
-                        existing_room_id = existing_room_data["id"]
-                        logger.info(f"[Discovery] Room {existing_room_id} was created by another process at ({new_x}, {new_y})")
-                        players_in_room = await self.db.get_room_players(existing_room_id)
-                        existing_room_data["players"] = players_in_room
-                        room = Room(**existing_room_data)
-                        return existing_room_id, room
-                else:
-                    # Still no room, create placeholder
-                    room_id = f"room_{new_x}_{new_y}"
-                    placeholder_title = f"Unexplored Area ({direction.title()})"
-                    placeholder_description = f"You venture {direction} into an unexplored area. The details of this place are still forming in your mind..."
-                    
-                    new_room = await self.create_room_with_coordinates(
-                        room_id=room_id,
-                        x=new_x,
-                        y=new_y,
-                        title=placeholder_title,
-                        description=placeholder_description,
-                        image_url="",
-                        players=[player.id],
-                        mark_discovered=True
-                    )
-                    return room_id, new_room
+            # Timeout reached, create fallback room
+            logger.warning(f"[Discovery] Timeout waiting for preloading at ({new_x}, {new_y}), creating fallback")
+            placeholder_title = f"Unexplored Area ({direction.title()})"
+            placeholder_description = f"You venture {direction} into an unexplored area. The details of this place are still forming in your mind..."
             
-            try:
-                # Double-check that coordinate is still undiscovered after acquiring lock
-                is_discovered = await self.db.is_coordinate_discovered(new_x, new_y)
-                if is_discovered:
-                    # Another process created the room while we were waiting for lock
-                    logger.info(f"[Discovery] Coordinate ({new_x}, {new_y}) was discovered by another process while waiting for lock")
-                    existing_room_data = await self.db.get_room_by_coordinates(new_x, new_y)
-                    if existing_room_data:
-                        existing_room_id = existing_room_data["id"]
-                        players_in_room = await self.db.get_room_players(existing_room_id)
-                        existing_room_data["players"] = players_in_room
-                        room = Room(**existing_room_data)
-                        return existing_room_id, room
-                
-                # Check if room is already being generated
-                room_id = f"room_{new_x}_{new_y}"
-                if await self.db.is_room_generation_locked(room_id):
-                    logger.info(f"[Discovery] Room {room_id} is already being generated - using placeholder")
-                    # Create a simple placeholder room while generation is in progress
-                    placeholder_title = f"Unexplored Area ({direction.title()})"
-                    placeholder_description = f"You venture {direction} into an unexplored area. The details of this place are still forming in your mind..."
-                    
-                    new_room = await self.create_room_with_coordinates(
-                        room_id=room_id,
-                        x=new_x,
-                        y=new_y,
-                        title=placeholder_title,
-                        description=placeholder_description,
-                        image_url="",
-                        players=[player.id],
-                        mark_discovered=True
-                    )
-                    return room_id, new_room
-                
-                # Try to acquire generation lock
-                lock_acquired = await self.db.set_room_generation_lock(room_id)
-                if not lock_acquired:
-                    logger.info(f"[Discovery] Could not acquire lock for {room_id} - using placeholder")
-                    # Create placeholder room
-                    placeholder_title = f"Unexplored Area ({direction.title()})"
-                    placeholder_description = f"You venture {direction} into an unexplored area. The details of this place are still forming in your mind..."
-                    
-                    new_room = await self.create_room_with_coordinates(
-                        room_id=room_id,
-                        x=new_x,
-                        y=new_y,
-                        title=placeholder_title,
-                        description=placeholder_description,
-                        image_url="",
-                        players=[player.id],
-                        mark_discovered=True
-                    )
-                    return room_id, new_room
-                
-                try:
-                    # Set generation status
-                    await self.db.set_room_generation_status(room_id, "generating")
-                    
-                    # Generate room description
-                    title, description, image_prompt = await self.ai.generate_room_description(
-                        context={
-                            "previous_room": current_room.dict(),
-                            "direction": direction,
-                            "player": player.dict(),
-                            "discovering_new_area": True
-                        }
-                    )
-                    
-                    # Generate image
-                    image_url = await self.ai.generate_room_image(image_prompt)
-                    
-                    # Create the room with full content
-                    new_room = await self.create_room_with_coordinates(
-                        room_id=room_id,
-                        x=new_x,
-                        y=new_y,
-                        title=title,
-                        description=description,
-                        image_url=image_url,
-                        players=[player.id],
-                        mark_discovered=True
-                    )
-                    
-                    # Set generation status to ready
-                    await self.db.set_room_generation_status(room_id, "ready")
-                    
-                    logger.info(f"[Discovery] Created and discovered new room {room_id} at ({new_x}, {new_y})")
-                    
-                except Exception as e:
-                    logger.error(f"[Discovery] Error generating room {room_id}: {str(e)}")
-                    await self.db.set_room_generation_status(room_id, "error")
-                    
-                    # Create fallback placeholder room
-                    placeholder_title = f"Unexplored Area ({direction.title()})"
-                    placeholder_description = f"You venture {direction} into an unexplored area. The details of this place are still forming in your mind..."
-                    
-                    new_room = await self.create_room_with_coordinates(
-                        room_id=room_id,
-                        x=new_x,
-                        y=new_y,
-                        title=placeholder_title,
-                        description=placeholder_description,
-                        image_url="",
-                        players=[player.id],
-                        mark_discovered=True
-                    )
-                    
-                finally:
-                    # Always release the generation lock
-                    await self.db.release_room_generation_lock(room_id)
-                
-                return room_id, new_room
-                
-            finally:
-                # Always release the coordinate lock
-                await self.db.release_coordinate_lock(new_x, new_y)
+            new_room = await self.create_room_with_coordinates(
+                room_id=room_id,
+                x=new_x,
+                y=new_y,
+                title=placeholder_title,
+                description=placeholder_description,
+                image_url="",
+                players=[player.id],
+                mark_discovered=True
+            )
+            
+            # Trigger preloading of adjacent rooms for this newly created room
+            logger.info(f"[Discovery] Triggering preload for newly created room {room_id} at ({new_x}, {new_y})")
+            asyncio.create_task(self.preload_adjacent_rooms(
+                new_x, new_y, new_room, player
+            ))
+            
+            return room_id, new_room
 
     async def handle_room_movement(
         self, 
@@ -538,106 +437,62 @@ class GameManager:
                 is_discovered = False
         
         if not is_discovered:
-            # UNDISCOVERED COORDINATE: Generate new room and mark as discovered
-            logger.info(f"[Discovery] Discovering new coordinate ({new_x}, {new_y})")
-            
-            # Use consistent room ID format
+            # UNDISCOVERED COORDINATE: Trigger preloading and wait for completion
+            logger.info(f"[Discovery] Coordinate ({new_x}, {new_y}) not discovered - triggering preloading")
             room_id = f"room_{new_x}_{new_y}"
             
             # Check if room is already being generated
             if await self.db.is_room_generation_locked(room_id):
-                logger.info(f"[Discovery] Room {room_id} is already being generated - using placeholder")
-                placeholder_title = f"Unexplored Area"
-                placeholder_description = f"You venture into an unexplored area. The details of this place are still forming in your mind..."
-                
-                new_room = await self.create_room_with_coordinates(
-                    room_id=room_id,
-                    x=new_x,
-                    y=new_y,
-                    title=placeholder_title,
-                    description=placeholder_description,
-                    image_url="",
-                    players=[player.id],
-                    mark_discovered=True
-                )
-                return room_id, new_room
+                logger.info(f"[Discovery] Room {room_id} is already being generated - waiting for completion")
+            else:
+                # Try to acquire generation lock and start generation
+                lock_acquired = await self.db.set_room_generation_lock(room_id)
+                if lock_acquired:
+                    logger.info(f"[Discovery] Starting generation for room {room_id}")
+                    # Start generation in background
+                    asyncio.create_task(self._generate_room_details_async(
+                        room_id, current_room, direction, player
+                    ))
+                else:
+                    logger.info(f"[Discovery] Could not acquire lock for {room_id} - waiting for completion")
             
-            # Try to acquire generation lock
-            lock_acquired = await self.db.set_room_generation_lock(room_id)
-            if not lock_acquired:
-                logger.info(f"[Discovery] Could not acquire lock for {room_id} - using placeholder")
-                placeholder_title = f"Unexplored Area"
-                placeholder_description = f"You venture into an unexplored area. The details of this place are still forming in your mind..."
+            # Wait for room to be generated (with timeout)
+            timeout = 60  # 60 seconds timeout
+            start_wait = time.time()
+            while time.time() - start_wait < timeout:
+                # Check if room exists and has content ready
+                room_data = await self.db.get_room(room_id)
+                if room_data and room_data.get('image_status') in ['content_ready', 'ready']:
+                    logger.info(f"[Discovery] Room {room_id} is ready after generation")
+                    players_in_room = await self.db.get_room_players(room_id)
+                    room_data["players"] = players_in_room
+                    room = Room(**room_data)
+                    return room_id, room
                 
-                new_room = await self.create_room_with_coordinates(
-                    room_id=room_id,
-                    x=new_x,
-                    y=new_y,
-                    title=placeholder_title,
-                    description=placeholder_description,
-                    image_url="",
-                    players=[player.id],
-                    mark_discovered=True
-                )
-                return room_id, new_room
+                # Check if room is still being generated
+                if room_data and room_data.get('image_status') == 'generating':
+                    logger.info(f"[Discovery] Room {room_id} is still generating, waiting...")
+                    await asyncio.sleep(1.0)
+                    continue
+                
+                # Room doesn't exist yet, wait a bit more
+                await asyncio.sleep(0.5)
             
-            try:
-                # Set generation status
-                await self.db.set_room_generation_status(room_id, "generating")
-                
-                # Generate room description
-                title, description, image_prompt = await self.ai.generate_room_description(
-                    context={
-                        "previous_room": current_room.dict(),
-                        "action": action,
-                        "player": player.dict(),
-                        "discovering_new_area": True
-                    }
-                )
-                
-                # Generate image
-                image_url = await self.ai.generate_room_image(image_prompt)
-                
-                # Create the room with full content
-                new_room = await self.create_room_with_coordinates(
-                    room_id=room_id,
-                    x=new_x,
-                    y=new_y,
-                    title=title,
-                    description=description,
-                    image_url=image_url,
-                    players=[player.id],
-                    mark_discovered=True
-                )
-                
-                # Set generation status to ready
-                await self.db.set_room_generation_status(room_id, "ready")
-                
-                logger.info(f"[Discovery] Created and discovered new room {room_id} at ({new_x}, {new_y})")
-                
-            except Exception as e:
-                logger.error(f"[Discovery] Error generating room {room_id}: {str(e)}")
-                await self.db.set_room_generation_status(room_id, "error")
-                
-                # Create fallback placeholder room
-                placeholder_title = f"Unexplored Area"
-                placeholder_description = f"You venture into an unexplored area. The details of this place are still forming in your mind..."
-                
-                new_room = await self.create_room_with_coordinates(
-                    room_id=room_id,
-                    x=new_x,
-                    y=new_y,
-                    title=placeholder_title,
-                    description=placeholder_description,
-                    image_url="",
-                    players=[player.id],
-                    mark_discovered=True
-                )
-                
-            finally:
-                # Always release the lock
-                await self.db.release_room_generation_lock(room_id)
+            # Timeout reached, create fallback room
+            logger.warning(f"[Discovery] Timeout waiting for generation at ({new_x}, {new_y}), creating fallback")
+            placeholder_title = f"Unexplored Area ({direction.title()})"
+            placeholder_description = f"You venture {direction} into an unexplored area. The details of this place are still forming in your mind..."
             
+            new_room = await self.create_room_with_coordinates(
+                room_id=room_id,
+                x=new_x,
+                y=new_y,
+                title=placeholder_title,
+                description=placeholder_description,
+                image_url="",
+                players=[player.id],
+                mark_discovered=True
+            )
             return room_id, new_room
 
     def _get_coordinates_for_direction(self, current_x: int, current_y: int, direction: Direction) -> Tuple[int, int]:
@@ -880,29 +735,28 @@ class GameManager:
                     content_time = time.time() - content_start
                     logger.info(f"[Performance] Room content generation took {content_time:.2f}s for {room_id}")
                     
-                    # Generate image
-                    image_start = time.time()
-                    image_url = await self.ai.generate_room_image(image_prompt)
-                    image_time = time.time() - image_start
-                    logger.info(f"[Performance] Room image generation took {image_time:.2f}s for {room_id}")
-                    
-                    # Create the room
+                    # Create the room with title and description immediately
                     room = await self.create_room_with_coordinates(
                         room_id=room_id,
                         x=x,
                         y=y,
                         title=title,
                         description=description,
-                        image_url=image_url,
+                        image_url="",  # No image yet
                         players=[],  # No players in preloaded room
                         mark_discovered=True
                     )
                     
-                    # Set generation status to ready
-                    await self.db.set_room_generation_status(room_id, "ready")
+                    # Set generation status to content_ready (image still pending)
+                    await self.db.set_room_generation_status(room_id, "content_ready")
+                    
+                    logger.info(f"[Performance] Created room {room_id} with title and description in {content_time:.2f}s")
+                    
+                    # Generate image in background
+                    asyncio.create_task(self._generate_room_image_background(room_id, image_prompt))
                     
                     elapsed = time.time() - start_time
-                    logger.info(f"[Performance] Successfully generated room {room_id} in {elapsed:.2f}s (content: {content_time:.2f}s, image: {image_time:.2f}s)")
+                    logger.info(f"[Performance] Successfully generated room {room_id} content in {elapsed:.2f}s (image generation in background)")
                     return room_id
                     
                 except Exception as e:
@@ -1004,78 +858,96 @@ class GameManager:
             logger.error(f"[Room Generation] Error generating room details for {room_id}: {str(e)}")
 
     async def _generate_room_image(self, room_id: str, image_prompt: str):
-        """Background task to generate room image and update room data"""
+        """Generate an image for a room and update the room data"""
         try:
-            # Get current room data
+            logger.info(f"[Image Generation] Starting image generation for room {room_id}")
+            
+            # Set image status to generating
             room_data = await self.db.get_room(room_id)
-            if not room_data:
-                logger.error(f"Room {room_id} not found when generating image")
-                return
-
-            room = Room(**room_data)
-
-            # Set status to generating
-            room.image_status = "generating"
-            await self.db.set_room(room_id, room.dict())
-
-            # Broadcast status update
-            await self.broadcast_room_update(room_id, {
-                "type": "room_update",
-                "room": {
-                    "id": room_id,
-                    "image_status": "generating"
-                }
-            })
-
-            # Generate image
-            image_url = await self.ai.generate_room_image(image_prompt)
-
-            if image_url:
-                # Update room with image URL
-                room.image_url = image_url
-                room.image_status = "ready"
-                await self.db.set_room(room_id, room.dict())
-
-                # Broadcast update to all clients
-                logger.info(f"Broadcasting image update for room {room_id}")
+            if room_data:
+                room_data['image_status'] = 'generating'
+                await self.db.set_room(room_id, room_data)
+                
+                # Broadcast room update
                 await self.broadcast_room_update(room_id, {
                     "type": "room_update",
-                    "room": {
-                        "id": room_id,
-                        "image_url": image_url,
-                        "image_status": "ready"
-                    }
+                    "room": room_data
+                })
+            
+            # Generate the image
+            image_url = await self.ai.generate_room_image(image_prompt)
+            
+            # Update room with image URL
+            room_data = await self.db.get_room(room_id)
+            if room_data:
+                room_data['image_url'] = image_url
+                room_data['image_status'] = 'ready'
+                await self.db.set_room(room_id, room_data)
+                
+                logger.info(f"[Image Generation] Successfully generated image for room {room_id}")
+                
+                # Broadcast room update
+                await self.broadcast_room_update(room_id, {
+                    "type": "room_update",
+                    "room": room_data
                 })
             else:
-                # Handle image generation failure
-                room.image_status = "error"
-                await self.db.set_room(room_id, room.dict())
+                logger.error(f"[Image Generation] Room {room_id} not found when updating image")
+                
+        except Exception as e:
+            logger.error(f"[Image Generation] Error generating image for room {room_id}: {str(e)}")
+            
+            # Set error status
+            room_data = await self.db.get_room(room_id)
+            if room_data:
+                room_data['image_status'] = 'error'
+                await self.db.set_room(room_id, room_data)
+                
+                # Broadcast room update
                 await self.broadcast_room_update(room_id, {
                     "type": "room_update",
-                    "room": {
-                        "id": room_id,
-                        "image_status": "error"
-                    }
+                    "room": room_data
                 })
 
+    async def _generate_room_image_background(self, room_id: str, image_prompt: str):
+        """Generate an image for a room in the background (for rooms that already have content)"""
+        try:
+            logger.info(f"[Background Image] Starting background image generation for room {room_id}")
+            
+            # Generate the image
+            image_url = await self.ai.generate_room_image(image_prompt)
+            
+            # Update room with image URL
+            room_data = await self.db.get_room(room_id)
+            if room_data:
+                room_data['image_url'] = image_url
+                room_data['image_status'] = 'ready'
+                await self.db.set_room(room_id, room_data)
+                
+                logger.info(f"[Background Image] Successfully generated image for room {room_id}")
+                
+                # Broadcast room update
+                await self.broadcast_room_update(room_id, {
+                    "type": "room_update",
+                    "room": room_data
+                })
+            else:
+                logger.error(f"[Background Image] Room {room_id} not found when updating image")
+                
         except Exception as e:
-            logger.error(f"Error generating room image: {str(e)}")
-            # Update room status to error
-            try:
-                room_data = await self.db.get_room(room_id)
-                if room_data:
-                    room = Room(**room_data)
-                    room.image_status = "error"
-                    await self.db.set_room(room_id, room.dict())
-                    await self.broadcast_room_update(room_id, {
-                        "type": "room_update",
-                        "room": {
-                            "id": room_id,
-                            "image_status": "error"
-                        }
-                    })
-            except Exception as inner_e:
-                logger.error(f"Error updating room status after image generation failure: {str(inner_e)}")
+            logger.error(f"[Background Image] Error generating image for room {room_id}: {str(e)}")
+            
+            # Set error status
+            room_data = await self.db.get_room(room_id)
+            if room_data:
+                room_data['image_status'] = 'error'
+                await self.db.set_room(room_id, room_data)
+                
+                # Broadcast room update
+                await self.broadcast_room_update(room_id, {
+                    "type": "room_update",
+                    "room": room_data
+                })
 
     async def broadcast_room_update(self, room_id: str, update: dict):
         """Broadcast a room update to all clients in the room"""

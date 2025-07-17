@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 from datetime import datetime
 from enum import Enum
 
@@ -35,14 +35,14 @@ class Room(BaseModel):
     x: int = 0  # X coordinate
     y: int = 0  # Y coordinate
     image_url: Optional[str] = None
-    image_status: Optional[str] = "pending"  # "pending", "generating", "ready", "error"
+    image_status: Optional[str] = "pending"  # "pending", "generating", "content_ready", "ready", "error"
     image_prompt: Optional[str] = None
     connections: Dict[Direction, str] = Field(default_factory=dict)  # direction -> room_id
     npcs: List[str] = Field(default_factory=list)  # List of NPC IDs
     items: List[str] = Field(default_factory=list)  # List of Item IDs
     players: List[str] = Field(default_factory=list)  # List of Player IDs
     visited: bool = False
-    properties: Dict[str, str] = Field(default_factory=dict)
+    properties: Dict[str, Any] = Field(default_factory=dict)
 
 class Player(BaseModel):
     id: str

@@ -66,20 +66,68 @@ class APIService {
         onError: (error: string) => void
     ): Promise<void> {
         try {
+            const store = useGameStore.getState();
+            
+            // Check if this is a movement action
+            const isMovement = /(north|south|east|west|up|down|move)/i.test(action.action);
+            
+            // Don't set movement loading state here - we'll determine it based on backend response
+            // The loading spinner should only show when the room is actually being generated
+            
             const response = await fetch(`${API_URL}/action/stream`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
+                    'Accept': 'text/event-stream',
                 },
                 body: JSON.stringify(action),
             });
 
             if (!response.ok) {
-                const errorData = await response.json();
-                throw new Error(errorData.detail || 'Failed to process action');
+                const errorText = await response.text();
+                console.error('[API] Stream error response:', errorText);
+                
+                // Clear movement loading state on error
+                if (isMovement) {
+                    store.setIsMovementLoading(false);
+                }
+                
+                if (response.status === 404) {
+                    // Room not found - try to recover
+                    const player = store.player;
+                    if (player && player.current_room) {
+                        console.log('[API] Room error detected. Attempting to reconnect to current room:', player.current_room);
+                        const websocketService = (await import('./websocket')).default;
+
+                        // First try to get the current room info
+                        try {
+                            const roomInfo = await this.getRoomInfo(player.current_room);
+                            store.setCurrentRoom(roomInfo.room);
+                            store.setNPCs(roomInfo.npcs);
+                            store.setPlayersInRoom(roomInfo.players);
+
+                            // Reconnect WebSocket to current room
+                            websocketService.setNextRoom(player.current_room);
+                            websocketService.disconnect();
+                            websocketService.connect(player.current_room, player.id);
+
+                            onError('Room transition failed. Staying in current room.');
+                        } catch (roomError) {
+                            console.error('[API] Failed to recover room state:', roomError);
+                            onError('Failed to recover room state. Please refresh the page.');
+                        }
+                        return;
+                    }
+                }
+                onError(errorText);
+                return;
             }
 
-            const reader = response.body!.getReader();
+            const reader = response.body?.getReader();
+            if (!reader) {
+                throw new Error('No response body');
+            }
+
             const decoder = new TextDecoder();
             let buffer = '';
 
@@ -93,12 +141,26 @@ class APIService {
 
                 for (const line of lines) {
                     if (line.startsWith('data: ')) {
-                        const data = JSON.parse(line.slice(6));
+                        const dataStr = line.slice(6);
+                        if (dataStr.trim() === '') continue;
+
+                        let data;
+                        try {
+                            data = JSON.parse(dataStr);
+                        } catch (e) {
+                            console.error('[API] Failed to parse stream data:', dataStr);
+                            continue;
+                        }
+
                         if (data.error) {
                             console.error('[API] Stream error:', data.error);
-                            // If room not found, try to recover
-                            if (data.error.includes('Room not found') || data.error.includes('Destination room')) {
-                                const store = useGameStore.getState();
+                            
+                            // Clear movement loading state on error
+                            if (isMovement) {
+                                store.setIsMovementLoading(false);
+                            }
+                            
+                            if (data.error.includes('Room not found')) {
                                 const player = store.player;
                                 if (player && player.current_room) {
                                     console.log('[API] Room error detected. Attempting to reconnect to current room:', player.current_room);
@@ -132,6 +194,20 @@ class APIService {
                         } else if (data.type === 'final') {
                             console.log('[API] Final stream data:', data);
 
+                            // Handle room generation status
+                            if (data.updates?.room_generation) {
+                                const roomGen = data.updates.room_generation;
+                                console.log('[API] Room generation status:', roomGen);
+                                
+                                if (roomGen.is_generating) {
+                                    console.log('[API] Room is being generated, showing loading spinner');
+                                    store.setIsRoomGenerating(true);
+                                } else {
+                                    console.log('[API] Room is ready, hiding loading spinner');
+                                    store.setIsRoomGenerating(false);
+                                }
+                            }
+
                             // Handle room change
                             if (data.updates?.player?.current_room) {
                                 const newRoomId = data.updates.player.current_room;
@@ -162,6 +238,14 @@ class APIService {
             }
         } catch (error) {
             console.error('[API] Stream error:', error);
+            
+            // Clear movement loading state on error
+            const store = useGameStore.getState();
+            const isMovement = /(north|south|east|west|up|down|move)/i.test(action.action);
+            if (isMovement) {
+                store.setIsMovementLoading(false);
+            }
+            
             onError(error instanceof Error ? error.message : 'An error occurred');
         }
     }

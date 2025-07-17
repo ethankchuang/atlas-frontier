@@ -83,6 +83,22 @@ class ConnectionManager:
         else:
             logger.warning(f"[WebSocket] No active connections in room {room_id}")
 
+    async def send_to_player(self, room_id: str, player_id: str, message: dict):
+        """Send a message to a specific player in a room"""
+        logger.info(f"[WebSocket] Sending to player {player_id} in room {room_id} - message type: {message.get('type')}")
+        if room_id in self.active_connections and player_id in self.active_connections[room_id]:
+            try:
+                await self.active_connections[room_id][player_id].send_json(message)
+                logger.debug(f"[WebSocket] Sent message to player {player_id} in room {room_id}")
+            except Exception as e:
+                logger.error(f"[WebSocket] Failed to send message to player {player_id}: {str(e)}")
+        else:
+            logger.warning(f"[WebSocket] Player {player_id} not found in room {room_id}")
+
+def rarity_to_stars(rarity: int) -> str:
+    """Convert rarity number to star representation"""
+    return "★" * rarity + "☆" * (4 - rarity)
+
 # Initialize managers
 manager = ConnectionManager()
 game_manager = GameManager()
@@ -215,9 +231,6 @@ async def process_action_stream(
                 npcs=npcs
             ):
                 if isinstance(chunk, dict):
-                    # Initialize room generation info
-                    room_generation_info = None
-                    
                     # Apply updates BEFORE yielding the final response
                     if "player" in chunk["updates"]:
                         player_updates = chunk["updates"]["player"]
@@ -236,36 +249,6 @@ async def process_action_stream(
                             new_room_id = actual_room_id
                             
                             logger.info(f"[Stream] Player moving to room: {new_room_id}")
-                            
-                            # Trigger preloading of adjacent rooms in the background
-                            logger.info(f"[Stream] Starting background preload for room {new_room_id} at ({new_room.x}, {new_room.y})")
-                            preload_task = asyncio.create_task(game_manager.preload_adjacent_rooms(
-                                new_room.x, new_room.y, new_room, player
-                            ))
-                            
-                            # Add error handling for the background task
-                            def handle_preload_error(task):
-                                try:
-                                    task.result()
-                                    logger.info(f"[Stream] Background preload completed successfully for room {new_room_id}")
-                                except Exception as e:
-                                    logger.error(f"[Stream] Background preload failed for room {new_room_id}: {str(e)}")
-                            
-                            preload_task.add_done_callback(handle_preload_error)
-                            
-                            # Only schedule room generation for newly created rooms (those with placeholder content)
-                            # Check if this is a new room that needs generation
-                            if new_room.title.startswith("Unexplored Area"):
-                                # Store the info we need for background generation
-                                room_generation_info = {
-                                    "room_id": new_room_id,
-                                    "current_room": room,
-                                    "direction": direction,
-                                    "player": player
-                                }
-                                logger.info(f"[Stream] Scheduled background generation for new room {new_room_id}")
-                            else:
-                                logger.info(f"[Stream] Skipping background generation for existing room {new_room_id}")
                             
                             # Room movement is now handled entirely by GameManager
                             # Remove the direction from updates since it's been processed
@@ -304,16 +287,6 @@ async def process_action_stream(
                         "content": chunk["response"],
                         "updates": chunk["updates"]
                     })
-
-                    # Trigger room generation after streaming response is complete
-                    if room_generation_info is not None:
-                        logger.info(f"[Stream] Triggering background room generation for {room_generation_info['room_id']}")
-                        asyncio.create_task(game_manager._generate_room_details_async(
-                            room_generation_info['room_id'],
-                            room_generation_info['current_room'],
-                            room_generation_info['direction'],
-                            room_generation_info['player']
-                        ))
 
                     # Continue with remaining updates
                     if "player" in chunk["updates"]:
@@ -355,6 +328,26 @@ async def process_action_stream(
                             await game_manager.db.set_item(item_id, item_data)
                             
                             logger.info(f"[Item Generation] Added item '{item_data['name']}' to player {player.id}")
+                            
+                            # Send server message to player about the obtained item
+                            rarity_stars = rarity_to_stars(item_data['rarity'])
+                            item_message = f"🎁 You obtained: {item_data['name']} {rarity_stars}"
+                            # Change: stars only at the end
+                            item_message = f"🎁 You obtained: {item_data['name']} {rarity_stars}"
+                            
+                            await manager.send_to_player(
+                                room_id=player.current_room,
+                                player_id=action_request.player_id,
+                                message={
+                                    "type": "item_obtained",
+                                    "player_id": action_request.player_id,
+                                    "item_name": item_data['name'],
+                                    "item_rarity": item_data['rarity'],
+                                    "rarity_stars": rarity_stars,
+                                    "message": item_message,
+                                    "timestamp": datetime.utcnow().isoformat()
+                                }
+                            )
                             
                             # Add item acquisition to player's memory log
                             player.memory_log.append(f"Found {item_data['name']} - {item_data['special_effects']}")

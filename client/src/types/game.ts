@@ -26,7 +26,7 @@ export interface Room {
     x: number;
     y: number;
     image_url: string;
-    image_status: 'pending' | 'generating' | 'ready' | 'error';
+    image_status: 'pending' | 'generating' | 'content_ready' | 'ready' | 'error';
     image_prompt?: string;
     connections: Record<string, string>;
     npcs: string[];
@@ -73,7 +73,7 @@ export interface ChatMessage {
     player_id: string;
     room_id: string;
     message: string;
-    message_type: 'chat' | 'emote' | 'system' | 'room_description';
+    message_type: 'chat' | 'emote' | 'system' | 'room_description' | 'item_obtained';
     timestamp: string;
     id?: string;
     isStreaming?: boolean;
@@ -82,6 +82,9 @@ export interface ChatMessage {
     players?: Player[];
     x?: number;
     y?: number;
+    item_name?: string;
+    item_rarity?: number;
+    rarity_stars?: string;
 }
 
 export interface NPCInteraction {

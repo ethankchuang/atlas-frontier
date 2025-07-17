@@ -145,6 +145,9 @@ class WebSocketService {
                 case 'action':
                     this.handleActionUpdate(data);
                     break;
+                case 'item_obtained':
+                    this.handleItemObtained(data);
+                    break;
                 case 'room_update':
                     console.log('[WebSocket] Received room update:', {
                         roomId: data.room?.id,
@@ -287,6 +290,26 @@ class WebSocketService {
         }
     }
 
+    private handleItemObtained(data: { player_id: string; item_name: string; item_rarity: number; rarity_stars: string; message: string; timestamp: string }) {
+        console.log('[WebSocket] Handling item obtained update:', data);
+        
+        // Only show item obtained messages for the current player
+        if (data.player_id === this.playerId) {
+            const itemMessage: ChatMessage = {
+                player_id: 'system',
+                room_id: this.roomId!,
+                message: data.message,
+                message_type: 'item_obtained',
+                timestamp: data.timestamp,
+                item_name: data.item_name,
+                item_rarity: data.item_rarity,
+                rarity_stars: data.rarity_stars
+            };
+            useGameStore.getState().addMessage(itemMessage);
+            console.log('[WebSocket] Added item obtained message to chat:', data.message);
+        }
+    }
+
     private handleRoomUpdate(room: Room) {
         const store = useGameStore.getState();
         console.log('[WebSocket] Received room update:', {
@@ -344,6 +367,12 @@ class WebSocketService {
                 playerCount: room.players?.length || 0
             });
             store.setCurrentRoom(room);
+
+            // Clear room generation state if the room is ready
+            if (room.image_status === 'ready' || room.image_status === 'content_ready') {
+                console.log('[WebSocket] Room is ready, clearing generation state');
+                store.setIsRoomGenerating(false);
+            }
 
             // CRITICAL: Sync the player list from the room data
             // Note: room.players contains player IDs (strings), not Player objects
