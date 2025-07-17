@@ -24,13 +24,15 @@ class AIHandler:
         json_template = '''
 {
     "title": "A short, evocative title",
-    "description": "A rich, atmospheric description",
+    "description": "A concise, atmospheric description (1-2 sentences max)",
     "image_prompt": "A detailed prompt for image generation"
 }
 '''
-        prompt = f"""Generate a detailed room description for a fantasy MUD game.
+        prompt = f"""Generate a concise room description for a fantasy MUD game.
         Context: {json.dumps(context)}
         Style: {style}
+
+        CRITICAL: Keep descriptions to 1-2 sentences maximum. Focus only on the most important visual and atmospheric details. Remove all fluff and unnecessary elaboration.
 
         Return a JSON object with these exact fields:
         {json_template}
@@ -41,7 +43,7 @@ class AIHandler:
             response = await client.chat.completions.create(
                 model="gpt-4.1-nano-2025-04-14",
                 messages=[
-                    {"role": "system", "content": "You are a creative writer for a fantasy MUD game. Always return clean JSON without any comments. Focus on describing ONLY the immediate room the player is entering."},
+                    {"role": "system", "content": "You are a concise writer for a fantasy MUD game. Always return clean JSON without comments. Keep descriptions to 1-2 sentences maximum. Focus only on essential details and remove all fluff."},
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0.7
@@ -141,16 +143,18 @@ class AIHandler:
         prompt = f"""Process this player action in a fantasy MUD game.
         Context: {json.dumps(context)}
 
-        IMPORTANT RULES:
-        1. You handle ONLY narrative responses and simple state changes
-        2. Determine if the player is inputting a movement command, if so add it to updates.player.direction
-        3. Focus on movement direction, inventory changes, quest progress, and NPC interactions
-        4. For movement actions, create rich, atmospheric descriptions of the journey and arrival
-        5. Describe the transition between rooms, the path taken, and the feeling of entering the new area
-        6. Make movement feel immersive and cinematic, not just "you move north"
+        CRITICAL RULES FOR CONCISE RESPONSES:
+        1. Keep narrative responses to 1-2 sentences maximum
+        2. Focus only on the most important details of what happens
+        3. Remove all fluff, unnecessary elaboration, and flowery language
+        4. For movement: Describe only the essential transition and arrival
+        5. For actions: Focus on the immediate result and key details only
+        6. You handle ONLY narrative responses and simple state changes
+        7. Determine if the player is inputting a movement command, if so add it to updates.player.direction
+        8. Focus on movement direction, inventory changes, quest progress, and NPC interactions
 
         IMPORTANT: Your response MUST follow this EXACT format:
-        1. First, write a narrative response describing what happens.
+        1. First, write a concise narrative response (1-2 sentences max).
         2. Then, add TWO newlines.
         3. Finally, provide a JSON object with this exact structure:
         {json_template}
@@ -164,7 +168,7 @@ class AIHandler:
             stream = await client.chat.completions.create(
                 model="gpt-4.1-nano-2025-04-14",
                 messages=[
-                    {"role": "system", "content": "You are the game master of a fantasy MUD game. You create immersive, atmospheric narratives for all player actions. Make every action feel cinematic and engaging."},
+                    {"role": "system", "content": "You are the game master of a fantasy MUD game. Keep all responses concise (1-2 sentences maximum). Focus only on essential details and remove all fluff. Make actions clear and direct."},
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0.7,
@@ -246,13 +250,15 @@ class AIHandler:
 
         json_template = '''
 {
-    "response": "The NPC's response",
-    "memory": "A new memory to store about this interaction"
+    "response": "The NPC's concise response (1-2 sentences max)",
+    "memory": "A brief memory to store about this interaction"
 }
 '''
 
         prompt = f"""Process this player's interaction with an NPC in a fantasy MUD game.
         Context: {json.dumps(context)}
+
+        CRITICAL: Keep NPC responses to 1-2 sentences maximum. Focus only on the most important information. Remove all fluff and unnecessary elaboration.
 
         Return a JSON object with this exact structure:
         {json_template}
@@ -261,7 +267,7 @@ class AIHandler:
         response = await client.chat.completions.create(
             model="gpt-4.1-nano-2025-04-14",
             messages=[
-                {"role": "system", "content": "You are an NPC in a fantasy MUD game. Always return clean JSON without any comments."},
+                {"role": "system", "content": "You are an NPC in a fantasy MUD game. Keep responses concise (1-2 sentences maximum). Focus only on essential information and remove all fluff. Always return clean JSON without any comments."},
                 {"role": "user", "content": prompt}
             ],
             temperature=0.7
@@ -276,7 +282,7 @@ class AIHandler:
         json_template = '''
 {
     "world_seed": "A unique identifier for this world",
-    "main_quest_summary": "A description of the main quest",
+    "main_quest_summary": "A concise description of the main quest (1-2 sentences max)",
     "starting_state": {
         "quest_stage": "beginning",
         "world_time": "dawn",
@@ -287,6 +293,8 @@ class AIHandler:
 
         prompt = f"""Create a new fantasy world and main quest for a MUD game.
 
+        CRITICAL: Keep the main quest summary to 1-2 sentences maximum. Focus only on the essential quest details. Remove all fluff and unnecessary elaboration.
+
         Return a JSON object with this exact structure:
         {json_template}
         """
@@ -294,7 +302,7 @@ class AIHandler:
         response = await client.chat.completions.create(
             model="gpt-4.1-nano-2025-04-14",
             messages=[
-                {"role": "system", "content": "You are a fantasy world creator. Always return clean JSON without any comments."},
+                {"role": "system", "content": "You are a fantasy world creator. Keep descriptions concise (1-2 sentences maximum). Focus only on essential details and remove all fluff. Always return clean JSON without any comments."},
                 {"role": "user", "content": prompt}
             ],
             temperature=0.7
@@ -313,3 +321,20 @@ class AIHandler:
             main_quest_summary=result["main_quest_summary"],
             global_state=starting_state
         )
+
+    @staticmethod
+    async def generate_text(prompt: str) -> str:
+        """Generate text using OpenAI"""
+        try:
+            response = await client.chat.completions.create(
+                model="gpt-4.1-nano-2025-04-14",
+                messages=[
+                    {"role": "system", "content": "You are a helpful assistant. Keep responses concise (1-2 sentences maximum). Focus only on essential information and remove all fluff. Always return clean, valid responses."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.7
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            logger.error(f"[Generate Text] Error generating text: {str(e)}")
+            raise

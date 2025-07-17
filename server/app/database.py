@@ -129,6 +129,32 @@ class Database:
             raise
 
     @staticmethod
+    async def get_item(item_id: str) -> Optional[Dict[str, Any]]:
+        """Get item data from Redis"""
+        try:
+            item_data = redis_client.get(f"item:{item_id}")
+            if item_data:
+                if isinstance(item_data, bytes):
+                    item_data = item_data.decode('utf-8')
+                return json.loads(item_data)
+            return None
+        except Exception as e:
+            logger.error(f"Error getting item {item_id}: {str(e)}")
+            raise
+
+    @staticmethod
+    async def set_item(item_id: str, item_data: Dict[str, Any]) -> bool:
+        """Save item data to Redis"""
+        try:
+            logger.debug(f"Setting item {item_id} with data: {item_data}")
+            serializable_data = Database._serialize_data(item_data)
+            logger.debug(f"Serialized item data: {serializable_data}")
+            return redis_client.set(f"item:{item_id}", json.dumps(serializable_data))
+        except Exception as e:
+            logger.error(f"Error setting item {item_id}: {str(e)}")
+            raise
+
+    @staticmethod
     async def add_npc_memory(npc_id: str, memory: str, metadata: Dict[str, Any]) -> None:
         """Add a memory to NPC's vector store"""
         npc_memory_collection.add(

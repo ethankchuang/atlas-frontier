@@ -56,6 +56,17 @@ def format_timestamp(timestamp_str: str) -> str:
         logger.debug(f"Error formatting timestamp {timestamp_str}: {str(e)}")
         return timestamp_str
 
+def get_item_details(redis_client, item_id: str) -> Dict:
+    """Get detailed information about an item."""
+    try:
+        item_data = redis_client.get(f'item:{item_id}')
+        if item_data:
+            return json.loads(item_data)
+        return None
+    except Exception as e:
+        logger.debug(f"Error getting item {item_id}: {str(e)}")
+        return None
+
 def check_users():
     """Check all users in the database and their current status."""
     try:
@@ -86,6 +97,22 @@ def check_users():
                     print(f"Last Action: {format_timestamp(player.get('last_action', ''))}")
                     print(f"Last Action Text: {player.get('last_action_text', 'None')}")
                     print(f"Inventory Items: {len(player.get('inventory', []))}")
+                    
+                    # Display detailed inventory information
+                    inventory = player.get('inventory', [])
+                    if inventory:
+                        print("  Inventory Details:")
+                        for i, item_id in enumerate(inventory, 1):
+                            item_details = get_item_details(redis_client, item_id)
+                            if item_details:
+                                rarity_stars = "★" * item_details.get('rarity', 1)
+                                print(f"    {i}. {item_details['name']} (Rarity: {rarity_stars})")
+                                print(f"       Effects: {item_details.get('special_effects', 'None')}")
+                            else:
+                                print(f"    {i}. {item_id} (Item data not found)")
+                    else:
+                        print("  Inventory: Empty")
+                    
                     print(f"Quest Progress: {len(player.get('quest_progress', {}))}")
                     print(f"Memory Log Entries: {len(player.get('memory_log', []))}")
                     print("-" * 80)
@@ -113,6 +140,38 @@ def check_users():
             for player in players:
                 last_action = format_timestamp(player.get('last_action', ''))
                 print(f"  - {player['name']} (Last action: {last_action})")
+
+        print("\n=== Item Statistics ===\n")
+
+        # Calculate item statistics
+        total_items = 0
+        rarity_counts = {1: 0, 2: 0, 3: 0, 4: 0}
+        all_items = []
+
+        for player in all_players:
+            inventory = player.get('inventory', [])
+            total_items += len(inventory)
+            
+            for item_id in inventory:
+                item_details = get_item_details(redis_client, item_id)
+                if item_details:
+                    rarity = item_details.get('rarity', 1)
+                    rarity_counts[rarity] = rarity_counts.get(rarity, 0) + 1
+                    all_items.append(item_details)
+
+        print(f"Total Items in Game: {total_items}")
+        print(f"Items by Rarity:")
+        for rarity in range(1, 5):
+            stars = "★" * rarity
+            count = rarity_counts.get(rarity, 0)
+            print(f"  Rarity {rarity} ({stars}): {count} items")
+        
+        if all_items:
+            print(f"\nSample Items:")
+            for i, item in enumerate(all_items[:5], 1):  # Show first 5 items
+                rarity_stars = "★" * item.get('rarity', 1)
+                print(f"  {i}. {item['name']} (Rarity: {rarity_stars})")
+                print(f"     Effects: {item.get('special_effects', 'None')}")
 
         print("\n=== Activity Summary ===\n")
 

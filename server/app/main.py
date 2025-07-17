@@ -22,6 +22,8 @@ from .models import (
 from .game_manager import GameManager
 from .config import settings
 from .logger import setup_logging
+from .templates.items import GenericItemTemplate
+import uuid
 
 # Set up logging
 setup_logging()
@@ -324,6 +326,42 @@ async def process_action_stream(
 
                         player = Player(**{**player.dict(), **player_updates})
                         await game_manager.db.set_player(player.id, player.dict())
+                        
+                        # Generate random item for player (100% chance for testing)
+                        try:
+                            logger.info(f"[Item Generation] Generating random item for player {player.id}")
+                            item_template = GenericItemTemplate()
+                            
+                            # Generate item with context
+                            context = {
+                                "location": room.title,
+                                "theme": "fantasy"
+                            }
+                            
+                            # Generate the item using AI
+                            prompt = item_template.generate_prompt(context)
+                            ai_response = await game_manager.ai.generate_text(prompt)
+                            item_data = item_template.parse_response(ai_response, context)
+                            
+                            # Create item ID and add to player's inventory
+                            item_id = f"item_{str(uuid.uuid4())}"
+                            item_data["id"] = item_id
+                            
+                            # Add item to player's inventory
+                            player.inventory.append(item_id)
+                            await game_manager.db.set_player(player.id, player.dict())
+                            
+                            # Save item to database
+                            await game_manager.db.set_item(item_id, item_data)
+                            
+                            logger.info(f"[Item Generation] Added item '{item_data['name']}' to player {player.id}")
+                            
+                            # Add item acquisition to player's memory log
+                            player.memory_log.append(f"Found {item_data['name']} - {item_data['special_effects']}")
+                            await game_manager.db.set_player(player.id, player.dict())
+                            
+                        except Exception as e:
+                            logger.error(f"[Item Generation] Failed to generate item for player {player.id}: {str(e)}")
 
                     if "room" in chunk["updates"]:
                         # Only update the current room, not the new room we just created
