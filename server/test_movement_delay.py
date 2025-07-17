@@ -10,7 +10,7 @@ import time
 import json
 
 # Add the server directory to the path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'app'))
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'app'))
 
 from app.game_manager import GameManager
 from app.models import Player, Room, ActionRequest

@@ -5,12 +5,19 @@ from typing import Optional
 class Settings(BaseSettings):
     # API Keys and External Services
     OPENAI_API_KEY: str = ""
+    REPLICATE_API_TOKEN: str = ""
     REDIS_URL: str = "redis://localhost:6379"
 
     # Game Settings
     DEFAULT_WORLD_SEED: str = "fantasy_world_v1"
     MAX_PLAYERS_PER_ROOM: int = 10
     IMAGE_GENERATION_ENABLED: bool = True
+    IMAGE_PROVIDER: str = "replicate"  # "openai" or "replicate"
+    
+    # Replicate Settings - Black Forest Labs Flux Schnell
+    REPLICATE_MODEL: str = "black-forest-labs/flux-schnell"  # Flux Schnell model
+    REPLICATE_IMAGE_WIDTH: int = 1024
+    REPLICATE_IMAGE_HEIGHT: int = 576  # 16:9 aspect ratio (landscape)
 
     # Server Settings
     HOST: str = "0.0.0.0"

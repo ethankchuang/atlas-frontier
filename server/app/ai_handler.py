@@ -7,12 +7,18 @@ from .models import Room, NPC, Player, GameState
 import asyncio
 import logging
 from .logger import setup_logging
+import replicate
+import os
 
 # Configure logging
 setup_logging()
 logger = logging.getLogger(__name__)
 
 client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+
+# Set up Replicate API token
+if settings.REPLICATE_API_TOKEN:
+    os.environ["REPLICATE_API_TOKEN"] = settings.REPLICATE_API_TOKEN
 
 class AIHandler:
     @staticmethod
@@ -60,13 +66,95 @@ class AIHandler:
 
     @staticmethod
     async def generate_room_image(prompt: str) -> str:
-        """Generate an image for a room using DALL-E"""
+        """Generate an image for a room using the configured provider"""
         if not settings.IMAGE_GENERATION_ENABLED:
             logger.info("[Image Generation] Image generation is disabled")
             return ""
 
         try:
             logger.info(f"[Image Generation] Generating image with prompt: {prompt}")
+
+            if settings.IMAGE_PROVIDER == "replicate":
+                return await AIHandler._generate_image_replicate(prompt)
+            else:
+                return await AIHandler._generate_image_openai(prompt)
+
+        except Exception as e:
+            logger.error(f"[Image Generation] Error generating image: {str(e)}")
+            return ""
+
+    @staticmethod
+    async def _generate_image_replicate(prompt: str) -> str:
+        """Generate an image using Replicate"""
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                logger.info(f"[Replicate] Starting image generation with prompt: {prompt} (attempt {attempt + 1})")
+                
+                # Ensure API token is set
+                if not settings.REPLICATE_API_TOKEN:
+                    raise ValueError("REPLICATE_API_TOKEN not configured")
+                
+                # Set environment variable for Replicate client
+                os.environ["REPLICATE_API_TOKEN"] = settings.REPLICATE_API_TOKEN
+                
+                # Enhanced prompt for better fantasy game images
+                enhanced_prompt = f"A detailed, atmospheric fantasy game scene, cinematic lighting, high quality: {prompt}"
+                
+                logger.info(f"[Replicate] Using model: {settings.REPLICATE_MODEL}")
+                logger.info(f"[Replicate] Image dimensions: {settings.REPLICATE_IMAGE_WIDTH}x{settings.REPLICATE_IMAGE_HEIGHT}")
+                
+                # Run the prediction with Flux Schnell parameters
+                output = replicate.run(
+                    settings.REPLICATE_MODEL,
+                    input={
+                        "prompt": enhanced_prompt,
+                        "aspect_ratio": "16:9",  # Flux Schnell uses aspect_ratio instead of width/height
+                        "num_outputs": 1,
+                        "num_inference_steps": 4,  # Flux Schnell recommends 4 steps
+                        "go_fast": True,  # Enable fast inference
+                        "output_format": "webp",
+                        "output_quality": 80
+                    }
+                )
+                
+                if output and len(output) > 0:
+                    image_url = output[0]
+                    # Convert FileOutput object to string URL if needed
+                    if hasattr(image_url, 'url'):
+                        image_url = image_url.url
+                    elif hasattr(image_url, '__str__'):
+                        image_url = str(image_url)
+                    
+                    logger.info(f"[Replicate] Generated image URL: {image_url}")
+                    return image_url
+                else:
+                    raise ValueError("No image URL received from Replicate")
+                    
+            except Exception as e:
+                error_msg = str(e)
+                logger.error(f"[Replicate] Error generating image (attempt {attempt + 1}): {error_msg}")
+                
+                # If it's an NSFW content error, try with a modified prompt
+                if "NSFW content detected" in error_msg and attempt < max_retries - 1:
+                    logger.info(f"[Replicate] NSFW content detected, trying with modified prompt")
+                    # Modify the prompt to be more family-friendly
+                    prompt = f"A family-friendly fantasy game scene, suitable for all ages: {prompt.replace('magical', 'peaceful').replace('mystical', 'beautiful')}"
+                    await asyncio.sleep(1)  # Wait before retrying
+                    continue
+                elif attempt < max_retries - 1:
+                    # For other errors, wait and retry
+                    await asyncio.sleep(1)
+                    continue
+                else:
+                    # Last attempt failed
+                    raise
+
+    @staticmethod
+    async def _generate_image_openai(prompt: str) -> str:
+        """Generate an image using OpenAI DALL-E"""
+        try:
+            logger.info(f"[OpenAI] Starting image generation with prompt: {prompt}")
 
             # Add retry logic for image generation
             max_retries = 3
@@ -83,14 +171,14 @@ class AIHandler:
 
                     # Verify the URL is valid and unique
                     if url and isinstance(url, str) and len(url) > 0:
-                        logger.info(f"[Image Generation] Generated image URL: {url}")
+                        logger.info(f"[OpenAI] Generated image URL: {url}")
                         return url
                     else:
                         raise ValueError("Invalid image URL received")
 
                 except Exception as e:
                     if attempt < max_retries - 1:
-                        logger.warning(f"[Image Generation] Attempt {attempt + 1} failed: {str(e)}")
+                        logger.warning(f"[OpenAI] Attempt {attempt + 1} failed: {str(e)}")
                         await asyncio.sleep(1)  # Wait before retrying
                     else:
                         raise
@@ -98,8 +186,8 @@ class AIHandler:
             raise Exception("Failed to generate valid image after all retries")
 
         except Exception as e:
-            logger.error(f"[Image Generation] Error generating image: {str(e)}")
-            return ""
+            logger.error(f"[OpenAI] Error generating image: {str(e)}")
+            raise
 
     @staticmethod
     async def stream_action(

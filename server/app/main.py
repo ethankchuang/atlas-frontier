@@ -363,6 +363,13 @@ async def process_action_stream(
                             room_updates = chunk["updates"]["room"]
                             if "players" not in room_updates:
                                 room_updates["players"] = await game_manager.db.get_room_players(room.id)
+                            # Ensure image_url is a string if it exists
+                            if "image_url" in room_updates:
+                                image_url = room_updates["image_url"]
+                                if hasattr(image_url, 'url'):
+                                    room_updates["image_url"] = image_url.url
+                                elif hasattr(image_url, '__str__'):
+                                    room_updates["image_url"] = str(image_url)
                             room = Room(**{**room.dict(), **room_updates})
                             await game_manager.db.set_room(room.id, room.dict())
 
