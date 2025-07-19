@@ -1,0 +1,178 @@
+{
+  "export_timestamp": "2025-07-19T05:47:42.276086",
+  "action_records": [
+    {
+      "id": "d592130b-21f6-4292-aaa7-1868ae26a02a",
+      "player_id": "player_4129d9c0-278d-4abc-b7f1-c638fc801234",
+      "room_id": "room_0_1",
+      "action": "talk to anyone here",
+      "ai_response": "Player attempts to talk to anyone here, but no NPCs are present.",
+      "timestamp": "2025-07-19T05:46:13.102148",
+      "updates": {
+        "player": {
+          "memory_log": [
+            "Attempted to talk to NPCs in Enchanted Forest Edge"
+          ]
+        }
+      },
+      "session_id": "session_player_4129d9c0-278d-4abc-b7f1-c638fc801234_20250719",
+      "metadata": {
+        "room_title": "Enchanted Forest Edge",
+        "npcs_present": [],
+        "ai_model": "gpt-4o"
+      }
+    },
+    {
+      "id": "eeaad6cd-08d4-4bd6-b10c-2bee66e84f47",
+      "player_id": "player_4129d9c0-278d-4abc-b7f1-c638fc801234",
+      "room_id": "room_start",
+      "action": "go north",
+      "ai_response": "Player moves north to the next room.",
+      "timestamp": "2025-07-19T05:46:09.204343",
+      "updates": {
+        "player": {
+          "direction": "north",
+          "memory_log": [
+            "Moved north from Village Square"
+          ],
+          "current_room": "room_0_1"
+        },
+        "room_generation": {
+          "is_generating": false,
+          "room_id": "room_0_1",
+          "image_status": "ready"
+        }
+      },
+      "session_id": "session_player_4129d9c0-278d-4abc-b7f1-c638fc801234_20250719",
+      "metadata": {
+        "room_title": "Village Square",
+        "npcs_present": [],
+        "ai_model": "gpt-4o"
+      }
+    },
+    {
+      "id": "1a1b1ecf-62a2-4d4a-95cc-3a2cef0c8d2b",
+      "player_id": "player_4129d9c0-278d-4abc-b7f1-c638fc801234",
+      "room_id": "room_start",
+      "action": "examine the room",
+      "ai_response": "The player examines the village square, noting the cobblestone paths, fountain, and thatched cottages under the twilight sky.",
+      "timestamp": "2025-07-19T05:46:08.178663",
+      "updates": {
+        "player": {
+          "memory_log": [
+            "Examined the room"
+          ]
+        },
+        "npcs": []
+      },
+      "session_id": "session_player_4129d9c0-278d-4abc-b7f1-c638fc801234_20250719",
+      "metadata": {
+        "room_title": "Village Square",
+        "npcs_present": [],
+        "ai_model": "gpt-4o"
+      }
+    },
+    {
+      "id": "fbd6805e-daa8-4cba-8b0b-570125d8f8e6",
+      "player_id": "player_4129d9c0-278d-4abc-b7f1-c638fc801234",
+      "room_id": "room_start",
+      "action": "look around",
+      "ai_response": "You look around the quiet village square, taking in the cobblestone paths, fountain, and thatched cottages under the twilight sky.",
+      "timestamp": "2025-07-19T05:46:06.990281",
+      "updates": {
+        "player": {
+          "memory_log": [
+            "Looked around the village square"
+          ]
+        }
+      },
+      "session_id": "session_player_4129d9c0-278d-4abc-b7f1-c638fc801234_20250719",
+      "metadata": {
+        "room_title": "Village Square",
+        "npcs_present": [],
+        "ai_model": "gpt-4o"
+      }
+    },
+    {
+      "id": "271dfa4c-277e-4867-966b-3f9c266e3ddf",
+      "player_id": "player_7594cf7c-83b4-4f03-8609-08167c3e3b68",
+      "room_id": "room_start",
+      "action": "move left",
+      "ai_response": "You move west into the neighboring room, a quiet alleyway lined with shadows.",
+      "timestamp": "2025-07-19T05:44:12.784922",
+      "updates": {
+        "player": {
+          "current_room": "room_-1_0"
+        }
+      },
+      "session_id": "session_player_7594cf7c-83b4-4f03-8609-08167c3e3b68_20250719",
+      "metadata": {
+        "room_title": "Village Square",
+        "npcs_present": [],
+        "ai_model": "gpt-4o"
+      }
+    },
+    {
+      "id": "09558e59-e92f-44b8-bde3-aa47407b5388",
+      "player_id": "player_7594cf7c-83b4-4f03-8609-08167c3e3b68",
+      "room_id": "room_start",
+      "action": "look around",
+      "ai_response": "You look around the village square, noting the cobblestone paths, fountain, and cottages under the twilight sky.",
+      "timestamp": "2025-07-19T05:43:33.779186",
+      "updates": {
+        "player": {
+          "memory_log": [
+            "Greeted the village square",
+            "Found Worn Village Bell - No special effects"
+          ]
+        }
+      },
+      "session_id": "session_player_7594cf7c-83b4-4f03-8609-08167c3e3b68_20250719",
+      "metadata": {
+        "room_title": "Village Square",
+        "npcs_present": [],
+        "ai_model": "gpt-4o"
+      }
+    },
+    {
+      "id": "392e25a2-d382-4b73-8a43-154edb1d4b7b",
+      "player_id": "player_7594cf7c-83b4-4f03-8609-08167c3e3b68",
+      "room_id": "room_start",
+      "action": "hi",
+      "ai_response": "You greet the village square, but no response occurs.",
+      "timestamp": "2025-07-19T05:43:29.036327",
+      "updates": {
+        "player": {
+          "memory_log": [
+            "Greeted the village square"
+          ]
+        }
+      },
+      "session_id": "session_player_7594cf7c-83b4-4f03-8609-08167c3e3b68_20250719",
+      "metadata": {
+        "room_title": "Village Square",
+        "npcs_present": [],
+        "ai_model": "gpt-4o"
+      }
+    }
+  ],
+  "chat_messages": [],
+  "game_sessions": [
+    {
+      "session_id": "3b33ec07-36d0-41ab-b07a-711868e3c58c",
+      "player_id": "player_4129d9c0-278d-4abc-b7f1-c638fc801234",
+      "start_time": "2025-07-19T05:46:05.579256",
+      "total_actions": "0",
+      "rooms_visited": "[]",
+      "items_obtained": "[]"
+    },
+    {
+      "session_id": "8b979249-8407-42b9-b6b0-0301df65e247",
+      "player_id": "player_7594cf7c-83b4-4f03-8609-08167c3e3b68",
+      "start_time": "2025-07-19T05:42:26.381770",
+      "total_actions": "0",
+      "rooms_visited": "[]",
+      "items_obtained": "[]"
+    }
+  ]
+}

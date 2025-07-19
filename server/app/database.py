@@ -6,6 +6,8 @@ from typing import Any, Dict, List, Optional
 from .config import settings
 import logging
 from .logger import setup_logging
+from datetime import datetime
+import uuid
 
 # Configure logging
 setup_logging()
@@ -500,4 +502,258 @@ class Database:
             
         except Exception as e:
             logger.error(f"Error atomically creating room {room_id} at ({x}, {y}): {str(e)}")
+            return False
+
+    @staticmethod
+    async def store_chat_message(room_id: str, message: 'ChatMessage') -> bool:
+        """Store a chat message in the room's chat history"""
+        try:
+            key = f"chat:room:{room_id}"
+            message_data = message.dict()
+            message_data['timestamp'] = message_data['timestamp'].isoformat()
+            
+            # Add to Redis list (left push for newest first)
+            redis_client.lpush(key, json.dumps(message_data))
+            
+            # Trim to keep only last 1000 messages per room
+            redis_client.ltrim(key, 0, 999)
+            
+            # Set TTL for automatic cleanup
+            redis_client.expire(key, 60 * 60 * 24 * 30)  # 30 days
+            
+            logger.debug(f"Stored chat message in room {room_id}: {message.id}")
+            return True
+        except Exception as e:
+            logger.error(f"Error storing chat message: {str(e)}")
+            raise
+
+    @staticmethod
+    async def store_action_record(player_id: str, action_record: 'ActionRecord') -> bool:
+        """Store a player action and AI response"""
+        try:
+            key = f"actions:player:{player_id}"
+            record_data = action_record.dict()
+            record_data['timestamp'] = record_data['timestamp'].isoformat()
+            
+            # Add to Redis list
+            redis_client.lpush(key, json.dumps(record_data))
+            
+            # Trim to keep only last 500 actions per player
+            redis_client.ltrim(key, 0, 499)
+            
+            # Set TTL for automatic cleanup
+            redis_client.expire(key, 60 * 60 * 24 * 90)  # 90 days
+            
+            logger.debug(f"Stored action record for player {player_id}: {action_record.id}")
+            return True
+        except Exception as e:
+            logger.error(f"Error storing action record: {str(e)}")
+            raise
+
+    @staticmethod
+    async def get_action_history(player_id: Optional[str] = None, room_id: Optional[str] = None, limit: int = 50) -> List[Dict[str, Any]]:
+        """Get action history with optional filtering"""
+        try:
+            # Get all action record keys (stored as lists)
+            if player_id:
+                # Get actions for specific player
+                pattern = f"actions:player:{player_id}"
+                keys = redis_client.keys(pattern)
+            else:
+                # Get all player action keys
+                pattern = "actions:player:*"
+                keys = redis_client.keys(pattern)
+            
+            if not keys:
+                return []
+            
+            # Get all records
+            records = []
+            for key in keys:
+                try:
+                    # Get all actions from the list
+                    action_list = redis_client.lrange(key, 0, -1)
+                    
+                    for action_data in action_list:
+                        try:
+                            # Parse the JSON action record
+                            action = json.loads(action_data.decode('utf-8'))
+                            
+                            # Apply room filter if specified
+                            if room_id and action.get('room_id') != room_id:
+                                continue
+                            
+                            records.append(action)
+                        except json.JSONDecodeError as e:
+                            logger.warning(f"Error parsing action record: {str(e)}")
+                            continue
+                            
+                except Exception as e:
+                    logger.warning(f"Error reading action list {key}: {str(e)}")
+                    continue
+            
+            # Sort by timestamp (newest first) and limit
+            records.sort(key=lambda x: x.get('timestamp', ''), reverse=True)
+            return records[:limit]
+            
+        except Exception as e:
+            logger.error(f"Error getting action history: {str(e)}")
+            return []
+
+    @staticmethod
+    async def get_actions_in_time_window(player_id: str, cutoff_timestamp: str) -> List[Dict[str, Any]]:
+        """Get all actions for a player within a specific time window"""
+        try:
+            # Get actions for specific player
+            pattern = f"actions:player:{player_id}"
+            keys = redis_client.keys(pattern)
+            
+            if not keys:
+                return []
+            
+            # Get all records within time window
+            records = []
+            for key in keys:
+                try:
+                    # Get all actions from the list
+                    action_list = redis_client.lrange(key, 0, -1)
+                    
+                    for action_data in action_list:
+                        try:
+                            # Parse the JSON action record
+                            action = json.loads(action_data.decode('utf-8'))
+                            
+                            # Only include actions within the time window
+                            action_timestamp = action.get('timestamp', '')
+                            if action_timestamp >= cutoff_timestamp:
+                                records.append(action)
+                            
+                        except json.JSONDecodeError as e:
+                            logger.warning(f"Error parsing action record: {str(e)}")
+                            continue
+                            
+                except Exception as e:
+                    logger.warning(f"Error reading action list {key}: {str(e)}")
+                    continue
+            
+            # Sort by timestamp (newest first)
+            records.sort(key=lambda x: x.get('timestamp', ''), reverse=True)
+            return records
+            
+        except Exception as e:
+            logger.error(f"Error getting actions in time window: {str(e)}")
+            return []
+    
+    @staticmethod
+    async def get_chat_history(player_id: Optional[str] = None, room_id: Optional[str] = None, limit: int = 50) -> List[Dict[str, Any]]:
+        """Get chat history with optional filtering"""
+        try:
+            # Get all chat room keys
+            pattern = "chat:room:*"
+            keys = redis_client.keys(pattern)
+            
+            if not keys:
+                return []
+            
+            # Get all messages
+            messages = []
+            for key in keys:
+                try:
+                    room_messages = redis_client.lrange(key, 0, -1)
+                    for msg_data in room_messages:
+                        try:
+                            message = json.loads(msg_data.decode('utf-8') if isinstance(msg_data, bytes) else msg_data)
+                            
+                            # Apply filters
+                            if player_id and message.get('player_id') != player_id:
+                                continue
+                            if room_id and message.get('room_id') != room_id:
+                                continue
+                            
+                            messages.append(message)
+                        except json.JSONDecodeError:
+                            continue
+                except Exception as e:
+                    logger.warning(f"Error reading chat room {key}: {str(e)}")
+                    continue
+            
+            # Sort by timestamp (newest first) and limit
+            messages.sort(key=lambda x: x.get('timestamp', ''), reverse=True)
+            return messages[:limit]
+            
+        except Exception as e:
+            logger.error(f"Error getting chat history: {str(e)}")
+            return []
+    
+    @staticmethod
+    async def get_game_sessions(player_id: Optional[str] = None, limit: int = 50) -> List[Dict[str, Any]]:
+        """Get game sessions with optional filtering"""
+        try:
+            # Get all session keys
+            pattern = "session:*"
+            keys = redis_client.keys(pattern)
+            
+            if not keys:
+                return []
+            
+            # Get all sessions
+            sessions = []
+            for key in keys[:limit * 2]:  # Get more than limit to account for filtering
+                try:
+                    session_data = redis_client.hgetall(key)
+                    if session_data:
+                        # Convert bytes to strings
+                        session = {k.decode('utf-8') if isinstance(k, bytes) else k: 
+                                 v.decode('utf-8') if isinstance(v, bytes) else v 
+                                 for k, v in session_data.items()}
+                        
+                        # Apply filters
+                        if player_id and session.get('player_id') != player_id:
+                            continue
+                        
+                        sessions.append(session)
+                except Exception as e:
+                    logger.warning(f"Error reading session {key}: {str(e)}")
+                    continue
+            
+            # Sort by start time (newest first) and limit
+            sessions.sort(key=lambda x: x.get('start_time', ''), reverse=True)
+            return sessions[:limit]
+            
+        except Exception as e:
+            logger.error(f"Error getting game sessions: {str(e)}")
+            return []
+
+    @staticmethod
+    async def create_game_session(player_id: str) -> str:
+        """Create a new game session"""
+        try:
+            session_id = str(uuid.uuid4())
+            session_data = {
+                "session_id": session_id,
+                "player_id": player_id,
+                "start_time": datetime.utcnow().isoformat(),
+                "total_actions": "0",
+                "rooms_visited": "[]",
+                "items_obtained": "[]"
+            }
+            
+            key = f"session:{session_id}"
+            redis_client.hset(key, mapping=session_data)
+            redis_client.expire(key, 60 * 60 * 24 * 7)  # 7 days
+            
+            return session_id
+        except Exception as e:
+            logger.error(f"Error creating game session: {str(e)}")
+            raise
+
+    @staticmethod
+    async def update_session(session_id: str, updates: Dict[str, Any]) -> bool:
+        """Update session data"""
+        try:
+            key = f"session:{session_id}"
+            redis_client.hset(key, mapping=updates)
+            return True
+        except Exception as e:
+            logger.error(f"Error updating session: {str(e)}")
             return False

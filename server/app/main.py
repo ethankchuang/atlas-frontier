@@ -17,7 +17,8 @@ from .models import (
     GameState,
     CreatePlayerRequest,
     PresenceRequest,
-    Direction
+    Direction,
+    ActionRecord
 )
 from .game_manager import GameManager
 from .config import settings
@@ -219,11 +220,40 @@ async def process_action_stream(
                 if npc_data:
                     npcs.append(NPC(**npc_data))
 
+            # Check rate limit before processing action
+            is_allowed, rate_limit_info = await game_manager.rate_limiter.check_rate_limit(
+                action_request.player_id,
+                game_manager.rate_limit_config['limit'],
+                game_manager.rate_limit_config['interval_minutes']
+            )
+            
+            if not is_allowed:
+                # Player has exceeded rate limit - display as chat message instead of error
+                wait_minutes = rate_limit_info['interval_minutes']
+                wait_seconds = rate_limit_info['time_until_reset']
+                
+                if wait_minutes >= 1:
+                    time_message = f"{wait_minutes:.1f} minutes"
+                else:
+                    time_message = f"{wait_seconds} seconds"
+                
+                rate_limit_message = f"⏰ Rate limit reached! You can only send {rate_limit_info['limit']} message every {wait_minutes} minutes. Please wait {time_message} before sending another message."
+                
+                logger.warning(f"Rate limit exceeded for {action_request.player_id}: {rate_limit_info['action_count']}/{rate_limit_info['limit']} actions")
+                
+                # Return as a normal chat message instead of an error
+                yield json.dumps({
+                    "type": "final",
+                    "content": rate_limit_message,
+                    "updates": {}
+                })
+                return
+            
             # All actions go through AI processing for rich narrative responses
             logger.info(f"[Stream] Processing action with AI: {action_request.action}")
             
             # Use AI processing for all actions (including movement)
-            async for chunk in game_manager.ai.stream_action(
+            async for chunk in game_manager.ai_handler.stream_action(
                 action=action_request.action,
                 player=player,
                 room=room,
@@ -281,12 +311,47 @@ async def process_action_stream(
                             # The client will handle disconnecting from old room and connecting to new room
                             # We don't need to manually move WebSocket connections since they're tied to room endpoints
 
-                    # NOW yield the final response with updated player data
-                    yield json.dumps({
-                        "type": "final",
-                        "content": chunk["response"],
-                        "updates": chunk["updates"]
-                    })
+                    # Check if this is a rate limit error
+                    if chunk.get("updates", {}).get("error") == "rate_limit_exceeded":
+                        # Yield rate limit error
+                        yield json.dumps({
+                            "type": "error",
+                            "error": "rate_limit_exceeded",
+                            "message": chunk["updates"]["message"],
+                            "rate_limit_info": chunk["updates"]["rate_limit_info"]
+                        })
+                    else:
+                        # NOW yield the final response with updated player data
+                        yield json.dumps({
+                            "type": "final",
+                            "content": chunk["response"],
+                            "updates": chunk["updates"]
+                        })
+
+                    # Store the action record with player input and AI response
+                    try:
+                        from .models import ActionRecord
+                        
+                        # Create a simple session ID for now (we can enhance this later)
+                        session_id = f"session_{action_request.player_id}_{datetime.utcnow().strftime('%Y%m%d')}"
+                        
+                        action_record = ActionRecord(
+                            player_id=action_request.player_id,
+                            room_id=action_request.room_id,
+                            action=action_request.action,
+                            ai_response=chunk["response"],
+                            updates=chunk.get("updates", {}),
+                            session_id=session_id,
+                            metadata={
+                                "room_title": room.title,
+                                "npcs_present": [npc.name for npc in npcs],
+                                "ai_model": "gpt-4o"
+                            }
+                        )
+                        await game_manager.db.store_action_record(action_request.player_id, action_record)
+                        logger.info(f"[Storage] Stored action record for player {action_request.player_id}")
+                    except Exception as e:
+                        logger.error(f"[Storage] Failed to store action record: {str(e)}")
 
                     # Continue with remaining updates
                     if "player" in chunk["updates"]:
@@ -313,7 +378,7 @@ async def process_action_stream(
                             
                             # Generate the item using AI
                             prompt = item_template.generate_prompt(context)
-                            ai_response = await game_manager.ai.generate_text(prompt)
+                            ai_response = await game_manager.ai_handler.generate_text(prompt)
                             item_data = item_template.parse_response(ai_response, context)
                             
                             # Create item ID and add to player's inventory
@@ -504,6 +569,9 @@ async def send_chat(
     game_manager: GameManager = Depends(get_game_manager)
 ):
     try:
+        # Store the chat message
+        await game_manager.db.store_chat_message(message.room_id, message)
+        
         # Broadcast the message to all players in the room
         await manager.broadcast_to_room(
             room_id=message.room_id,
@@ -548,6 +616,105 @@ async def interact_with_npc(
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+# Chat history endpoint
+@app.get("/chat/history/{room_id}")
+async def get_room_chat_history(
+    room_id: str,
+    limit: int = 50,
+    game_manager: GameManager = Depends(get_game_manager)
+):
+    """Get chat history for a room"""
+    try:
+        messages = await game_manager.db.get_chat_history(room_id, limit)
+        return {"messages": messages}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+# Action history endpoint
+@app.get("/actions/history/{player_id}")
+async def get_player_action_history(
+    player_id: str,
+    limit: int = 50,
+    game_manager: GameManager = Depends(get_game_manager)
+):
+    """Get action history for a player"""
+    try:
+        actions = await game_manager.db.get_action_history(player_id, limit)
+        return {"actions": actions}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+# Analytics endpoint
+@app.get("/analytics/player/{player_id}")
+async def get_player_analytics(
+    player_id: str,
+    days: int = 7,
+    game_manager: GameManager = Depends(get_game_manager)
+):
+    """Get player action analytics"""
+    try:
+        from datetime import timedelta
+        from collections import Counter
+        
+        actions = await game_manager.db.get_action_history(player_id, limit=1000)
+        
+        # Filter by date range
+        cutoff_date = datetime.utcnow() - timedelta(days=days)
+        recent_actions = []
+        
+        for action in actions:
+            action_time = datetime.fromisoformat(action['timestamp'])
+            if action_time > cutoff_date:
+                recent_actions.append(action)
+        
+        return {
+            "total_actions": len(recent_actions),
+            "actions_per_day": len(recent_actions) / days if days > 0 else 0,
+            "most_common_actions": Counter([a['action'] for a in recent_actions]).most_common(10),
+            "rooms_visited": list(set([a['room_id'] for a in recent_actions])),
+            "total_ai_responses": len(recent_actions),
+            "average_response_length": sum(len(a['ai_response']) for a in recent_actions) / len(recent_actions) if recent_actions else 0
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+# Rate limit status endpoint
+@app.get("/rate-limit/status/{player_id}")
+async def get_rate_limit_status(
+    player_id: str,
+    game_manager: GameManager = Depends(get_game_manager)
+):
+    """Get current rate limit status for a player"""
+    try:
+        status = await game_manager.rate_limiter.get_rate_limit_status(
+            player_id,
+            game_manager.rate_limit_config['limit'],
+            game_manager.rate_limit_config['interval_minutes']
+        )
+        return status
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Update rate limit configuration endpoint
+@app.post("/rate-limit/config")
+async def update_rate_limit_config(
+    config: dict,
+    game_manager: GameManager = Depends(get_game_manager)
+):
+    """Update rate limit configuration"""
+    try:
+        if 'limit' in config:
+            game_manager.rate_limit_config['limit'] = config['limit']
+        if 'interval_minutes' in config:
+            game_manager.rate_limit_config['interval_minutes'] = config['interval_minutes']
+        
+        return {
+            "success": True,
+            "config": game_manager.rate_limit_config
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     import uvicorn

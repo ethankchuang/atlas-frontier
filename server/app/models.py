@@ -2,6 +2,7 @@ from pydantic import BaseModel, Field
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 from enum import Enum
+import uuid
 
 class Direction(str, Enum):
     NORTH = "north"
@@ -75,12 +76,26 @@ class ActionResponse(BaseModel):
     updates: Dict[str, dict] = Field(default_factory=dict)
     image_url: Optional[str] = None
 
+class ActionRecord(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    player_id: str
+    room_id: str
+    action: str  # Player's input
+    ai_response: str  # AI's response
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    updates: Dict[str, Any] = Field(default_factory=dict)  # Game state changes
+    session_id: str  # To group actions by session
+    metadata: Dict[str, Any] = Field(default_factory=dict)  # Additional context like room title, NPCs present, etc.
+
 class ChatMessage(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     player_id: str
     room_id: str
     message: str
     message_type: str = "chat"  # chat, emote, system
     timestamp: datetime = Field(default_factory=datetime.utcnow)
+    is_ai_response: bool = False
+    ai_context: Optional[Dict[str, Any]] = None  # Store AI context for responses
 
 class NPCInteraction(BaseModel):
     player_id: str
@@ -92,3 +107,12 @@ class NPCInteraction(BaseModel):
 class PresenceRequest(BaseModel):
     player_id: str
     room_id: str
+
+class GameSession(BaseModel):
+    session_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    player_id: str
+    start_time: datetime = Field(default_factory=datetime.utcnow)
+    end_time: Optional[datetime] = None
+    total_actions: int = 0
+    rooms_visited: List[str] = Field(default_factory=list)
+    items_obtained: List[str] = Field(default_factory=list)

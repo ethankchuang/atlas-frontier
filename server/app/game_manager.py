@@ -6,15 +6,31 @@ from .database import Database
 from .ai_handler import AIHandler
 import uuid
 import asyncio
+import time
+from .ai_handler import AIHandler
+from .database import Database
+from .rate_limiter import RateLimiter
 import logging
+from typing import Dict, Any, List, Optional, Tuple
+from .models import Player, Room, GameState, ActionRecord
+from datetime import datetime
+import uuid
 
 logger = logging.getLogger(__name__)
 
 class GameManager:
     def __init__(self):
         self.db = Database()
-        self.ai = AIHandler()
-        self.connection_manager = None  # Will be set by FastAPI app
+        self.ai_handler = AIHandler()
+        self.rate_limiter = RateLimiter(self.db)
+        self.connection_manager = None
+        self.logger = logging.getLogger(__name__)
+        
+        # Rate limiting configuration
+        self.rate_limit_config = {
+            'limit': 50,  # Maximum actions per interval
+            'interval_minutes': 30  # Time window in minutes
+        }
 
     def set_connection_manager(self, manager):
         """Set the connection manager instance"""
@@ -25,7 +41,7 @@ class GameManager:
         start_time = time.time()
         logger.info(f"[Performance] Starting game initialization")
         
-        game_state = await self.ai.generate_world_seed()
+        game_state = await self.ai_handler.generate_world_seed()
         await self.db.set_game_state(game_state.dict())
         
         elapsed = time.time() - start_time
@@ -52,6 +68,10 @@ class GameManager:
         await self.db.set_player(player_id, player.dict())
         await self.ensure_starting_room()
         await self.db.add_to_room_players(starting_room, player_id)
+
+        # Create a new game session for the player
+        session_id = await self.db.create_game_session(player_id)
+        logger.info(f"[GameManager] Created session {session_id} for player {player_id}")
 
         elapsed = time.time() - start_time
         logger.info(f"[Performance] Player creation completed in {elapsed:.2f}s for {name}")
@@ -97,7 +117,7 @@ class GameManager:
         # Create new starting room
         logger.info(f"[Performance] Generating new starting room content")
         content_start = time.time()
-        title, description, image_prompt = await self.ai.generate_room_description(
+        title, description, image_prompt = await self.ai_handler.generate_room_description(
             context={"is_starting_room": True}
         )
         content_time = time.time() - content_start
@@ -151,122 +171,169 @@ class GameManager:
         player_id: str,
         action: str
     ) -> Tuple[str, Dict[str, any]]:
-        """Process a player's action"""
+        """Process a player's action with rate limiting"""
         start_time = time.time()
-        logger.info(f"[Performance] Processing action for player {player_id}: {action}")
-
-        # Get initial state
-        state_start = time.time()
-        player_data = await self.db.get_player(player_id)
-        if not player_data:
-            raise ValueError("Player not found")
-
-        player = Player(**player_data)
-        current_room_id = player.current_room
-        room_data = await self.db.get_room(current_room_id)
-        if not room_data:
-            raise ValueError("Room not found")
-
-        room = Room(**room_data)
-        state_time = time.time() - state_start
-        logger.info(f"[Performance] State loading took {state_time:.2f}s")
-
-        # Get game state
-        game_state_data = await self.db.get_game_state()
-        game_state = GameState(**game_state_data)
-
-        # Get NPCs in the room
-        npcs = []
-        for npc_id in room.npcs:
-            npc_data = await self.db.get_npc(npc_id)
-            if npc_data:
-                npcs.append(NPC(**npc_data))
-
-        # Process the action through AI (collect streaming chunks)
-        ai_start = time.time()
-        response = ""
-        updates = {}
+        self.logger.info(f"[Performance] Processing action for player {player_id}: {action}")
         
-        async for chunk in self.ai.stream_action(action, player, room, game_state, npcs):
-            if isinstance(chunk, dict):
-                # This is the final message with updates
-                response = chunk["response"]
-                updates = chunk.get("updates", {})
-                break
-            else:
-                # This is a text chunk - collect it
-                response += chunk
+        # Check rate limit before processing
+        is_allowed, rate_limit_info = await self.rate_limiter.check_rate_limit(
+            player_id, 
+            self.rate_limit_config['limit'], 
+            self.rate_limit_config['interval_minutes']
+        )
         
-        ai_time = time.time() - ai_start
-        logger.info(f"[Performance] AI processing took {ai_time:.2f}s")
-        logger.info(f"[GameManager] Action processed - Updates received: {list(updates.keys())}")
-        logger.info(f"[GameManager] Player updates: {updates.get('player', {})}")
-
-        # If player moved to a new room
-        if "direction" in updates.get("player", {}):
-            direction = updates["player"]["direction"]
-            logger.info(f"[GameManager] Player attempting to move {direction}")
-
-            # Use coordinate-based room movement
-            movement_start = time.time()
-            actual_room_id, new_room = await self.handle_room_movement_by_direction(
-                player, room, direction
-            )
-            movement_time = time.time() - movement_start
-            logger.info(f"[Performance] Room movement processing took {movement_time:.2f}s")
+        if not is_allowed:
+            # Player has exceeded rate limit
+            error_message = f"You have exceeded the rate limit of {rate_limit_info['limit']} actions per {rate_limit_info['interval_minutes']} minutes. Please wait {rate_limit_info['time_until_reset']} seconds before trying again."
             
-            # Update the player's destination to the actual room ID
-            updates["player"]["current_room"] = actual_room_id
-            new_room_id = actual_room_id
+            self.logger.warning(f"Rate limit exceeded for {player_id}: {rate_limit_info['action_count']}/{rate_limit_info['limit']} actions")
             
-            # Check if the room is still being generated
-            room_data = await self.db.get_room(new_room_id)
-            is_room_generating = room_data and room_data.get('image_status') == 'generating'
-            
-            # Add room generation status to updates
-            updates["room_generation"] = {
-                "is_generating": is_room_generating,
-                "room_id": new_room_id,
-                "image_status": room_data.get('image_status') if room_data else 'unknown'
+            return error_message, {
+                'error': 'rate_limit_exceeded',
+                'rate_limit_info': rate_limit_info,
+                'message': error_message
             }
+        
+        # Continue with normal action processing
+        try:
+            # Load current state
+            state_start = time.time()
+            player_data = await self.db.get_player(player_id)
+            if not player_data:
+                return "Player not found", {}
             
-            logger.info(f"[GameManager] Player moving to room: {new_room_id} (generating: {is_room_generating})")
-            logger.info(f"[GameManager] About to trigger preloading for room {new_room_id} at ({new_room.x}, {new_room.y})")
-
-            # Note: Room updates are now handled by the streaming endpoint
-            # to ensure proper WebSocket connection management
-            logger.info(f"[GameManager] Room updates will be handled by streaming endpoint")
-
-            # Update room players in database
-            await self.db.remove_from_room_players(current_room_id, player_id)
-            await self.db.add_to_room_players(new_room_id, player_id)
+            player = Player(**player_data)
+            current_room_id = player.current_room
+            room_data = await self.db.get_room(current_room_id)
+            if not room_data:
+                return "Room not found", {}
             
-            # CRITICAL: Save the updated player data to the database
-            updated_player = Player(**{**player.dict(), **updates["player"]})
-            await self.db.set_player(player_id, updated_player.dict())
-            logger.info(f"[GameManager] Saved updated player data to database: {player_id} -> {updated_player.current_room}")
+            room = Room(**room_data)
+            game_state_data = await self.db.get_game_state()
+            game_state = GameState(**game_state_data)
+            npcs = []
+            for npc_id in room.npcs:
+                npc_data = await self.db.get_npc(npc_id)
+                if npc_data:
+                    npcs.append(NPC(**npc_data))
             
-            # Trigger preloading of adjacent rooms in the background
-            logger.info(f"[GameManager] Starting background preload for room {new_room_id} at ({new_room.x}, {new_room.y})")
-            preload_start = time.time()
-            preload_task = asyncio.create_task(self.preload_adjacent_rooms(
-                new_room.x, new_room.y, new_room, updated_player
-            ))
+            elapsed = time.time() - state_start
+            self.logger.info(f"[Performance] State loading took {elapsed:.2f}s")
             
-            # Add error handling for the background task
-            def handle_preload_error(task):
-                try:
-                    task.result()
-                    preload_elapsed = time.time() - preload_start
-                    logger.info(f"[Performance] Background preload completed in {preload_elapsed:.2f}s for room {new_room_id}")
-                except Exception as e:
-                    logger.error(f"[GameManager] Background preload failed for room {new_room_id}: {str(e)}")
+            # Process with AI
+            ai_start = time.time()
+            response = ""
+            updates = {}
             
-            preload_task.add_done_callback(handle_preload_error)
-
-        elapsed = time.time() - start_time
-        logger.info(f"[Performance] Total action processing took {elapsed:.2f}s")
-        return response, updates
+            async for chunk in self.ai_handler.stream_action(
+                player=player,
+                room=room,
+                game_state=game_state,
+                npcs=npcs,
+                action=action
+            ):
+                if isinstance(chunk, dict):
+                    # This is the final message with updates
+                    response = chunk["response"]
+                    updates = chunk.get("updates", {})
+                    break
+                else:
+                    # This is a text chunk - collect it
+                    response += chunk
+            
+            elapsed = time.time() - ai_start
+            self.logger.info(f"[Performance] AI processing took {elapsed:.2f}s")
+            
+            # Apply updates
+            if updates:
+                self.logger.info(f"[GameManager] Action processed - Updates received: {list(updates.keys())}")
+                
+                # Handle player updates
+                if 'player' in updates:
+                    player_updates = updates['player']
+                    self.logger.info(f"[GameManager] Player updates: {player_updates}")
+                    
+                    # Update player data (excluding direction which is handled separately)
+                    for key, value in player_updates.items():
+                        if key != 'direction' and hasattr(player, key):
+                            setattr(player, key, value)
+                    
+                    # Handle movement
+                    if 'direction' in player_updates:
+                        self.logger.info(f"[GameManager] Player attempting to move {player_updates['direction']}")
+                        actual_room_id, new_room = await self.handle_room_movement_by_direction(
+                            player, 
+                            room, 
+                            player_updates['direction']
+                        )
+                        # Update current room after movement
+                        player.current_room = actual_room_id
+                        new_room_id = actual_room_id
+                
+                # Handle room generation updates
+                if 'room_generation' in updates:
+                    room_updates = updates['room_generation']
+                    self.logger.info(f"[GameManager] Room updates will be handled by streaming endpoint")
+                
+                # Save updated player data
+                await self.db.set_player(player_id, player.dict())
+                self.logger.info(f"[GameManager] Saved updated player data to database: {player_id} -> {player.current_room}")
+                
+                # Start background preload for new room if player moved
+                if 'direction' in updates.get('player', {}):
+                    new_room_id = player.current_room
+                    if new_room_id != current_room_id:
+                        self.logger.info(f"[GameManager] Starting background preload for room {new_room_id}")
+                        preload_start = time.time()
+                        preload_task = asyncio.create_task(self.preload_adjacent_rooms(
+                            new_room.x, new_room.y, new_room, player
+                        ))
+                        
+                        # Add error handling for the background task
+                        def handle_preload_error(task):
+                            try:
+                                task.result()
+                                preload_elapsed = time.time() - preload_start
+                                logger.info(f"[Performance] Background preload completed in {preload_elapsed:.2f}s for room {new_room_id}")
+                            except Exception as e:
+                                logger.error(f"[GameManager] Background preload failed for room {new_room_id}: {str(e)}")
+                        
+                        preload_task.add_done_callback(handle_preload_error)
+            
+            # Store the action record
+            try:
+                from .models import ActionRecord
+                
+                # Create a simple session ID for now (we can enhance this later)
+                session_id = f"session_{player_id}_{datetime.utcnow().strftime('%Y%m%d')}"
+                
+                action_record = ActionRecord(
+                    player_id=player_id,
+                    room_id=current_room_id,
+                    action=action,
+                    ai_response=response,
+                    updates=updates,
+                    session_id=session_id,
+                    metadata={
+                        "room_title": room.title,
+                        "npcs_present": [npc.name for npc in npcs],
+                        "ai_model": "gpt-4o"
+                    }
+                )
+                
+                await self.db.store_action_record(player_id, action_record)
+                self.logger.info(f"[Storage] Stored action record for player {player_id}")
+                
+            except Exception as e:
+                self.logger.error(f"Error storing action record: {str(e)}")
+            
+            elapsed = time.time() - start_time
+            self.logger.info(f"[Performance] Total action processing took {elapsed:.2f}s")
+            return response, updates
+            
+        except Exception as e:
+            self.logger.error(f"Error processing action for {player_id}: {str(e)}")
+            return f"Error processing action: {str(e)}", {}
 
     async def handle_room_movement_by_direction(
         self, 
@@ -723,7 +790,7 @@ class GameManager:
                     
                     # Generate room description
                     content_start = time.time()
-                    title, description, image_prompt = await self.ai.generate_room_description(
+                    title, description, image_prompt = await self.ai_handler.generate_room_description(
                         context={
                             "previous_room": current_room.dict(),
                             "direction": direction,
@@ -783,7 +850,7 @@ class GameManager:
             logger.info(f"[Room Generation] Starting background room generation for {room_id}")
             
             # Generate the detailed room description
-            title, description, image_prompt = await self.ai.generate_room_description(
+            title, description, image_prompt = await self.ai_handler.generate_room_description(
                 context={
                     "previous_room": current_room.dict(),
                     "direction": direction,
@@ -823,7 +890,7 @@ class GameManager:
             logger.info(f"[Room Generation] Starting background room generation for {room_id} (from action)")
             
             # Generate the detailed room description
-            title, description, image_prompt = await self.ai.generate_room_description(
+            title, description, image_prompt = await self.ai_handler.generate_room_description(
                 context={
                     "previous_room": current_room.dict(),
                     "action": action,
@@ -875,7 +942,7 @@ class GameManager:
                 })
             
             # Generate the image
-            image_url = await self.ai.generate_room_image(image_prompt)
+            image_url = await self.ai_handler.generate_room_image(image_prompt)
             
             # Update room with image URL
             room_data = await self.db.get_room(room_id)
@@ -915,7 +982,7 @@ class GameManager:
             logger.info(f"[Background Image] Starting background image generation for room {room_id}")
             
             # Generate the image
-            image_url = await self.ai.generate_room_image(image_prompt)
+            image_url = await self.ai_handler.generate_room_image(image_prompt)
             
             # Update room with image URL
             room_data = await self.db.get_room(room_id)
@@ -1023,7 +1090,7 @@ class GameManager:
         )
 
         # Process the interaction
-        response, new_memory = await self.ai.process_npc_interaction(
+        response, new_memory = await self.ai_handler.process_npc_interaction(
             message=message,
             npc=npc,
             player=player,
