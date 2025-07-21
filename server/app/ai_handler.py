@@ -1,5 +1,5 @@
 from openai import AsyncOpenAI
-from typing import Dict, List, Optional, Tuple, AsyncGenerator, Union
+from typing import Dict, List, Optional, Tuple, AsyncGenerator, Union, Any
 import json
 from datetime import datetime
 from .config import settings
@@ -23,7 +23,7 @@ if settings.REPLICATE_API_TOKEN:
 class AIHandler:
     @staticmethod
     async def generate_room_description(
-        context: Dict[str, any],
+        context: Dict[str, Any],
         style: str = "fantasy"
     ) -> Tuple[str, str, str]:
         """Generate a room title and description"""
@@ -196,7 +196,7 @@ class AIHandler:
         room: Room,
         game_state: GameState,
         npcs: List[NPC]
-    ) -> AsyncGenerator[Union[str, Dict[str, any]], None]:
+    ) -> AsyncGenerator[Union[str, Dict[str, Any]], None]:
         """Process a player's action using the LLM with streaming"""
         context = {
             "player": player.dict(),
@@ -223,7 +223,11 @@ class AIHandler:
                 "dialogue_history": [],
                 "memory_log": []
             }
-        ]
+        ],
+        "reward_item": {
+            "deserves_item": true/false,
+            "item_name": "optional: creative name for the item if deserves_item is true"
+        }
     }
 }
 '''
@@ -240,6 +244,13 @@ class AIHandler:
         6. You handle ONLY narrative responses and simple state changes
         7. Determine if the player is inputting a movement command, if so add it to updates.player.direction
         8. Focus on movement direction, inventory changes, quest progress, and NPC interactions
+
+        ITEM REWARD EVALUATION:
+        - Evaluate if the player's action deserves an item reward based on creativity and engagement
+        - Simple movement commands (like "move north", "go south") should NOT reward items
+        - Thoughtful exploration actions (like "investigate the area", "examine the surroundings", "search for clues") SHOULD have a chance at items
+        - Creative interactions, problem-solving, and detailed investigations deserve higher chances
+        - If deserves_item is true, provide a creative item name that fits the action and location context
 
         IMPORTANT: Your response MUST follow this EXACT format:
         1. First, write a concise narrative response (1-2 sentences max).
@@ -324,7 +335,7 @@ class AIHandler:
         npc: NPC,
         player: Player,
         room: Room,
-        relevant_memories: List[Dict[str, any]]
+        relevant_memories: List[Dict[str, Any]]
     ) -> Tuple[str, str]:
         """Process NPC dialogue using the LLM"""
         context = {
