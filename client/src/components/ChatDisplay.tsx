@@ -71,7 +71,7 @@ const ChatDisplay: React.FC = () => {
                     <div className="mb-6 font-mono">
                         <div className="flex items-center justify-between mb-3">
                             <div className="text-xl font-bold text-amber-500">
-                                {message.title}
+                                {message.title}{message.biome ? ` (${message.biome})` : ''}
                             </div>
                             <div className="text-sm text-amber-300 bg-amber-900 bg-opacity-30 px-2 py-1 rounded">
                                 ({message.x ?? 0}, {message.y ?? 0})

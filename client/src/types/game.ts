@@ -25,6 +25,7 @@ export interface Room {
     description: string;
     x: number;
     y: number;
+    biome?: string;
     image_url: string;
     image_status: 'pending' | 'generating' | 'content_ready' | 'ready' | 'error';
     image_prompt?: string;
@@ -79,6 +80,7 @@ export interface ChatMessage {
     isStreaming?: boolean;
     title?: string;
     description?: string;
+    biome?: string;
     players?: Player[];
     x?: number;
     y?: number;

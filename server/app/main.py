@@ -514,6 +514,12 @@ async def get_room(
 ):
     try:
         room_info = await game_manager.get_room_info(room_id)
+        
+        # TEMPORARY FIX: Ensure biome field is included from database
+        room_data = await game_manager.db.get_room(room_id)
+        if room_data and 'biome' in room_data:
+            room_info['room']['biome'] = room_data['biome']
+        
         return room_info
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -737,4 +743,4 @@ async def update_rate_limit_config(
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host=settings.HOST, port=settings.PORT, reload=settings.DEBUG)
+    uvicorn.run("app.main:app", host=settings.HOST, port=settings.PORT, reload=settings.DEBUG)

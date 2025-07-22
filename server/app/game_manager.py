@@ -117,22 +117,41 @@ class GameManager:
         # Create new starting room
         logger.info(f"[Performance] Generating new starting room content")
         content_start = time.time()
+        
+        # Generate biome for starting room (no adjacent biomes)
+        try:
+            game_state_data = await self.db.get_game_state()
+            starting_biome = await self.ai_handler.generate_biome(
+                x=x, 
+                y=y, 
+                adjacent_biomes=[],  # Starting room has no adjacent biomes
+                world_seed=game_state_data.get("world_seed", "") if game_state_data else ""
+            )
+            logger.info(f"[GameManager] Generated starting room biome: {starting_biome}")
+        except Exception as e:
+            logger.error(f"[GameManager] Error generating starting room biome: {str(e)}")
+            starting_biome = "forest"  # Fallback biome
+        
         title, description, image_prompt = await self.ai_handler.generate_room_description(
-            context={"is_starting_room": True}
+            context={
+                "is_starting_room": True,
+                "biome": starting_biome
+            }
         )
         content_time = time.time() - content_start
-        logger.info(f"[Performance] Starting room content generation took {content_time:.2f}s")
+        logger.info(f"[Performance] Starting room content generation took {content_time:.2f}s with biome: {starting_biome}")
 
         # Get current players in the room from Redis set
         players_in_room = await self.db.get_room_players(room_id)
 
-        # Create room with title and description immediately (progressive loading)
+        # Create room with title, description, and biome immediately (progressive loading)
         room = await self.create_room_with_coordinates(
             room_id=room_id,
             x=x,
             y=y,
             title=title,
             description=description,
+            biome=starting_biome,
             image_url="",  # No image yet
             players=players_in_room,
             mark_discovered=True  # Starting room is always discovered
@@ -605,6 +624,11 @@ class GameManager:
         # Extract players from kwargs if provided, otherwise use empty list
         players = kwargs.pop('players', [])
 
+        # Debug logging for biome
+        biome = kwargs.get('biome', None)
+        logger.info(f"[GameManager] Creating room {room_id} with biome: {biome}")
+        logger.info(f"[GameManager] kwargs: {kwargs}")
+
         # Create the room object
         room = Room(
             id=room_id,
@@ -788,13 +812,27 @@ class GameManager:
                     # Set generation status
                     await self.db.set_room_generation_status(room_id, "generating")
                     
-                    # Generate room description
+                    # Generate biome first
+                    biome_start = time.time()
+                    adjacent_biomes = await self.get_adjacent_biomes(x, y)
+                    game_state_data = await self.db.get_game_state()
+                    biome = await self.ai_handler.generate_biome(
+                        x=x, 
+                        y=y, 
+                        adjacent_biomes=adjacent_biomes,
+                        world_seed=game_state_data.get("world_seed", "") if game_state_data else ""
+                    )
+                    biome_time = time.time() - biome_start
+                    logger.info(f"[Performance] Biome generation took {biome_time:.2f}s for {room_id}: {biome}")
+                    
+                    # Generate room description with biome context
                     content_start = time.time()
                     title, description, image_prompt = await self.ai_handler.generate_room_description(
                         context={
                             "previous_room": current_room.dict(),
                             "direction": direction,
                             "player": player.dict(),
+                            "biome": biome,  # Include biome in context
                             "discovering_new_area": True,
                             "is_preload": True  # Hint that this is preloading
                         }
@@ -802,13 +840,14 @@ class GameManager:
                     content_time = time.time() - content_start
                     logger.info(f"[Performance] Room content generation took {content_time:.2f}s for {room_id}")
                     
-                    # Create the room with title and description immediately
+                    # Create the room with title, description, and biome
                     room = await self.create_room_with_coordinates(
                         room_id=room_id,
                         x=x,
                         y=y,
                         title=title,
                         description=description,
+                        biome=biome,  # Include biome in room creation
                         image_url="",  # No image yet
                         players=[],  # No players in preloaded room
                         mark_discovered=True
@@ -843,6 +882,25 @@ class GameManager:
             elapsed = time.time() - start_time
             logger.error(f"[Performance] Failed to preload room {room_id} after {elapsed:.2f}s: {str(e)}")
             raise
+
+    async def get_adjacent_biomes(self, x: int, y: int) -> List[str]:
+        """Get biomes of adjacent rooms that already exist"""
+        adjacent_biomes = []
+        
+        # Check all 4 adjacent coordinates
+        adjacent_coords = [(x, y+1), (x, y-1), (x+1, y), (x-1, y)]
+        
+        for adj_x, adj_y in adjacent_coords:
+            try:
+                room_data = await self.db.get_room_by_coordinates(adj_x, adj_y)
+                if room_data and "biome" in room_data and room_data["biome"]:
+                    adjacent_biomes.append(room_data["biome"])
+            except Exception as e:
+                logger.debug(f"[Biome] Could not get room at ({adj_x}, {adj_y}): {str(e)}")
+                continue
+        
+        logger.debug(f"[Biome] Found adjacent biomes for ({x}, {y}): {adjacent_biomes}")
+        return adjacent_biomes
 
     async def _generate_room_details_async(self, room_id: str, current_room: Room, direction: str, player: Player):
         """Generate detailed room description and image in the background"""
@@ -1114,6 +1172,7 @@ class GameManager:
 
     async def get_room_info(self, room_id: str) -> Dict[str, any]:
         """Get complete information about a room"""
+        logger.info(f"[BIOME DEBUG] get_room_info called for room {room_id}")
         # Get room data
         room_data = await self.db.get_room(room_id)
         if not room_data:
@@ -1122,7 +1181,13 @@ class GameManager:
         # Update room data with current players from Redis set
         players_in_room = await self.db.get_room_players(room_id)
         room_data["players"] = players_in_room
+        
+        # Debug: Log the biome data before and after Room creation
+        logger.info(f"[DEBUG] Room data from DB has biome: {room_data.get('biome')}")
         room = Room(**room_data)
+        room_dict = room.dict()
+        logger.info(f"[DEBUG] Room.dict() has biome: {room_dict.get('biome')}")
+        logger.info(f"[DEBUG] Room object biome attribute: {getattr(room, 'biome', 'MISSING')}")
 
         # Get player objects
         players = []
@@ -1138,8 +1203,13 @@ class GameManager:
             if npc_data:
                 npcs.append(NPC(**npc_data))
 
+        # Ensure biome field is explicitly included in the response
+        room_dict = room.dict()
+        # Force include biome field from original database data
+        room_dict['biome'] = room_data.get('biome')
+        
         return {
-            "room": room.dict(),
+            "room": room_dict,
             "players": [p.dict() for p in players],
             "npcs": [n.dict() for n in npcs]
         }

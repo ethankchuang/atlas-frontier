@@ -60,6 +60,7 @@ const GameLayout: React.FC<GameLayoutProps> = ({ playerId }) => {
                     timestamp: new Date().toISOString(),
                     title: roomInfo.room.title,
                     description: roomInfo.room.description,
+                    biome: roomInfo.room.biome,
                     players: roomInfo.players,
                     x: roomInfo.room.x,
                     y: roomInfo.room.y

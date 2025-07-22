@@ -36,6 +36,7 @@ def check_rooms():
 
         # Store image URLs and their corresponding rooms
         image_urls = defaultdict(list)
+        biome_distribution = defaultdict(list)
         rooms_by_id = {}
 
         print("\n=== Room Data ===\n")
@@ -83,6 +84,10 @@ def check_rooms():
 
                 image_url = room.get('image_url', 'No image')
                 image_urls[image_url].append(room_id)
+                
+                # Track biome distribution
+                biome = room.get('biome', 'No biome')
+                biome_distribution[biome].append(room_id)
 
                 print("Room: {}".format(room_id))
                 print("Title: {}".format(room.get('title', 'No title')))
@@ -90,6 +95,7 @@ def check_rooms():
                 if len(description) > 100:
                     description = description[:100] + "..."
                 print("Description: {}".format(description))
+                print("Biome: {}".format(room.get('biome', 'No biome')))
                 print("Connections: {}".format(room.get('connections', {})))
                 print("Players: {}".format(players))
                 print("Image URL: {}".format(image_url))
@@ -131,6 +137,21 @@ def check_rooms():
                             print("Warning: One-way connection detected from {} to {}".format(room_id, connected_room_id))
                             print("  {} --{}--> {}".format(room_id, direction, connected_room_id))
                             print("  But reverse connection {} is missing or incorrect".format(opposite))
+
+        print("\n=== Biome Distribution ===\n")
+        # Handle None values in biome sorting
+        sorted_biomes = sorted(biome_distribution.items(), key=lambda x: (x[0] is None, x[0]))
+        for biome, rooms in sorted_biomes:
+            print("Biome: {} ({} rooms)".format(biome, len(rooms)))
+            room_coords = []
+            for room_id in rooms:
+                room = rooms_by_id.get(room_id, {})
+                x, y = room.get('x', '?'), room.get('y', '?')
+                room_coords.append("{}({},{})".format(room_id, x, y))
+            print("  Rooms: {}".format(', '.join(room_coords[:10])))  # Show up to 10 rooms
+            if len(room_coords) > 10:
+                print("  ... and {} more".format(len(room_coords) - 10))
+            print()
 
         print("\n=== Duplicate Image URLs ===\n")
         for url, rooms in image_urls.items():

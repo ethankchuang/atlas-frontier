@@ -22,6 +22,97 @@ if settings.REPLICATE_API_TOKEN:
 
 class AIHandler:
     @staticmethod
+    async def generate_biome(
+        x: int, 
+        y: int, 
+        adjacent_biomes: List[str],
+        world_seed: str = ""
+    ) -> str:
+        """Generate a biome for a room based on coordinates and adjacent biomes"""
+        json_template = '''
+{
+    "biome": "A specific biome name that fits the world context"
+}
+'''
+        
+        # Create context about location and neighboring biomes
+        context_info = {
+            "coordinates": {"x": x, "y": y},
+            "distance_from_origin": abs(x) + abs(y),
+            "adjacent_biomes": adjacent_biomes,
+            "world_seed": world_seed
+        }
+        
+        # Analyze adjacent biomes to avoid similar themes
+        avoid_keywords = set()
+        for biome in adjacent_biomes:
+            if biome:
+                # Extract key theme words to avoid
+                biome_lower = biome.lower()
+                if any(word in biome_lower for word in ['forest', 'wood', 'tree', 'grove', 'glade']):
+                    avoid_keywords.update(['forest', 'woodland', 'grove', 'glade', 'tree'])
+                if any(word in biome_lower for word in ['twilight', 'dusk', 'shadow', 'dark']):
+                    avoid_keywords.update(['twilight', 'shadow', 'dark', 'dusk'])
+                if any(word in biome_lower for word in ['enchanted', 'magical', 'mystic']):
+                    avoid_keywords.update(['enchanted', 'magical', 'mystic', 'mystical'])
+
+        avoid_text = ""
+        if avoid_keywords:
+            avoid_text = f"\nIMPORTANT: AVOID these themes that are already nearby: {', '.join(avoid_keywords)}"
+
+        prompt = f"""Generate a biome for a fantasy MUD game room at coordinates ({x}, {y}).
+
+Context: {json.dumps(context_info)}{avoid_text}
+
+BIOME GENERATION RULES:
+1. Create DRAMATIC biome diversity - avoid similar themes in adjacent areas
+2. If adjacent biomes exist, try to pick something DIFFERENT rather than similar
+3. Favor contrasting biome types: if there's forest nearby, consider desert, ice, volcanic, etc.
+4. Distance from origin (0,0): closer rooms can be civilized, farther rooms more exotic
+5. Use varied biome types: natural, magical, elemental, underground, aerial themes
+6. Each biome should feel unique and distinct from neighbors
+
+BIOME CATEGORIES TO CHOOSE FROM:
+- Fire/Heat: volcanic fields, lava tubes, scorching desert, fire elemental plane
+- Ice/Cold: frozen tundra, ice caves, glacier, blizzard peaks, frost realm
+- Water: underwater grotto, coral reef, rushing rapids, misty lake, steam vents
+- Earth/Stone: crystal caverns, marble halls, rocky badlands, gem mines, stone circles
+- Air/Sky: floating islands, wind tunnels, cloud bridges, storm vortex, aerial spire
+- Death/Dark: bone yards, necropolis, shadow realm, void chambers, skull throne
+- Life/Light: healing springs, celestial garden, rainbow bridge, sunlit meadow, life shrine
+- Civilized: market square, guard tower, temple grounds, royal courtyard, workshop district
+
+Return a JSON object with this exact structure:
+{json_template}
+"""
+
+        logger.debug(f"[Biome Generation] Generating biome for ({x}, {y}) with adjacent biomes: {adjacent_biomes}")
+        try:
+            response = await client.chat.completions.create(
+                model="gpt-4.1-nano-2025-04-14",
+                messages=[
+                    {"role": "system", "content": "You are a fantasy world designer. Create DIVERSE and CONTRASTING biomes that avoid repetitive themes. Prioritize dramatic variety over geographical realism. Always return clean JSON without comments."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.9  # Higher temperature for maximum biome variety
+            )
+
+            content = response.choices[0].message.content
+            logger.debug(f"[Biome Generation] Received response: {content}")
+
+            result = json.loads(content)
+            biome = result["biome"]
+            logger.info(f"[Biome Generation] Generated biome '{biome}' for coordinates ({x}, {y})")
+            return biome
+        except Exception as e:
+            logger.error(f"[Biome Generation] Error generating biome: {str(e)}")
+            # Fallback to a basic biome
+            fallback_biomes = ["forest", "plains", "hills", "meadow", "woodland"]
+            fallback = fallback_biomes[abs(x + y) % len(fallback_biomes)]
+            logger.info(f"[Biome Generation] Using fallback biome: {fallback}")
+            return fallback
+
+    @staticmethod
     async def generate_room_description(
         context: Dict[str, Any],
         style: str = "fantasy"
@@ -34,11 +125,18 @@ class AIHandler:
     "image_prompt": "A detailed prompt for image generation"
 }
 '''
+        # Extract biome from context if available
+        biome_context = ""
+        if "biome" in context and context["biome"]:
+            biome_context = f"This room is in a {context['biome']} biome. "
+
         prompt = f"""Generate a concise room description for a fantasy MUD game.
         Context: {json.dumps(context)}
         Style: {style}
+        
+        {biome_context}The room's content, atmosphere, and features should strongly reflect this biome setting.
 
-        CRITICAL: Keep descriptions to 1-2 sentences maximum. Focus only on the most important visual and atmospheric details. Remove all fluff and unnecessary elaboration.
+        CRITICAL: Keep descriptions to 1-2 sentences maximum. Focus only on the most important visual and atmospheric details that fit the biome. Remove all fluff and unnecessary elaboration.
 
         Return a JSON object with these exact fields:
         {json_template}
