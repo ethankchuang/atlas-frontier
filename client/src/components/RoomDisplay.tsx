@@ -36,6 +36,11 @@ const RoomDisplay: React.FC = () => {
         );
     }
 
+    // Format the room title with biome in parenthesis if present
+    const formattedTitle = currentRoom.biome
+        ? `${currentRoom.title} (${currentRoom.biome})`
+        : currentRoom.title;
+
     return (
         <div className="w-full h-full bg-black">
             {/* Room Image */}
@@ -58,13 +63,17 @@ const RoomDisplay: React.FC = () => {
                 {currentRoom.image_url && !imageError && (
                     <img
                         src={currentRoom.image_url}
-                        alt={currentRoom.title}
+                        alt={formattedTitle}
                         className="w-full h-full object-cover"
                         onLoad={handleImageLoad}
                         onError={handleImageError}
                         style={{ display: isImageLoading ? 'none' : 'block' }}
                     />
                 )}
+            </div>
+            {/* Room Title Overlay */}
+            <div className="absolute top-4 left-1/2 transform -translate-x-1/2 bg-black bg-opacity-70 px-6 py-2 rounded shadow-lg z-20">
+                <span className="text-2xl font-bold text-amber-400 font-mono">{formattedTitle}</span>
             </div>
         </div>
     );

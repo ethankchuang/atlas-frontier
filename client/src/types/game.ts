@@ -26,6 +26,7 @@ export interface Room {
     x: number;
     y: number;
     biome?: string;
+    biome_color?: string;
     image_url: string;
     image_status: 'pending' | 'generating' | 'content_ready' | 'ready' | 'error';
     image_prompt?: string;

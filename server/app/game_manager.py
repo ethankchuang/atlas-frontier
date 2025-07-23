@@ -1,20 +1,123 @@
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
 from datetime import datetime
 import time
-from .models import Room, Player, NPC, GameState, Direction
-from .database import Database
-from .ai_handler import AIHandler
 import uuid
 import asyncio
-import time
-from .ai_handler import AIHandler
-from .database import Database
-from .rate_limiter import RateLimiter
+import random
 import logging
-from typing import Dict, Any, List, Optional, Tuple
-from .models import Player, Room, GameState, ActionRecord
-from datetime import datetime
-import uuid
+import noise  # Perlin noise library, make sure it's in requirements.txt
+
+from .models import Room, Player, NPC, GameState, Direction, ActionRecord
+from .database import Database
+from .ai_handler import AIHandler
+from .rate_limiter import RateLimiter
+from .biome_manager import BiomeManager
+
+# Helper to get chunk id using Perlin noise
+CHUNK_SIZE = 13  # Slightly larger chunk size for bigger biomes
+PERLIN_SCALE = 0.09  # Lower scale for less frequent biome changes
+CHUNK_QUANTIZATION = 0.35  # Larger quantization for bigger chunks
+
+def get_chunk_id(x, y):
+    """Generate chunk ID using Perlin noise for natural biome boundaries"""
+    nx = x * PERLIN_SCALE
+    ny = y * PERLIN_SCALE
+    # Use Perlin noise to get a value, then quantize to chunk grid
+    val = noise.pnoise2(nx, ny)
+    chunk_x = int(nx // CHUNK_QUANTIZATION)
+    chunk_y = int(ny // CHUNK_QUANTIZATION)
+    return f"chunk_{chunk_x}_{chunk_y}"
+
+# Super-chunk logic disabled to prevent recursion issues
+# def get_super_chunk_id(x, y):
+#     """Create super-chunks (clusters of chunks) for even larger biome regions"""
+#     # Use a much larger scale for super-chunks
+#     nx = x * 0.02  # Much smaller scale for larger regions
+#     ny = y * 0.02
+#     val = noise.pnoise2(nx, ny)
+#     # Very large quantization for super-chunks
+#     super_chunk_x = int(nx // 1.0)
+#     super_chunk_y = int(ny // 1.0)
+#     return f"super_chunk_{super_chunk_x}_{super_chunk_y}"
+
+# Helper to get/set biome for a chunk in Redis
+async def get_chunk_biome(self, chunk_id):
+    biome_data = await self.db.get_chunk_biome(chunk_id)
+    if biome_data:
+        return biome_data
+    return None
+
+async def set_chunk_biome(self, chunk_id, biome_data):
+    await self.db.set_chunk_biome(chunk_id, biome_data)
+
+# Helper to get adjacent chunk ids
+def get_adjacent_chunk_ids(chunk_id):
+    # chunk_id format: chunk_{x}_{y}
+    _, cx, cy = chunk_id.split('_')
+    cx, cy = int(cx), int(cy)
+    adj = []
+    for dx, dy in [(-1,0),(1,0),(0,-1),(0,1)]:
+        adj.append(f"chunk_{cx+dx}_{cy+dy}")
+    return adj
+
+# Helper to get all saved biomes from the database
+async def get_all_saved_biomes(self):
+    # Should return a list of biome dicts: [{"name": ..., "description": ...}, ...]
+    return await self.db.get_all_biomes()
+
+# Helper to save a new biome to the database
+async def save_new_biome(self, biome_data):
+    await self.db.save_biome(biome_data)
+
+# Update assign_biome_to_chunk to use all saved biomes and equal probability
+async def assign_biome_to_chunk(self, chunk_id):
+    # Get adjacent chunk biomes
+    adj_biomes = set()
+    for adj_id in get_adjacent_chunk_ids(chunk_id):
+        adj_biome = await get_chunk_biome(self, adj_id)
+        if adj_biome:
+            adj_biomes.add(adj_biome["name"])
+    
+    # Temporarily disabled super-chunk logic to debug recursion issues
+    # # Also check super-chunk biome for larger regions
+    # # Extract coordinates from chunk_id to get super-chunk
+    # try:
+    #     _, cx, cy = chunk_id.split('_')
+    #     cx, cy = int(cx), int(cy)
+    #     # Convert chunk coordinates back to approximate world coordinates
+    #     world_x = cx * CHUNK_QUANTIZATION / PERLIN_SCALE
+    #     world_y = cy * CHUNK_QUANTIZATION / PERLIN_SCALE
+    #     super_chunk_id = get_super_chunk_id(world_x, world_y)
+    #     super_chunk_biome = await get_chunk_biome(self, super_chunk_id)
+    #     if super_chunk_biome:
+    #         # If super-chunk has a biome, prefer it (70% chance)
+    #         if random.random() < 0.7:
+    #             await set_chunk_biome(self, chunk_id, super_chunk_biome)
+    #             return super_chunk_biome
+    # except:
+    #     pass  # Fall back to normal logic if super-chunk lookup fails
+    
+    # Get all saved biomes
+    saved_biomes = await get_all_saved_biomes(self)
+    # Exclude biomes used by adjacent chunks
+    available_biomes = [b for b in saved_biomes if b["name"] not in adj_biomes]
+    choices = available_biomes + ["new"]
+    weights = [1] * len(available_biomes) + [1]  # Equal chance for each + new
+    # If all saved biomes are adjacent, must generate new
+    if not available_biomes:
+        chosen = "new"
+    else:
+        chosen = random.choices(choices, weights=weights, k=1)[0]
+    if chosen == "new":
+        # Ask LLM for a new biome name/desc
+        biome_data = await self.ai_handler.generate_biome_chunk(chunk_id, adj_biomes)
+        biome_data["name"] = biome_data["name"].lower()  # Normalize to lowercase
+        await save_new_biome(self, biome_data)
+    else:
+        biome_data = chosen
+        biome_data["name"] = biome_data["name"].lower()  # Normalize to lowercase
+    await set_chunk_biome(self, chunk_id, biome_data)
+    return biome_data
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +126,7 @@ class GameManager:
         self.db = Database()
         self.ai_handler = AIHandler()
         self.rate_limiter = RateLimiter(self.db)
+        self.biome_manager = BiomeManager(self.db, self.ai_handler)
         self.connection_manager = None
         self.logger = logging.getLogger(__name__)
         
@@ -118,24 +222,26 @@ class GameManager:
         logger.info(f"[Performance] Generating new starting room content")
         content_start = time.time()
         
-        # Generate biome for starting room (no adjacent biomes)
+        # Generate biome for starting room using BiomeManager
         try:
-            game_state_data = await self.db.get_game_state()
-            starting_biome = await self.ai_handler.generate_biome(
-                x=x, 
-                y=y, 
-                adjacent_biomes=[],  # Starting room has no adjacent biomes
-                world_seed=game_state_data.get("world_seed", "") if game_state_data else ""
-            )
+            biome_data = await self.biome_manager.get_biome_for_coordinates(x, y)
+            starting_biome = biome_data["name"].lower()  # Normalize to lowercase
+            starting_biome_desc = biome_data["description"]
             logger.info(f"[GameManager] Generated starting room biome: {starting_biome}")
         except Exception as e:
             logger.error(f"[GameManager] Error generating starting room biome: {str(e)}")
-            starting_biome = "forest"  # Fallback biome
+            # Fallback to simple biome generation
+            biome_data = await self.ai_handler.generate_biome_chunk("chunk_0_0", set())
+            starting_biome = biome_data["name"].lower()  # Normalize to lowercase
+            starting_biome_desc = biome_data["description"]
+            await self.db.save_biome(biome_data)
+            logger.info(f"[GameManager] Generated fallback biome: {starting_biome}")
         
         title, description, image_prompt = await self.ai_handler.generate_room_description(
             context={
                 "is_starting_room": True,
-                "biome": starting_biome
+                "biome": starting_biome,
+                "biome_description": starting_biome_desc
             }
         )
         content_time = time.time() - content_start
@@ -812,16 +918,11 @@ class GameManager:
                     # Set generation status
                     await self.db.set_room_generation_status(room_id, "generating")
                     
-                    # Generate biome first
+                    # Generate biome first using BiomeManager
                     biome_start = time.time()
-                    adjacent_biomes = await self.get_adjacent_biomes(x, y)
-                    game_state_data = await self.db.get_game_state()
-                    biome = await self.ai_handler.generate_biome(
-                        x=x, 
-                        y=y, 
-                        adjacent_biomes=adjacent_biomes,
-                        world_seed=game_state_data.get("world_seed", "") if game_state_data else ""
-                    )
+                    biome_data = await self.biome_manager.get_biome_for_coordinates(x, y)
+                    biome = biome_data["name"].lower()  # Normalize to lowercase
+                    biome_desc = biome_data["description"]
                     biome_time = time.time() - biome_start
                     logger.info(f"[Performance] Biome generation took {biome_time:.2f}s for {room_id}: {biome}")
                     
@@ -832,9 +933,10 @@ class GameManager:
                             "previous_room": current_room.dict(),
                             "direction": direction,
                             "player": player.dict(),
-                            "biome": biome,  # Include biome in context
+                            "biome": biome,
+                            "biome_description": biome_desc,
                             "discovering_new_area": True,
-                            "is_preload": True  # Hint that this is preloading
+                            "is_preload": True
                         }
                     )
                     content_time = time.time() - content_start
@@ -1208,6 +1310,13 @@ class GameManager:
         # Force include biome field from original database data
         room_dict['biome'] = room_data.get('biome')
         
+        # Include biome color if available
+        if room_data.get('biome'):
+            chunk_id = get_chunk_id(room.x, room.y)
+            biome_data = await self.db.get_chunk_biome(chunk_id)
+            if biome_data and 'color' in biome_data:
+                room_dict['biome_color'] = biome_data['color']
+        
         return {
             "room": room_dict,
             "players": [p.dict() for p in players],
@@ -1274,3 +1383,22 @@ class GameManager:
         except Exception as e:
             logger.error(f"[World Structure] Error getting world structure: {str(e)}")
             return {"error": str(e)}
+
+    # Add a helper function to get the 7x7 local map with room info
+    async def get_local_map_with_room_info(self, center_x, center_y, size=7):
+        half = size // 2
+        local_map = []
+        for dx in range(-half, half + 1):
+            for dy in range(-half, half + 1):
+                x, y = center_x + dx, center_y + dy
+                room_data = await self.db.get_room_by_coordinates(x, y)
+                if room_data:
+                    local_map.append({
+                        "x": x,
+                        "y": y,
+                        "biome": room_data.get("biome"),
+                        "name": room_data.get("title"),
+                        "description": room_data.get("description", "")
+                    })
+                # Don't add anything for undiscovered rooms - just skip them
+        return local_map

@@ -35,8 +35,14 @@ interface GameStore {
 
     // Minimap state - track visited coordinates
     visitedCoordinates: Set<string>;
-    addVisitedCoordinate: (x: number, y: number) => void;
+    addVisitedCoordinate: (x: number, y: number, biome?: string) => void;
     isCoordinateVisited: (x: number, y: number) => boolean;
+
+    // Biome state - track biome for each visited coordinate
+    visitedBiomes: { [key: string]: string };
+
+    // Biome colors - track color for each biome
+    biomeColors: { [key: string]: string };
 
     // Connection state
     isConnected: boolean;
@@ -59,6 +65,15 @@ interface GameStore {
     setError: (error: string | null) => void;
 }
 
+function pastelColorFromString(str: string) {
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+        hash = str.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    const h = hash % 360;
+    return `hsl(${h}, 60%, 80%)`;
+}
+
 const useGameStore = create<GameStore>((set, get) => ({
     // Initial states
     player: null,
@@ -68,6 +83,8 @@ const useGameStore = create<GameStore>((set, get) => ({
     gameState: null,
     messages: [],
     visitedCoordinates: new Set<string>(),
+    visitedBiomes: {}, // NEW: mapping from 'x,y' to biome
+    biomeColors: {}, // NEW: mapping from biome name to color
     isConnected: false,
     isLoading: false,
     isMovementLoading: false,
@@ -76,7 +93,26 @@ const useGameStore = create<GameStore>((set, get) => ({
 
     // Setters
     setPlayer: (player) => set({ player }),
-    setCurrentRoom: (room) => set({ currentRoom: room }),
+    setCurrentRoom: (room) => set((state) => {
+        const coordKey = `${room.x},${room.y}`;
+        const newVisitedCoordinates = new Set(state.visitedCoordinates);
+        newVisitedCoordinates.add(coordKey);
+        const newVisitedBiomes = { ...state.visitedBiomes };
+        let newBiomeColors = { ...state.biomeColors };
+        if (room.biome) {
+            newVisitedBiomes[coordKey] = room.biome;
+            // Use AI-generated color if available, otherwise fallback to pastel
+            if (!newBiomeColors[room.biome]) {
+                newBiomeColors[room.biome] = room.biome_color || pastelColorFromString(room.biome);
+            }
+        }
+        return {
+            currentRoom: room,
+            visitedCoordinates: newVisitedCoordinates,
+            visitedBiomes: newVisitedBiomes,
+            biomeColors: newBiomeColors,
+        };
+    }),
     setNPCs: (npcs) => set({ npcs }),
     setPlayersInRoom: (players) => set({ playersInRoom: players }),
     setGameState: (state) => set({ gameState: state }),
@@ -88,20 +124,27 @@ const useGameStore = create<GameStore>((set, get) => ({
             msg.id === id ? updater(msg) : msg
         )
     })),
-    
     // Minimap functions
-    addVisitedCoordinate: (x: number, y: number) => set((state) => {
+    addVisitedCoordinate: (x: number, y: number, biome?: string) => set((state) => {
         const coordKey = `${x},${y}`;
         const newVisitedCoordinates = new Set(state.visitedCoordinates);
         newVisitedCoordinates.add(coordKey);
-        return { visitedCoordinates: newVisitedCoordinates };
+        const newVisitedBiomes = { ...state.visitedBiomes };
+        let newBiomeColors = { ...state.biomeColors };
+        if (biome) {
+            newVisitedBiomes[coordKey] = biome;
+            // Use pastel fallback for coordinates added without room data
+            if (!newBiomeColors[biome]) {
+                newBiomeColors[biome] = pastelColorFromString(biome);
+            }
+        }
+        return { visitedCoordinates: newVisitedCoordinates, visitedBiomes: newVisitedBiomes, biomeColors: newBiomeColors };
     }),
     isCoordinateVisited: (x: number, y: number) => {
         const state = get();
         const coordKey = `${x},${y}`;
         return state.visitedCoordinates.has(coordKey);
     },
-    
     setIsConnected: (connected) => set({ isConnected: connected }),
     setIsLoading: (loading) => set({ isLoading: loading }),
     setIsMovementLoading: (loading) => set({ isMovementLoading: loading }),

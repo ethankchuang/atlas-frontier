@@ -411,9 +411,9 @@ class Database:
     async def reset_world() -> None:
         """Reset the entire game world by clearing all data"""
         try:
-            # Clear all Redis data (includes coordinate mappings)
+            # Clear all Redis data (includes coordinate mappings, saved biomes, and chunk biome assignments)
             redis_client.flushall()
-            logger.info("Redis data cleared (including coordinate mappings)")
+            logger.info("Redis data cleared (including coordinate mappings, saved biomes, and chunk biome assignments)")
 
             # Clear ChromaDB collections
             try:
@@ -756,4 +756,68 @@ class Database:
             return True
         except Exception as e:
             logger.error(f"Error updating session: {str(e)}")
+            return False
+
+    @staticmethod
+    async def get_chunk_biome(chunk_id: str) -> Optional[Dict[str, Any]]:
+        """Get biome data for a chunk from Redis"""
+        try:
+            biome_data = redis_client.get(f"chunk_biome:{chunk_id}")
+            if biome_data:
+                if isinstance(biome_data, bytes):
+                    biome_data = biome_data.decode('utf-8')
+                return json.loads(biome_data)
+            return None
+        except Exception as e:
+            logger.error(f"Error getting chunk biome {chunk_id}: {str(e)}")
+            return None
+
+    @staticmethod
+    async def set_chunk_biome(chunk_id: str, biome_data: Dict[str, Any]) -> bool:
+        """Set biome data for a chunk in Redis"""
+        try:
+            serializable_data = Database._serialize_data(biome_data)
+            return redis_client.set(f"chunk_biome:{chunk_id}", json.dumps(serializable_data))
+        except Exception as e:
+            logger.error(f"Error setting chunk biome {chunk_id}: {str(e)}")
+            return False
+
+    @staticmethod
+    async def get_all_biomes() -> List[Dict[str, Any]]:
+        """Return a list of all biome dicts ever created"""
+        try:
+            biome_keys = redis_client.keys("biome:*")
+            biomes = []
+            for key in biome_keys:
+                biome_data = redis_client.get(key)
+                if biome_data:
+                    if isinstance(biome_data, bytes):
+                        biome_data = biome_data.decode('utf-8')
+                    try:
+                        biomes.append(json.loads(biome_data))
+                    except Exception as e:
+                        logger.error(f"Error decoding biome {key}: {str(e)}")
+                        continue
+            return biomes
+        except Exception as e:
+            logger.error(f"Error getting all biomes: {str(e)}")
+            return []
+
+    @staticmethod
+    async def get_all_saved_biomes() -> List[Dict[str, Any]]:
+        """Return a list of all biome dicts ever created (alias for get_all_biomes)"""
+        return await Database.get_all_biomes()
+
+    @staticmethod
+    async def save_biome(biome_data: Dict[str, Any]) -> bool:
+        """Save a new biome to Redis (use a hash of the name as the key)"""
+        try:
+            import hashlib
+            name = biome_data.get("name", "")
+            name_hash = hashlib.sha256(name.encode('utf-8')).hexdigest()[:16]
+            key = f"biome:{name_hash}"
+            serializable_data = Database._serialize_data(biome_data)
+            return redis_client.set(key, json.dumps(serializable_data))
+        except Exception as e:
+            logger.error(f"Error saving biome {biome_data}: {str(e)}")
             return False
