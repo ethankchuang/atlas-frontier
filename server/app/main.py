@@ -366,79 +366,90 @@ async def process_action_stream(
                         await game_manager.db.set_player(player.id, player.dict())
                         
                         # Check if AI decided player deserves an item reward
-                        if "reward_item" in chunk["updates"] and chunk["updates"]["reward_item"].get("deserves_item"):
-                            try:
-                                logger.info(f"[Item Generation] AI decided player {player.id} deserves an item reward")
-                                item_template = GenericItemTemplate()
-                                
-                                # Use AI-provided item name if available, otherwise generate with context
-                                ai_item_name = chunk["updates"]["reward_item"].get("item_name")
-                                context = {
-                                    "location": room.title,
-                                    "theme": "fantasy",
-                                    "suggested_name": ai_item_name
-                                }
-                                
-                                # Generate the item using AI
-                                if ai_item_name:
-                                    # Use the AI-suggested name and generate properties around it
-                                    prompt = f"Generate item properties for a fantasy item named '{ai_item_name}' found in {room.title}. Return JSON with name, description, rarity (1-4), and special_effects."
-                                    ai_response = await game_manager.ai_handler.generate_text(prompt)
-                                    try:
-                                        item_data = json.loads(ai_response)
-                                        # Ensure the AI-suggested name is used
-                                        item_data["name"] = ai_item_name
-                                    except json.JSONDecodeError:
-                                        # Fallback to template generation if JSON parsing fails
+                        if "reward_item" in chunk["updates"]:
+                            reward_item = chunk["updates"]["reward_item"]
+                            logger.debug(f"[Item Generation] Reward item data: {reward_item}")
+                            
+                            # Handle both boolean and string values for deserves_item
+                            deserves_item = reward_item.get("deserves_item")
+                            if isinstance(deserves_item, str):
+                                deserves_item = deserves_item.lower() == "true"
+                            
+                            if deserves_item:
+                                try:
+                                    logger.info(f"[Item Generation] AI decided player {player.id} deserves an item reward")
+                                    item_template = GenericItemTemplate()
+                                    
+                                    # Use AI-provided item name if available, otherwise generate with context
+                                    ai_item_name = chunk["updates"]["reward_item"].get("item_name")
+                                    context = {
+                                        "location": room.title,
+                                        "theme": "fantasy",
+                                        "suggested_name": ai_item_name
+                                    }
+                                    
+                                    # Generate the item using AI
+                                    if ai_item_name:
+                                        # Use the AI-suggested name and generate properties around it
+                                        prompt = f"Generate item properties for a fantasy item named '{ai_item_name}' found in {room.title}. Return JSON with name, description, rarity (1-4), and special_effects."
+                                        ai_response = await game_manager.ai_handler.generate_text(prompt)
+                                        try:
+                                            item_data = json.loads(ai_response)
+                                            # Ensure the AI-suggested name is used
+                                            item_data["name"] = ai_item_name
+                                        except json.JSONDecodeError:
+                                            # Fallback to template generation if JSON parsing fails
+                                            prompt = item_template.generate_prompt(context)
+                                            ai_response = await game_manager.ai_handler.generate_text(prompt)
+                                            item_data = item_template.parse_response(ai_response, context)
+                                            item_data["name"] = ai_item_name
+                                    else:
+                                        # Standard item generation
                                         prompt = item_template.generate_prompt(context)
                                         ai_response = await game_manager.ai_handler.generate_text(prompt)
                                         item_data = item_template.parse_response(ai_response, context)
-                                        item_data["name"] = ai_item_name
-                                else:
-                                    # Standard item generation
-                                    prompt = item_template.generate_prompt(context)
-                                    ai_response = await game_manager.ai_handler.generate_text(prompt)
-                                    item_data = item_template.parse_response(ai_response, context)
-                                
-                                # Create item ID and add to player's inventory
-                                item_id = f"item_{str(uuid.uuid4())}"
-                                item_data["id"] = item_id
-                                
-                                # Add item to player's inventory
-                                player.inventory.append(item_id)
-                                await game_manager.db.set_player(player.id, player.dict())
-                                
-                                # Save item to database
-                                await game_manager.db.set_item(item_id, item_data)
-                                
-                                logger.info(f"[Item Generation] Added item '{item_data['name']}' to player {player.id}")
-                                
-                                # Send server message to player about the obtained item
-                                rarity_stars = rarity_to_stars(item_data['rarity'])
-                                item_message = f"🎁 You obtained: {item_data['name']} {rarity_stars}"
-                                
-                                await manager.send_to_player(
-                                    room_id=player.current_room,
-                                    player_id=action_request.player_id,
-                                    message={
-                                        "type": "item_obtained",
-                                        "player_id": action_request.player_id,
-                                        "item_name": item_data['name'],
-                                        "item_rarity": item_data['rarity'],
-                                        "rarity_stars": rarity_stars,
-                                        "message": item_message,
-                                        "timestamp": datetime.utcnow().isoformat()
-                                    }
-                                )
-                                
-                                # Add item acquisition to player's memory log
-                                player.memory_log.append(f"Found {item_data['name']} - {item_data['special_effects']}")
-                                await game_manager.db.set_player(player.id, player.dict())
-                                
-                            except Exception as e:
-                                logger.error(f"[Item Generation] Failed to generate item for player {player.id}: {str(e)}")
+                                    
+                                    # Create item ID and add to player's inventory
+                                    item_id = f"item_{str(uuid.uuid4())}"
+                                    item_data["id"] = item_id
+                                    
+                                    # Add item to player's inventory
+                                    player.inventory.append(item_id)
+                                    await game_manager.db.set_player(player.id, player.dict())
+                                    
+                                    # Save item to database
+                                    await game_manager.db.set_item(item_id, item_data)
+                                    
+                                    logger.info(f"[Item Generation] Added item '{item_data['name']}' to player {player.id}")
+                                    
+                                    # Send server message to player about the obtained item
+                                    rarity_stars = rarity_to_stars(item_data['rarity'])
+                                    item_message = f"🎁 You obtained: {item_data['name']} {rarity_stars}"
+                                    
+                                    await manager.send_to_player(
+                                        room_id=player.current_room,
+                                        player_id=action_request.player_id,
+                                        message={
+                                            "type": "item_obtained",
+                                            "player_id": action_request.player_id,
+                                            "item_name": item_data['name'],
+                                            "item_rarity": item_data['rarity'],
+                                            "rarity_stars": rarity_stars,
+                                            "message": item_message,
+                                            "timestamp": datetime.utcnow().isoformat()
+                                        }
+                                    )
+                                    
+                                    # Add item acquisition to player's memory log
+                                    player.memory_log.append(f"Found {item_data['name']} - {item_data['special_effects']}")
+                                    await game_manager.db.set_player(player.id, player.dict())
+                                    
+                                except Exception as e:
+                                    logger.error(f"[Item Generation] Failed to generate item for player {player.id}: {str(e)}")
+                            else:
+                                logger.debug(f"[Item Generation] AI decided player {player.id} does not deserve an item for this action")
                         else:
-                            logger.debug(f"[Item Generation] AI decided player {player.id} does not deserve an item for this action")
+                            logger.debug(f"[Item Generation] No reward_item field in AI response")
 
                     if "room" in chunk["updates"]:
                         # Only update the current room, not the new room we just created

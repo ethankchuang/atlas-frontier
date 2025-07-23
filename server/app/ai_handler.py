@@ -223,40 +223,77 @@ class AIHandler:
                 "dialogue_history": [],
                 "memory_log": []
             }
-        ]
+        ],
+        "reward_item": {
+            "deserves_item": true,
+            "item_name": "name of the item to reward (only if deserves_item is true)"
+        }
     }
 }
 '''
 
-        prompt = f"""Process this player action in a fantasy MUD game.
-        Context: {json.dumps(context)}
-
-        CRITICAL RULES FOR CONCISE RESPONSES:
-        1. Keep narrative responses to 1-2 sentences maximum
-        2. Focus only on the most important details of what happens
-        3. Remove all fluff, unnecessary elaboration, and flowery language
-        4. For movement: Describe only the essential transition and arrival
-        5. For actions: Focus on the immediate result and key details only
-        6. You handle ONLY narrative responses and simple state changes
-        7. Determine if the player is inputting a movement command, if so add it to updates.player.direction
-        8. Focus on movement direction, inventory changes, quest progress, and NPC interactions
-
-        IMPORTANT: Your response MUST follow this EXACT format:
-        1. First, write a concise narrative response (1-2 sentences max).
-        2. Then, add TWO newlines.
-        3. Finally, provide a JSON object with this exact structure:
-        {json_template}
-
-        Only include fields in updates that need to be changed. The updates object is optional.
-        Do not include any comments in the JSON.
-        """
+        # Build the prompt without nested f-strings to avoid syntax errors
+        prompt_parts = [
+            f"Process this player action in a fantasy MUD game.",
+            f"Context: {json.dumps(context)}",
+            "",
+            "CRITICAL RULES FOR CONCISE RESPONSES:",
+            "1. Keep narrative responses to 1-2 sentences maximum",
+            "2. Focus only on the most important details of what happens",
+            "3. Remove all fluff, unnecessary elaboration, and flowery language",
+            "4. For movement: Describe only the essential transition and arrival",
+            "5. For actions: Focus on the immediate result and key details only",
+            "6. You handle ONLY narrative responses and simple state changes",
+            "7. Determine if the player is inputting a movement command, if so add it to updates.player.direction",
+            "8. Focus on movement direction, inventory changes, quest progress, and NPC interactions",
+            "",
+            "ITEM HINTING POLICY (CRITICAL):",
+            "- ALWAYS hint at nearby items when players explore, investigate, or look around",
+            "- Common exploration actions that should trigger item hints: \"look\", \"examine\", \"investigate\", \"search\", \"explore\", \"check\", \"inspect\"",
+            "- When hinting at items, describe them briefly but clearly so players know what to interact with",
+            "- Examples: \"You notice a glint of metal beneath the leaves\", \"There's a suspicious crack in the wall\", \"A faint glow emanates from behind the rocks\"",
+            "- Add item hints to the narrative response, not just the memory log",
+            "",
+            "ITEM REWARD POLICY (IMPORTANT):",
+            "- Only reward the player with items if they directly interact with it (e.g., \"grab\", \"take\", \"pick up\", \"collect\")",
+            "- If the player deserves an item, set updates.reward_item.deserves_item to true and provide updates.reward_item.item_name",
+            "- **CRITICAL:** Do NOT update the player's inventory directly. Only use the reward_item field",
+            "- If the player investigates but doesn't grab the item, only hint at it - do NOT reward it yet",
+            "",
+            "EXAMPLES:",
+            "1. Player action: \"look around\" or \"investigate\"",
+            "   - Narrative: \"You notice a faint glow emanating from beneath a pile of ash.\"",
+            "   - Memory: \"Found a hidden glowing object beneath the ash\"",
+            "   - JSON: {\"updates\": {\"player\": {\"memory_log\": [\"Found a hidden glowing object beneath the ash\"]}}}",
+            "2. Player action: \"grab the glowing object\" or \"take the glowing object\"",
+            "   - Narrative: \"You grab the glowing object, feeling its warmth in your hands.\"",
+            "   - Memory: \"Picked up the glowing object\"",
+            "   - JSON: {\"updates\": {\"player\": {\"memory_log\": [\"Picked up the glowing object\"]}, \"reward_item\": {\"deserves_item\": true, \"item_name\": \"glowing object\"}}}",
+            "",
+            "CRITICAL JSON RULES:",
+            "- deserves_item must be a boolean value (true/false), NOT a string (\"true\"/\"false\")",
+            "- All JSON must be valid and properly formatted",
+            "- Do not include any comments or extra text in the JSON",
+            "- Only include the updates object if there are actual updates to make",
+            "",
+            "IMPORTANT: Your response MUST follow this EXACT format:",
+            "1. First, write a concise narrative response (1-2 sentences max).",
+            "2. Then, add TWO newlines.",
+            "3. Finally, provide a JSON object with this exact structure:",
+            json_template,
+            "",
+            "Only include fields in updates that need to be changed. The updates object is optional.",
+            "Do not include any comments in the JSON."
+        ]
+        
+        prompt = "\n".join(prompt_parts)
 
         logger.debug(f"[Stream Action] Sending prompt to OpenAI: {prompt}")
         try:
             stream = await client.chat.completions.create(
                 model="gpt-4.1-nano-2025-04-14",
                 messages=[
-                    {"role": "system", "content": "You are the game master of a fantasy MUD game. Keep all responses concise (1-2 sentences maximum). Focus only on essential details and remove all fluff. Make actions clear and direct."},
+                    {"role": "system", "content": "You are the game master of a fantasy MUD game. Keep all responses concise (1-2 sentences maximum). Focus only on essential details and remove all fluff. Make actions clear and direct. ALWAYS hint at nearby items when players explore or investigate - this is crucial for player engagement."},
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0.7,
