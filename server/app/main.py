@@ -397,6 +397,17 @@ async def process_action_stream(
                                             item_data = json.loads(ai_response)
                                             # Ensure the AI-suggested name is used
                                             item_data["name"] = ai_item_name
+                                            
+                                            # ENFORCE RARITY RESTRICTIONS for AI-generated items
+                                            rarity = item_data.get('rarity', 1)
+                                            if rarity < 3:
+                                                # Force no special effects for rarity 1 and 2
+                                                item_data['special_effects'] = "No special effects"
+                                            elif rarity >= 3:
+                                                # Ensure special effects exist for rarity 3 and 4
+                                                if not item_data.get('special_effects') or item_data['special_effects'].lower() in ['', 'no special effects', 'none']:
+                                                    item_data['special_effects'] = "No special effects"
+                                                    
                                         except json.JSONDecodeError:
                                             # Fallback to template generation if JSON parsing fails
                                             prompt = item_template.generate_prompt(context)
