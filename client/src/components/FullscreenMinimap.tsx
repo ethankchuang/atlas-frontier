@@ -173,7 +173,7 @@ const FullscreenMinimap: React.FC<FullscreenMinimapProps> = ({ onClose }) => {
                         {visitedRooms.map((tile) => {
                             // Calculate position relative to player
                             const relativeX = (tile.x - playerX) * 28; // 24px tile + 4px gap
-                            const relativeY = (tile.y - playerY) * 28;
+                            const relativeY = (playerY - tile.y) * 28; // Invert Y to fix north/south orientation
                             
                             if (tile.biome) {
                                 const color = biomeColors[tile.biome] || pastelColorFromString(tile.biome);
