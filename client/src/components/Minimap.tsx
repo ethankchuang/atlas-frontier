@@ -16,7 +16,7 @@ function pastelColorFromString(str: string) {
 }
 
 const Minimap: React.FC<MinimapProps> = ({ className = '' }) => {
-    const { currentRoom, player, isCoordinateVisited, visitedCoordinates, visitedBiomes, biomeColors } = useGameStore();
+    const { currentRoom, player, isCoordinateVisited, visitedCoordinates, visitedBiomes, biomeColors, setIsMinimapFullscreen } = useGameStore();
 
     if (!currentRoom || !player) {
         return null;
@@ -58,9 +58,21 @@ const Minimap: React.FC<MinimapProps> = ({ className = '' }) => {
     const grid = useMemo(generateGrid, [playerX, playerY, visitedCoordinates, visitedBiomes, biomeColors]);
     const visitedCount = visitedCoordinates.size;
 
+    const handleMinimapClick = (event: React.MouseEvent) => {
+        event.stopPropagation();
+        setIsMinimapFullscreen(true);
+    };
+
     return (
-        <div className={`minimap ${className}`}>
-            <div className="text-xs text-green-500 mb-2 font-mono border-b border-green-700 pb-1">MINIMAP</div>
+        <div 
+            className={`minimap ${className} cursor-pointer hover:border-green-500 transition-colors`}
+            onClick={handleMinimapClick}
+            title="Click to expand map"
+        >
+            <div className="text-xs text-green-500 mb-2 font-mono border-b border-green-700 pb-1 flex items-center justify-between">
+                <span>MINIMAP</span>
+                <span className="text-green-400 text-xs">[CLICK]</span>
+            </div>
             <div className="grid grid-cols-5 gap-1">
                 {grid.map((row, rowIndex) =>
                     row.map((tile, colIndex) => {

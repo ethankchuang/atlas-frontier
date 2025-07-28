@@ -4,6 +4,7 @@ import RoomDisplay from './RoomDisplay';
 import ChatDisplay from './ChatDisplay';
 import ChatInput from './ChatInput';
 import Minimap from './Minimap';
+import FullscreenMinimap from './FullscreenMinimap';
 import PlayersInRoom from './PlayersInRoom';
 import apiService from '@/services/api';
 import websocketService from '@/services/websocket';
@@ -24,7 +25,9 @@ const GameLayout: React.FC<GameLayoutProps> = ({ playerId }) => {
         setIsLoading,
         setError,
         setGameState,
-        addVisitedCoordinate
+        addVisitedCoordinate,
+        isMinimapFullscreen,
+        setIsMinimapFullscreen
     } = useGameStore();
 
     // Initialize game state
@@ -164,6 +167,11 @@ const GameLayout: React.FC<GameLayoutProps> = ({ playerId }) => {
 
             {/* Players in Room - positioned below minimap */}
             <PlayersInRoom />
+
+            {/* Fullscreen Minimap */}
+            {isMinimapFullscreen && (
+                <FullscreenMinimap onClose={() => setIsMinimapFullscreen(false)} />
+            )}
 
             {/* Chat Display (bottom 35%) */}
             <div className="h-[50%] flex flex-col relative">

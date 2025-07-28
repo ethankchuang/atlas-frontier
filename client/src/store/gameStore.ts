@@ -63,6 +63,10 @@ interface GameStore {
     // Error state
     error: string | null;
     setError: (error: string | null) => void;
+
+    // Minimap fullscreen state
+    isMinimapFullscreen: boolean;
+    setIsMinimapFullscreen: (fullscreen: boolean) => void;
 }
 
 function pastelColorFromString(str: string) {
@@ -90,6 +94,7 @@ const useGameStore = create<GameStore>((set, get) => ({
     isMovementLoading: false,
     isRoomGenerating: false,
     error: null,
+    isMinimapFullscreen: false,
 
     // Setters
     setPlayer: (player) => set({ player }),
@@ -149,7 +154,8 @@ const useGameStore = create<GameStore>((set, get) => ({
     setIsLoading: (loading) => set({ isLoading: loading }),
     setIsMovementLoading: (loading) => set({ isMovementLoading: loading }),
     setIsRoomGenerating: (generating) => set({ isRoomGenerating: generating }),
-    setError: (error) => set({ error })
+    setError: (error) => set({ error }),
+    setIsMinimapFullscreen: (fullscreen) => set({ isMinimapFullscreen: fullscreen })
 }));
 
 export default useGameStore;
