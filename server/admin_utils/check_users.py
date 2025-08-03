@@ -106,8 +106,12 @@ def check_users():
                             item_details = get_item_details(redis_client, item_id)
                             if item_details:
                                 rarity_stars = "★" * item_details.get('rarity', 1)
-                                print(f"    {i}. {item_details['name']} (Rarity: {rarity_stars})")
+                                item_type = item_details.get('type', 'Unknown Type')
+                                print(f"    {i}. {item_details['name']} [{item_type}] (Rarity: {rarity_stars})")
+                                print(f"       Type: {item_details.get('type_description', 'No description')}")
                                 print(f"       Effects: {item_details.get('special_effects', 'None')}")
+                                if item_details.get('type_capabilities'):
+                                    print(f"       Capabilities: {', '.join(item_details.get('type_capabilities', []))}")
                             else:
                                 print(f"    {i}. {item_id} (Item data not found)")
                     else:
@@ -166,12 +170,27 @@ def check_users():
             count = rarity_counts.get(rarity, 0)
             print(f"  Rarity {rarity} ({stars}): {count} items")
         
+        # Calculate item type statistics
+        type_counts = {}
+        for item in all_items:
+            item_type = item.get('type', 'Unknown Type')
+            type_counts[item_type] = type_counts.get(item_type, 0) + 1
+        
+        if type_counts:
+            print(f"\nItems by Type:")
+            for item_type, count in sorted(type_counts.items()):
+                print(f"  {item_type}: {count} items")
+        
         if all_items:
-            print(f"\nSample Items:")
-            for i, item in enumerate(all_items[:5], 1):  # Show first 5 items
-                rarity_stars = "★" * item.get('rarity', 1)
-                print(f"  {i}. {item['name']} (Rarity: {rarity_stars})")
-                print(f"     Effects: {item.get('special_effects', 'None')}")
+                    print(f"\nSample Items:")
+        for i, item in enumerate(all_items[:5], 1):  # Show first 5 items
+            rarity_stars = "★" * item.get('rarity', 1)
+            item_type = item.get('type', 'Unknown Type')
+            print(f"  {i}. {item['name']} [{item_type}] (Rarity: {rarity_stars})")
+            print(f"     Type: {item.get('type_description', 'No description')}")
+            print(f"     Effects: {item.get('special_effects', 'None')}")
+            if item.get('type_capabilities'):
+                print(f"     Capabilities: {', '.join(item.get('type_capabilities', []))}")
 
         print("\n=== Activity Summary ===\n")
 

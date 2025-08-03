@@ -67,6 +67,34 @@ interface GameStore {
     // Minimap fullscreen state
     isMinimapFullscreen: boolean;
     setIsMinimapFullscreen: (fullscreen: boolean) => void;
+
+    // Duel challenge state
+    duelChallenge: { challengerName: string; challengerId: string } | null;
+    setDuelChallenge: (challenge: { challengerName: string; challengerId: string } | null) => void;
+
+    // Duel state
+    isInDuel: boolean;
+    duelOpponent: { id: string; name: string } | null;
+    myDuelMove: string | null;
+    opponentDuelMove: string | null;
+    bothMovesSubmitted: boolean;
+    currentRound: number;
+    player1Condition: string;
+    player2Condition: string;
+    player1Tags: Array<{ name: string; severity: number; type: 'positive' | 'negative' }>;
+    player2Tags: Array<{ name: string; severity: number; type: 'positive' | 'negative' }>;
+    player1TotalSeverity: number;
+    player2TotalSeverity: number;
+    
+    // Duel actions
+    startDuel: (opponent: { id: string; name: string }) => void;
+    submitDuelMove: (move: string) => void;
+    setOpponentMove: (move: string) => void;
+    setBothMovesSubmitted: (submitted: boolean) => void;
+    updateDuelConditions: (player1Condition: string, player2Condition: string) => void;
+    updateDuelTags: (player1Tags: any[], player2Tags: any[], player1TotalSeverity: number, player2TotalSeverity: number) => void;
+    prepareNextRound: (round: number) => void;
+    endDuel: () => void;
 }
 
 function pastelColorFromString(str: string) {
@@ -95,6 +123,19 @@ const useGameStore = create<GameStore>((set, get) => ({
     isRoomGenerating: false,
     error: null,
     isMinimapFullscreen: false,
+    duelChallenge: null,
+    isInDuel: false,
+    duelOpponent: null,
+    myDuelMove: null,
+    opponentDuelMove: null,
+    bothMovesSubmitted: false,
+    currentRound: 1,
+    player1Condition: "Healthy",
+    player2Condition: "Healthy",
+    player1Tags: [],
+    player2Tags: [],
+    player1TotalSeverity: 0,
+    player2TotalSeverity: 0,
 
     // Setters
     setPlayer: (player) => set({ player }),
@@ -155,7 +196,74 @@ const useGameStore = create<GameStore>((set, get) => ({
     setIsMovementLoading: (loading) => set({ isMovementLoading: loading }),
     setIsRoomGenerating: (generating) => set({ isRoomGenerating: generating }),
     setError: (error) => set({ error }),
-    setIsMinimapFullscreen: (fullscreen) => set({ isMinimapFullscreen: fullscreen })
+    setIsMinimapFullscreen: (fullscreen) => set({ isMinimapFullscreen: fullscreen }),
+    setDuelChallenge: (challenge) => set({ duelChallenge: challenge }),
+    
+    // Duel actions
+    startDuel: (opponent) => {
+        console.log('[GameStore] Starting duel with opponent:', opponent);
+        set({ 
+            isInDuel: true, 
+            duelOpponent: opponent, 
+            myDuelMove: null,
+            opponentDuelMove: null,
+            bothMovesSubmitted: false,
+            currentRound: 1,
+            player1Condition: "Healthy",
+            player2Condition: "Healthy",
+            player1Tags: [],
+            player2Tags: [],
+            player1TotalSeverity: 0,
+            player2TotalSeverity: 0,
+        });
+        console.log('[GameStore] Duel state updated');
+    },
+    submitDuelMove: (move) => set((state) => {
+        const newState: any = { 
+            myDuelMove: move,
+            bothMovesSubmitted: false
+        };
+        
+        // If opponent has already submitted their move, both moves are ready
+        if (state.opponentDuelMove) {
+            newState.bothMovesSubmitted = true;
+        }
+        
+        return newState;
+    }),
+    setOpponentMove: (move) => set((state) => {
+        const newState: any = { opponentDuelMove: move };
+        
+        // If current player has already submitted their move, both moves are ready
+        if (state.myDuelMove) {
+            newState.bothMovesSubmitted = true;
+        }
+        
+        return newState;
+    }),
+    setBothMovesSubmitted: (submitted) => set({ bothMovesSubmitted: submitted }),
+    updateDuelConditions: (player1Condition, player2Condition) => set({ player1Condition, player2Condition }),
+    updateDuelTags: (player1Tags, player2Tags, player1TotalSeverity, player2TotalSeverity) => set({ player1Tags, player2Tags, player1TotalSeverity, player2TotalSeverity }),
+    prepareNextRound: (round) => set({ 
+        currentRound: round,
+        myDuelMove: null,
+        opponentDuelMove: null,
+        bothMovesSubmitted: false
+    }),
+    endDuel: () => set({ 
+        isInDuel: false, 
+        duelOpponent: null, 
+        myDuelMove: null,
+        opponentDuelMove: null,
+        bothMovesSubmitted: false,
+        currentRound: 1,
+        player1Condition: "Healthy",
+        player2Condition: "Healthy",
+        player1Tags: [],
+        player2Tags: [],
+        player1TotalSeverity: 0,
+        player2TotalSeverity: 0,
+    })
 }));
 
 export default useGameStore;

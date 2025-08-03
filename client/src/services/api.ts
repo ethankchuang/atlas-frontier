@@ -217,7 +217,7 @@ class APIService {
                                 onFinal({
                                     success: true,
                                     message: data.content,
-                                    updates: data.updates
+                                    updates: data.updates || {}
                                 });
 
                                 // Then update WebSocket's roomId and reconnect
@@ -229,7 +229,7 @@ class APIService {
                                 onFinal({
                                     success: true,
                                     message: data.content,
-                                    updates: data.updates
+                                    updates: data.updates || {}
                                 });
                             }
                         }

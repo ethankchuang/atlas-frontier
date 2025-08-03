@@ -135,10 +135,43 @@ class GameManager:
             'limit': 50,  # Maximum actions per interval
             'interval_minutes': 30  # Time window in minutes
         }
+        
+        # Item type manager
+        from .templates.item_types import ItemTypeManager
+        self.item_type_manager = ItemTypeManager()
 
     def set_connection_manager(self, manager):
         """Set the connection manager instance"""
         self.connection_manager = manager
+    
+    async def get_player(self, player_id: str) -> Optional[Player]:
+        """Get a player by ID"""
+        try:
+            player_data = await self.db.get_player(player_id)
+            if player_data:
+                return Player(**player_data)
+            return None
+        except Exception as e:
+            self.logger.error(f"[GameManager] Error getting player {player_id}: {str(e)}")
+            return None
+    
+    async def load_item_types(self):
+        """Load item types from database for existing worlds"""
+        try:
+            item_types_data = await self.db.get_item_types()
+            if item_types_data:
+                self.item_type_manager.from_dict_list(item_types_data)
+                logger.info(f"[Item Types] Loaded {len(self.item_type_manager.item_types)} item types from database")
+                
+                # Log the loaded types
+                logger.info(f"[Item Types] Loaded {len(self.item_type_manager.item_types)} item types:")
+                for item_type in self.item_type_manager.item_types:
+                    logger.info(f"[Item Types]   - {item_type.name}: {', '.join(item_type.capabilities)}")
+            else:
+                logger.info(f"[Item Types] No item types found in database, will be generated on next world initialization")
+        except Exception as e:
+            logger.error(f"[Item Types] Error loading item types: {str(e)}")
+            # Continue without item types - they'll be generated on next world initialization
 
     async def initialize_game(self) -> GameState:
         """Initialize a new game world"""
@@ -147,6 +180,33 @@ class GameManager:
         
         game_state = await self.ai_handler.generate_world_seed()
         await self.db.set_game_state(game_state.dict())
+        
+        # Generate item types for this world
+        logger.info(f"[Item Types] Generating item types for world: {game_state.world_seed}")
+        logger.info(f"[Item Types] World seed hash: {hash(game_state.world_seed) % (2**32)}")
+        
+        # Create world context for theme analysis
+        world_context = {
+            'main_quest_summary': game_state.main_quest_summary,
+            'world_seed': game_state.world_seed
+        }
+        
+        item_types = await self.item_type_manager.generate_world_item_types(game_state.world_seed, world_context, self.ai_handler)
+        await self.db.set_item_types(self.item_type_manager.to_dict_list())
+        
+        # Log detailed information about generated types
+        logger.info(f"[Item Types] Generated {len(item_types)} item types:")
+        
+        # Log all item types
+        logger.info(f"[Item Types] All {len(item_types)} types:")
+        for item_type in item_types:
+            logger.info(f"[Item Types]   - {item_type.name}: {', '.join(item_type.capabilities)}")
+        
+        # Log full details
+        logger.info(f"[Item Types] Full item type details:")
+        for item_type in item_types:
+            logger.info(f"[Item Types] - {item_type.name}: {item_type.description}")
+            logger.info(f"[Item Types]   Capabilities: {', '.join(item_type.capabilities)}")
         
         elapsed = time.time() - start_time
         logger.info(f"[Performance] Game initialization completed in {elapsed:.2f}s")

@@ -195,7 +195,8 @@ class AIHandler:
         player: Player,
         room: Room,
         game_state: GameState,
-        npcs: List[NPC]
+        npcs: List[NPC],
+        potential_item_type=None
     ) -> AsyncGenerator[Union[str, Dict[str, any]], None]:
         """Process a player's action using the LLM with streaming"""
         context = {
@@ -223,11 +224,11 @@ class AIHandler:
                 "dialogue_history": [],
                 "memory_log": []
             }
-        ],
-        "reward_item": {
-            "deserves_item": true,
-            "item_name": "name of the item to reward (only if deserves_item is true)"
-        }
+        ]
+    },
+    "reward_item": {
+        "deserves_item": true,
+        "item_type": "optional, one of: Sword, Bow, Shield, Armor, Utility Tool, Potion, Map, Key, Torch, Amulet"
     }
 }
 '''
@@ -236,6 +237,22 @@ class AIHandler:
         prompt_parts = [
             f"Process this player action in a fantasy MUD game.",
             f"Context: {json.dumps(context)}",
+            "",
+        ]
+        
+        # Add item discovery context if applicable
+        if potential_item_type:
+            prompt_parts.extend([
+                "ITEM DISCOVERY CONTEXT:",
+                f"The player might discover a {potential_item_type.name.lower()}: {potential_item_type.description}",
+                f"Capabilities: {', '.join(potential_item_type.capabilities)}",
+                "When describing item discovery, be specific about finding this type of item.",
+                "",
+            ])
+        
+
+        
+        prompt_parts.extend([
             "",
             "CRITICAL RULES FOR CONCISE RESPONSES:",
             "1. Keep narrative responses to 1-2 sentences maximum",
@@ -247,28 +264,49 @@ class AIHandler:
             "7. Determine if the player is inputting a movement command, if so add it to updates.player.direction",
             "8. Focus on movement direction, inventory changes, quest progress, and NPC interactions",
             "",
-            "ITEM HINTING POLICY (CRITICAL):",
-            "- ALWAYS hint at nearby items when players explore, investigate, or look around",
-            "- Common exploration actions that should trigger item hints: \"look\", \"examine\", \"investigate\", \"search\", \"explore\", \"check\", \"inspect\"",
-            "- When hinting at items, describe them briefly but clearly so players know what to interact with",
-            "- Examples: \"You notice a glint of metal beneath the leaves\", \"There's a suspicious crack in the wall\", \"A faint glow emanates from behind the rocks\"",
-            "- Add item hints to the narrative response, not just the memory log",
-            "",
-            "ITEM REWARD POLICY (IMPORTANT):",
-            "- Only reward the player with items if they directly interact with it (e.g., \"grab\", \"take\", \"pick up\", \"collect\")",
-            "- If the player deserves an item, set updates.reward_item.deserves_item to true and provide updates.reward_item.item_name",
+            "ITEM REWARD POLICY (CRITICAL):",
+            "- **TRUST YOUR JUDGMENT:** Analyze the player's action and determine if they should receive an item",
+            "- If the player is clearly trying to obtain, collect, or interact with an item, set reward_item.deserves_item to true",
+            "- If the player is just exploring, looking around, or investigating without clear intent to collect, set reward_item.deserves_item to false",
             "- **CRITICAL:** Do NOT update the player's inventory directly. Only use the reward_item field",
-            "- If the player investigates but doesn't grab the item, only hint at it - do NOT reward it yet",
+            "- Use your understanding of the action context to make the decision - no hardcoded keywords",
+            "",
+            "ITEM TYPE SELECTION (CRITICAL):",
+            "- When you mention an item in your narrative, you MUST specify the item_type in reward_item.item_type",
+            "- Available item types: Sword, Bow, Shield, Armor, Utility Tool, Potion, Map, Key, Torch, Amulet",
+            "- **VARY YOUR CHOICES:** Don't always pick the same item type. Consider the room's atmosphere and biome",
+            "- **MATCH NARRATIVE TO TYPE:** If you mention a 'sword' in narrative, set item_type to 'Sword'",
+            "- **CONTEXTUAL CHOICES:** Choose item types that make sense for the environment and situation",
+            "- **ROOM CONTEXT MATTERS:** In dark areas, consider Torch. In combat areas, consider Sword/Shield. In mysterious areas, consider Amulet/Key",
+            "- **BIOME CONSIDERATIONS:** Desert areas might have Map/Key, forest areas might have Bow/Utility Tool, etc.",
+            "- If no item is mentioned in narrative, leave item_type undefined or null",
+            "",
+            "ITEM TYPE USAGE (CRITICAL):",
+            "- If you have information about a specific item type (sword, amulet, key, etc.), use it in your narrative",
+            "- Instead of saying \"hidden object\" or \"item\", be specific: \"sword\", \"amulet\", \"key\", etc.",
+            "- Make the narrative match the item type being discovered",
             "",
             "EXAMPLES:",
-            "1. Player action: \"look around\" or \"investigate\"",
-            "   - Narrative: \"You notice a faint glow emanating from beneath a pile of ash.\"",
-            "   - Memory: \"Found a hidden glowing object beneath the ash\"",
-            "   - JSON: {\"updates\": {\"player\": {\"memory_log\": [\"Found a hidden glowing object beneath the ash\"]}}}",
-            "2. Player action: \"grab the glowing object\" or \"take the glowing object\"",
-            "   - Narrative: \"You grab the glowing object, feeling its warmth in your hands.\"",
-            "   - Memory: \"Picked up the glowing object\"",
-            "   - JSON: {\"updates\": {\"player\": {\"memory_log\": [\"Picked up the glowing object\"]}, \"reward_item\": {\"deserves_item\": true, \"item_name\": \"glowing object\"}}}",
+            "1. Player action: \"look around\" (in a dark cave)",
+            "   - Narrative: \"You notice a torch mounted on the wall, its flame still flickering.\"",
+            "   - Memory: \"Found a torch on the wall\"",
+            "   - JSON: {\"updates\": {\"player\": {\"memory_log\": [\"Found a torch on the wall\"]}}, \"reward_item\": {\"deserves_item\": false, \"item_type\": \"Torch\"}}",
+            "2. Player action: \"grab the torch\"",
+            "   - Narrative: \"You pull the torch from its mount, feeling the warmth of its flame.\"",
+            "   - Memory: \"Retrieved the torch from the wall\"",
+            "   - JSON: {\"updates\": {\"player\": {\"memory_log\": [\"Retrieved the torch from the wall\"]}}, \"reward_item\": {\"deserves_item\": true, \"item_type\": \"Torch\"}}",
+            "3. Player action: \"search for items\" (in a forest)",
+            "   - Narrative: \"You spot a bow leaning against a tree, its string still taut.\"",
+            "   - Memory: \"Found a bow against a tree\"",
+            "   - JSON: {\"updates\": {\"player\": {\"memory_log\": [\"Found a bow against a tree\"]}}, \"reward_item\": {\"deserves_item\": false, \"item_type\": \"Bow\"}}",
+            "4. Player action: \"collect the bow\"",
+            "   - Narrative: \"You carefully lift the bow, testing its draw weight.\"",
+            "   - Memory: \"Retrieved the bow from the tree\"",
+            "   - JSON: {\"updates\": {\"player\": {\"memory_log\": [\"Retrieved the bow from the tree\"]}}, \"reward_item\": {\"deserves_item\": true, \"item_type\": \"Bow\"}}",
+            "5. Player action: \"look for hidden items\" (in a mysterious temple)",
+            "   - Narrative: \"You find no items visible in the shadowed expanse.\"",
+            "   - Memory: \"Looked for hidden items\"",
+            "   - JSON: {\"updates\": {\"player\": {\"memory_log\": [\"Looked for hidden items\"]}}, \"reward_item\": {\"deserves_item\": false}}",
             "",
             "CRITICAL JSON RULES:",
             "- deserves_item must be a boolean value (true/false), NOT a string (\"true\"/\"false\")",
@@ -282,9 +320,13 @@ class AIHandler:
             "3. Finally, provide a JSON object with this exact structure:",
             json_template,
             "",
+            "**CRITICAL: ALWAYS include the reward_item field in your JSON response!**",
+            "**CRITICAL: Set reward_item.deserves_item to true for grab/take actions!**",
+            "**CRITICAL: Set reward_item.deserves_item to false for look/search actions!**",
+            "",
             "Only include fields in updates that need to be changed. The updates object is optional.",
             "Do not include any comments in the JSON."
-        ]
+        ])
         
         prompt = "\n".join(prompt_parts)
 
@@ -308,7 +350,6 @@ class AIHandler:
                 if chunk.choices[0].delta.content is not None:
                     content = chunk.choices[0].delta.content
                     buffer += content
-                    #logger.debug(f"[Stream Action] Received chunk: {content}")
 
                     # Check if we've hit the JSON part (after two newlines)
                     if not narrative_complete and "\n\n{" in buffer:
@@ -463,6 +504,23 @@ class AIHandler:
         except Exception as e:
             logger.error(f"[Generate Text] Error generating text: {str(e)}")
             raise
+
+    @staticmethod
+    async def analyze_duel(prompt: str) -> str:
+        """Analyze a duel between two players and determine the outcome"""
+        try:
+            response = await client.chat.completions.create(
+                model="gpt-4.1-nano-2025-04-14",
+                messages=[
+                    {"role": "system", "content": "You are a fantasy duel referee. Analyze the moves of two players and determine who wins. Be dramatic and engaging, but keep the analysis concise (2-3 sentences). Consider the effectiveness, creativity, and interaction of the moves. Always clearly state who wins."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.8
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            logger.error(f"[Analyze Duel] Error analyzing duel: {str(e)}")
+            return "The duel ended in a draw due to an error in analysis."
 
     @staticmethod
     async def generate_biome_chunk(chunk_id: str, adjacent_biomes: set) -> Dict[str, str]:

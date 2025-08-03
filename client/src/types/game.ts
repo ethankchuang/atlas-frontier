@@ -71,11 +71,19 @@ export interface ActionResponse {
     image_url?: string;
 }
 
+export type ChatMessageType = 
+  | 'chat' 
+  | 'emote' 
+  | 'system' 
+  | 'room_description' 
+  | 'item_obtained' 
+  | 'duel_challenge';
+
 export interface ChatMessage {
     player_id: string;
     room_id: string;
     message: string;
-    message_type: 'chat' | 'emote' | 'system' | 'room_description' | 'item_obtained';
+    message_type: ChatMessageType;
     timestamp: string;
     id?: string;
     isStreaming?: boolean;
@@ -87,6 +95,7 @@ export interface ChatMessage {
     y?: number;
     item_name?: string;
     item_rarity?: number;
+    item_type?: string;
     rarity_stars?: string;
 }
 

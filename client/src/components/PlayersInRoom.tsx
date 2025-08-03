@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import useGameStore from '@/store/gameStore';
 import { UserCircleIcon } from '@heroicons/react/24/solid';
+import websocketService from '@/services/websocket';
 
 const PlayersInRoom: React.FC = () => {
     const { playersInRoom, player } = useGameStore();
@@ -23,9 +24,7 @@ const PlayersInRoom: React.FC = () => {
         };
 
         document.addEventListener('mousedown', handleClickOutside);
-        return () => {
-            document.removeEventListener('mousedown', handleClickOutside);
-        };
+        return () => document.removeEventListener('mousedown', handleClickOutside);
     }, []);
 
     const handlePlayerClick = (event: React.MouseEvent, playerId: string) => {
@@ -36,8 +35,6 @@ const PlayersInRoom: React.FC = () => {
         if (!playerElement) return;
         
         const rect = playerElement.getBoundingClientRect();
-        
-        // Use viewport coordinates for absolute positioning
         setMenuPosition({
             x: rect.left + rect.width / 2,
             y: rect.bottom + 5
@@ -46,12 +43,16 @@ const PlayersInRoom: React.FC = () => {
         setShowMenu(true);
     };
 
+    const closeMenu = () => {
+        setShowMenu(false);
+        setSelectedPlayer(null);
+    };
+
     const handleFightClick = () => {
         if (selectedPlayer) {
-            console.log('Fight action for player:', selectedPlayer);
-            // TODO: Implement fight action
-            setShowMenu(false);
-            setSelectedPlayer(null);
+            console.log('Sending duel challenge to player:', selectedPlayer);
+            websocketService.sendDuelChallenge(selectedPlayer);
+            closeMenu();
         }
     };
 
@@ -59,13 +60,12 @@ const PlayersInRoom: React.FC = () => {
         if (selectedPlayer) {
             console.log('Close action for player:', selectedPlayer);
             // TODO: Implement close action
-            setShowMenu(false);
-            setSelectedPlayer(null);
+            closeMenu();
         }
     };
 
     if (otherPlayers.length === 0) {
-        return null; // Don't show anything if no other players
+        return null;
     }
 
     return (
@@ -103,7 +103,7 @@ const PlayersInRoom: React.FC = () => {
                         <button
                             onClick={handleFightClick}
                             className="w-8 h-8 bg-yellow-600 hover:bg-yellow-700 text-black font-bold text-sm rounded flex items-center justify-center transition-colors"
-                            title="Fight"
+                            title="Challenge to Duel"
                         >
                             ⚔️
                         </button>

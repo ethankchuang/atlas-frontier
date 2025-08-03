@@ -157,6 +157,38 @@ class Database:
             raise
 
     @staticmethod
+    async def get_item_types() -> Optional[List[Dict[str, Any]]]:
+        """Get item types for the current world"""
+        try:
+            item_types_data = redis_client.get("item_types")
+            if item_types_data:
+                if isinstance(item_types_data, bytes):
+                    item_types_data = item_types_data.decode('utf-8')
+                return json.loads(item_types_data)
+            return None
+        except Exception as e:
+            logger.error(f"Error getting item types: {str(e)}")
+            raise
+
+    @staticmethod
+    async def set_item_types(item_types_data: List[Dict[str, Any]]) -> bool:
+        """Save item types for the current world"""
+        try:
+            logger.debug(f"Setting item types with data: {item_types_data}")
+            # For lists, we need to serialize each item individually
+            serializable_data = []
+            for item_data in item_types_data:
+                serializable_item = {}
+                for key, value in item_data.items():
+                    serializable_item[key] = Database._serialize_value(value)
+                serializable_data.append(serializable_item)
+            logger.debug(f"Serialized item types data: {serializable_data}")
+            return redis_client.set("item_types", json.dumps(serializable_data))
+        except Exception as e:
+            logger.error(f"Error setting item types: {str(e)}")
+            raise
+
+    @staticmethod
     async def add_npc_memory(npc_id: str, memory: str, metadata: Dict[str, Any]) -> None:
         """Add a memory to NPC's vector store"""
         npc_memory_collection.add(
@@ -411,9 +443,9 @@ class Database:
     async def reset_world() -> None:
         """Reset the entire game world by clearing all data"""
         try:
-            # Clear all Redis data (includes coordinate mappings, saved biomes, and chunk biome assignments)
+            # Clear all Redis data (includes coordinate mappings, saved biomes, chunk biome assignments, and item types)
             redis_client.flushall()
-            logger.info("Redis data cleared (including coordinate mappings, saved biomes, and chunk biome assignments)")
+            logger.info("Redis data cleared (including coordinate mappings, saved biomes, chunk biome assignments, and item types)")
 
             # Clear ChromaDB collections
             try:
@@ -820,4 +852,126 @@ class Database:
             return redis_client.set(key, json.dumps(serializable_data))
         except Exception as e:
             logger.error(f"Error saving biome {biome_data}: {str(e)}")
+            return False
+
+    # Dynamic validation system methods
+    @staticmethod
+    async def get_world_validation_rules(world_seed: str) -> Optional[Dict[str, Any]]:
+        """Get validation rules for a specific world"""
+        try:
+            rules_data = redis_client.get(f"validation_rules:{world_seed}")
+            if rules_data:
+                if isinstance(rules_data, bytes):
+                    rules_data = rules_data.decode('utf-8')
+                return json.loads(rules_data)
+            return None
+        except Exception as e:
+            logger.error(f"Error getting validation rules for world {world_seed}: {str(e)}")
+            return None
+
+    @staticmethod
+    async def set_world_validation_rules(world_seed: str, rules_data: Dict[str, Any]) -> bool:
+        """Set validation rules for a specific world"""
+        try:
+            serializable_data = Database._serialize_data(rules_data)
+            return redis_client.set(f"validation_rules:{world_seed}", json.dumps(serializable_data))
+        except Exception as e:
+            logger.error(f"Error setting validation rules for world {world_seed}: {str(e)}")
+            return False
+
+    @staticmethod
+    async def update_validation_rules(world_seed: str, updates: Dict[str, Any]) -> bool:
+        """Update validation rules for a world (merge with existing rules)"""
+        try:
+            existing_rules = await Database.get_world_validation_rules(world_seed)
+            if existing_rules:
+                existing_rules.update(updates)
+            else:
+                existing_rules = updates
+            
+            return await Database.set_world_validation_rules(world_seed, existing_rules)
+        except Exception as e:
+            logger.error(f"Error updating validation rules for world {world_seed}: {str(e)}")
+            return False
+
+    @staticmethod
+    async def get_validation_learning_data(world_seed: str) -> List[Dict[str, Any]]:
+        """Get learning data for validation rule improvements"""
+        try:
+            learning_data = redis_client.get(f"validation_learning:{world_seed}")
+            if learning_data:
+                if isinstance(learning_data, bytes):
+                    learning_data = learning_data.decode('utf-8')
+                return json.loads(learning_data)
+            return []
+        except Exception as e:
+            logger.error(f"Error getting validation learning data for world {world_seed}: {str(e)}")
+            return []
+
+    @staticmethod
+    async def add_validation_learning_data(world_seed: str, learning_entry: Dict[str, Any]) -> bool:
+        """Add learning data for validation rule improvements"""
+        try:
+            learning_data = await Database.get_validation_learning_data(world_seed)
+            learning_data.append(learning_entry)
+            
+            # Keep only the last 1000 entries to prevent memory issues
+            if len(learning_data) > 1000:
+                learning_data = learning_data[-1000:]
+            
+            serializable_data = Database._serialize_data(learning_data)
+            return redis_client.set(f"validation_learning:{world_seed}", json.dumps(serializable_data))
+        except Exception as e:
+            logger.error(f"Error adding validation learning data for world {world_seed}: {str(e)}")
+            return False
+
+    @staticmethod
+    async def get_world_validation_stats(world_seed: str) -> Dict[str, Any]:
+        """Get validation statistics for a world"""
+        try:
+            stats_data = redis_client.get(f"validation_stats:{world_seed}")
+            if stats_data:
+                if isinstance(stats_data, bytes):
+                    stats_data = stats_data.decode('utf-8')
+                return json.loads(stats_data)
+            return {
+                "total_validations": 0,
+                "valid_actions": 0,
+                "invalid_actions": 0,
+                "ai_validations": 0,
+                "common_invalid_actions": {},
+                "validation_mode_changes": []
+            }
+        except Exception as e:
+            logger.error(f"Error getting validation stats for world {world_seed}: {str(e)}")
+            return {}
+
+    @staticmethod
+    async def update_validation_stats(world_seed: str, validation_result: Dict[str, Any]) -> bool:
+        """Update validation statistics for a world"""
+        try:
+            stats = await Database.get_world_validation_stats(world_seed)
+            
+            # Update basic stats
+            stats["total_validations"] = stats.get("total_validations", 0) + 1
+            
+            if validation_result.get("valid", False):
+                stats["valid_actions"] = stats.get("valid_actions", 0) + 1
+            else:
+                stats["invalid_actions"] = stats.get("invalid_actions", 0) + 1
+                
+                # Track common invalid actions
+                action = validation_result.get("action", "unknown")
+                if action in stats.get("common_invalid_actions", {}):
+                    stats["common_invalid_actions"][action] += 1
+                else:
+                    stats["common_invalid_actions"][action] = 1
+            
+            if validation_result.get("ai_validated", False):
+                stats["ai_validations"] = stats.get("ai_validations", 0) + 1
+            
+            serializable_data = Database._serialize_data(stats)
+            return redis_client.set(f"validation_stats:{world_seed}", json.dumps(serializable_data))
+        except Exception as e:
+            logger.error(f"Error updating validation stats for world {world_seed}: {str(e)}")
             return False

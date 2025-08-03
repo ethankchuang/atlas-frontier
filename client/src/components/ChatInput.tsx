@@ -5,13 +5,57 @@ import websocketService from '@/services/websocket';
 import { ChatMessage } from '@/types/game';
 import { PaperAirplaneIcon, FaceSmileIcon } from '@heroicons/react/24/solid';
 
+// Tag display component
+const CombatTags: React.FC<{ tags: Array<{ name: string; severity: number; type: 'positive' | 'negative' }>; totalSeverity: number }> = ({ tags, totalSeverity }) => {
+    if (tags.length === 0) return null;
+
+    return (
+        <div className="flex flex-wrap gap-1 mb-2">
+            {tags.map((tag, index) => (
+                <span
+                    key={index}
+                    className={`px-2 py-1 text-xs rounded-full ${
+                        tag.type === 'positive' 
+                            ? 'bg-green-100 text-green-800 border border-green-200' 
+                            : 'bg-red-100 text-red-800 border border-red-200'
+                    }`}
+                >
+                    {tag.name}
+                    {tag.severity > 0 && <span className="ml-1 font-bold">({tag.severity})</span>}
+                </span>
+            ))}
+            {totalSeverity > 0 && (
+                <span className="px-2 py-1 text-xs rounded-full bg-orange-100 text-orange-800 border border-orange-200 font-bold">
+                    Total Severity: {totalSeverity}/50
+                </span>
+            )}
+        </div>
+    );
+};
+
 const ChatInput: React.FC = () => {
     const [input, setInput] = useState('');
     const [isEmote, setIsEmote] = useState(false);
     const [isStreaming, setIsStreaming] = useState(false);
     const streamMessageIdRef = useRef<string | null>(null);
     const inputRef = useRef<HTMLInputElement>(null);
-    const { player, currentRoom, messages, addMessage, updateMessage } = useGameStore();
+    const {
+        player,
+        currentRoom,
+        isInDuel,
+        duelOpponent,
+        myDuelMove,
+        bothMovesSubmitted,
+        player1Condition,
+        player2Condition,
+        player1Tags,
+        player2Tags,
+        player1TotalSeverity,
+        player2TotalSeverity,
+        addMessage,
+        updateMessage,
+        submitDuelMove
+    } = useGameStore();
 
     useEffect(() => {
         // Focus input on mount
@@ -24,6 +68,37 @@ const ChatInput: React.FC = () => {
 
         const trimmedInput = input.trim();
         setInput('');
+
+        // Check if we're in a duel first
+        if (isInDuel && duelOpponent) {
+            // Handle duel move
+            if (!myDuelMove) {
+                // Submit our move
+                submitDuelMove(trimmedInput);
+                websocketService.sendDuelMove(duelOpponent.id, trimmedInput);
+                
+                // Add message showing we submitted our move (but not what it was)
+                const duelMessage: ChatMessage = {
+                    player_id: player.id,
+                    room_id: currentRoom.id,
+                    message: `⚔️ You prepare your combat move...`,
+                    message_type: 'system',
+                    timestamp: new Date().toISOString()
+                };
+                addMessage(duelMessage);
+            } else {
+                // Already submitted our move, just show a message
+                const message: ChatMessage = {
+                    player_id: player.id,
+                    room_id: currentRoom.id,
+                    message: "You've already submitted your move. Waiting for your opponent...",
+                    message_type: 'system',
+                    timestamp: new Date().toISOString()
+                };
+                addMessage(message);
+            }
+            return;
+        }
 
         // Only add command to history if it's not a chat or emote
         if (!isEmote && !trimmedInput.startsWith('/')) {
@@ -165,41 +240,74 @@ const ChatInput: React.FC = () => {
         setIsEmote(false);
     };
 
+    const toggleEmote = () => {
+        setIsEmote(!isEmote);
+    };
+
     return (
-        <form onSubmit={handleSubmit} className="flex items-center gap-2 p-3 bg-black border-t border-amber-900">
+        <div className="bg-black border-t border-amber-900">
+            {/* Condition Display for Duels */}
+            {isInDuel && duelOpponent && (
+                <div className="px-3 py-2 bg-amber-900/20">
+                    {/* Players on same line */}
+                    <div className="flex justify-between items-center mb-2">
+                        <div className="flex items-center gap-2">
+                            <span className="text-amber-100 text-sm font-mono">You: {player1Condition}</span>
+                            <CombatTags tags={player1Tags} totalSeverity={player1TotalSeverity} />
+                        </div>
+                        <span className="text-amber-100 text-sm font-mono">
+                            {myDuelMove ? "Move submitted" : "Enter move"}
+                        </span>
+                        <div className="flex items-center gap-2">
+                            <span className="text-amber-100 text-sm font-mono">{duelOpponent.name}: {player2Condition}</span>
+                            <CombatTags tags={player2Tags} totalSeverity={player2TotalSeverity} />
+                        </div>
+                    </div>
+                </div>
+            )}
+            
+            <form onSubmit={handleSubmit} className="flex items-center gap-2 p-3">
             <button
                 type="button"
-                onClick={() => setIsEmote(!isEmote)}
-                className={`p-2.5 rounded ${
-                    isEmote ? 'bg-yellow-600' : 'bg-amber-900'
-                } hover:bg-yellow-700 transition-colors`}
-                title="Toggle emote mode"
-                disabled={isStreaming}
+                    onClick={toggleEmote}
+                    className={`p-2 rounded transition-colors ${
+                        isEmote 
+                            ? 'bg-amber-600 text-amber-100' 
+                            : 'bg-amber-900/50 text-amber-400 hover:bg-amber-800/50'
+                    }`}
+                    disabled={isStreaming || isInDuel}
             >
-                <FaceSmileIcon className="w-6 h-6 text-amber-100" />
+                    <FaceSmileIcon className="w-5 h-5" />
             </button>
 
-            <div className="flex-1 relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-amber-500 font-mono text-xl">{'>'}{'>'}</span>
+                <div className="relative flex-1">
                 <input
                     ref={inputRef}
                     type="text"
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
-                    placeholder={isEmote ? "Express an action..." : "What do you want to do?"}
+                        placeholder={
+                            isInDuel 
+                                ? (myDuelMove ? "Waiting for opponent..." : "Enter your combat move...")
+                                : (isEmote ? "Express an action..." : "What do you want to do?")
+                        }
                     className="w-full pl-10 py-2.5 bg-black text-green-400 font-mono text-xl border border-amber-900 focus:border-amber-500 focus:outline-none rounded"
-                    disabled={isStreaming}
+                        disabled={isStreaming || (isInDuel && !!myDuelMove && !bothMovesSubmitted)}
                 />
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                        <span className="text-amber-400 text-xl font-mono">{'>'}</span>
+                    </div>
             </div>
 
             <button
                 type="submit"
-                disabled={!input.trim() || isStreaming}
-                className="p-2.5 bg-amber-900 text-amber-100 rounded hover:bg-amber-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    disabled={isStreaming || !input.trim() || (isInDuel && !!myDuelMove && !bothMovesSubmitted)}
+                    className="p-2 bg-amber-600 text-amber-100 rounded hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
                 <PaperAirplaneIcon className="w-6 h-6" />
             </button>
         </form>
+        </div>
     );
 };
 

@@ -6,6 +6,7 @@ import ChatInput from './ChatInput';
 import Minimap from './Minimap';
 import FullscreenMinimap from './FullscreenMinimap';
 import PlayersInRoom from './PlayersInRoom';
+import DuelChallengePopup from './DuelChallengePopup';
 import apiService from '@/services/api';
 import websocketService from '@/services/websocket';
 import { ChatMessage } from '@/types/game';
@@ -172,6 +173,9 @@ const GameLayout: React.FC<GameLayoutProps> = ({ playerId }) => {
             {isMinimapFullscreen && (
                 <FullscreenMinimap onClose={() => setIsMinimapFullscreen(false)} />
             )}
+
+            {/* Duel Challenge Popup */}
+            <DuelChallengePopup />
 
             {/* Chat Display (bottom 35%) */}
             <div className="h-[50%] flex flex-col relative">

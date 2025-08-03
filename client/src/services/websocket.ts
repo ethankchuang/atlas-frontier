@@ -148,6 +148,28 @@ class WebSocketService {
                 case 'item_obtained':
                     this.handleItemObtained(data);
                     break;
+                case 'duel_challenge':
+                    this.handleDuelChallenge(data);
+                    break;
+                case 'duel_response':
+                    this.handleDuelResponse(data);
+                    break;
+                case 'duel_move':
+                    this.handleDuelMove(data);
+                    break;
+                case 'duel_cancel':
+                    this.handleDuelCancel(data);
+                    break;
+                case 'duel_outcome':
+                    this.handleDuelOutcome(data);
+                    break;
+                case 'duel_round_result':
+                    this.handleDuelRoundResult(data);
+                    break;
+                case 'duel_next_round':
+                    this.handleDuelNextRound(data);
+                    break;
+                
                 case 'room_update':
                     console.log('[WebSocket] Received room update:', {
                         roomId: data.room?.id,
@@ -309,6 +331,351 @@ class WebSocketService {
             console.log('[WebSocket] Added item obtained message to chat:', data.message);
         }
     }
+
+    private handleDuelChallenge(data: { type: 'duel_challenge'; challenger_id: string; target_id: string; room_id: string; timestamp: string }) {
+        console.log('[WebSocket] Handling duel challenge:', data);
+        const store = useGameStore.getState();
+        const player = store.player;
+        
+        // Only show challenge popup if this player is the target
+        if (player && data.target_id === player.id) {
+            // Find challenger's name
+            const challenger = store.playersInRoom.find(p => p.id === data.challenger_id);
+            if (challenger) {
+                store.setDuelChallenge({
+                    challengerName: challenger.name,
+                    challengerId: data.challenger_id
+                });
+            }
+        }
+    }
+
+    private handleDuelResponse(data: { type: 'duel_response'; challenger_id: string; responder_id: string; response: 'accept' | 'decline'; room_id: string; timestamp: string }) {
+        console.log('[WebSocket] Handling duel response:', data);
+        const store = useGameStore.getState();
+        const player = store.player;
+
+        if (!player) {
+            console.error('[WebSocket] Player not found for duel response.');
+            return;
+        }
+
+        // Add a message to chat about the duel response
+        // Note: playersInRoom only contains other players, not the current player
+        const responder = store.playersInRoom.find(p => p.id === data.responder_id) || 
+                         (player.id === data.responder_id ? player : null);
+        const challenger = store.playersInRoom.find(p => p.id === data.challenger_id) || 
+                          (player.id === data.challenger_id ? player : null);
+        
+        console.log('[WebSocket] DEBUG: Looking for players in room:', {
+            responder_id: data.responder_id,
+            challenger_id: data.challenger_id,
+            current_player_id: player.id,
+            players_in_room: store.playersInRoom.map(p => ({ id: p.id, name: p.name })),
+            responder_found: !!responder,
+            challenger_found: !!challenger
+        });
+        
+        if (responder && challenger) {
+            console.log('DEBUG: data.response =', data.response, 'Type:', typeof data.response, 'Is "accept"?', data.response === 'accept'); // Added for debugging
+            if (data.response === 'accept') {
+                console.log('[WebSocket] Duel accepted! Starting duel for player:', player.name);
+                
+                // Start the duel for both players
+                if (player.id === data.challenger_id) {
+                    // Challenger starts duel with responder
+                    console.log('[WebSocket] Challenger starting duel with:', responder.name);
+                    store.startDuel({ id: data.responder_id, name: responder.name });
+                } else if (player.id === data.responder_id) {
+                    // Responder starts duel with challenger
+                    console.log('[WebSocket] Responder starting duel with:', challenger.name);
+                    store.startDuel({ id: data.challenger_id, name: challenger.name });
+                }
+                
+                const message = `${responder.name} accepted ${challenger.name}'s duel challenge! The duel begins!`;
+                store.addMessage({
+                    player_id: 'system',
+                    room_id: data.room_id,
+                    message,
+                    message_type: 'system',
+                    timestamp: data.timestamp
+                });
+            } else {
+                const message = `${responder.name} declined ${challenger.name}'s duel challenge.`;
+                store.addMessage({
+                    player_id: 'system',
+                    room_id: data.room_id,
+                    message,
+                    message_type: 'system',
+                    timestamp: data.timestamp
+                });
+            }
+        } else {
+            console.log('[WebSocket] ERROR: Could not find responder or challenger in playersInRoom:', {
+                responder_id: data.responder_id,
+                challenger_id: data.challenger_id,
+                current_player_id: player.id,
+                players_in_room: store.playersInRoom.map(p => ({ id: p.id, name: p.name }))
+            });
+            
+            // Fallback: if we can't find the players in the room, try to start the duel anyway
+            if (data.response === 'accept') {
+                console.log('[WebSocket] Fallback: Starting duel with available player data');
+                if (player.id === data.challenger_id) {
+                    // We're the challenger, start duel with responder
+                    store.startDuel({ id: data.responder_id, name: 'Opponent' });
+                } else if (player.id === data.responder_id) {
+                    // We're the responder, start duel with challenger
+                    store.startDuel({ id: data.challenger_id, name: 'Opponent' });
+                }
+                
+                const message = `Duel challenge accepted! The duel begins!`;
+                store.addMessage({
+                    player_id: 'system',
+                    room_id: data.room_id,
+                    message,
+                    message_type: 'system',
+                    timestamp: data.timestamp
+                });
+            }
+        }
+    }
+
+    private handleDuelMove(data: { type: 'duel_move'; player_id: string; opponent_id: string; move: string; room_id: string; timestamp: string }) {
+        console.log('[WebSocket] Handling duel move:', data);
+        const store = useGameStore.getState();
+        const player = store.player;
+
+        if (!player) {
+            console.error('[WebSocket] Player not found for duel move.');
+            return;
+        }
+
+        // If this is the opponent's move, store it but don't show in chat yet
+        if (player.id !== data.player_id) {
+            console.log('[WebSocket] Received opponent duel move (keeping secret):', data.move);
+            store.setOpponentMove(data.move);
+            
+            // Check if both moves have been submitted
+            if (store.myDuelMove && store.opponentDuelMove) {
+                console.log('[WebSocket] Both moves submitted, setting flag');
+                store.setBothMovesSubmitted(true);
+            }
+            
+            // Don't add message to chat - keep the move secret until both are submitted
+        } else {
+            // This is our own move - check if both moves are now submitted
+            if (store.myDuelMove && store.opponentDuelMove) {
+                console.log('[WebSocket] Both moves submitted, setting flag');
+                store.setBothMovesSubmitted(true);
+            }
+        }
+    }
+
+    private handleDuelCancel(data: { type: 'duel_cancel'; player_id: string; opponent_id: string; room_id: string; timestamp: string }) {
+        console.log('[WebSocket] Handling duel cancel:', data);
+        const store = useGameStore.getState();
+        const player = store.player;
+
+        if (!player) {
+            console.error('[WebSocket] Player not found for duel cancel.');
+            return;
+        }
+
+        if (player.id === data.player_id) {
+            // This is the current player's cancel.
+            // We need to send it to the opponent.
+            this.sendDuelCancel(data.opponent_id);
+        } else {
+            // This is an opponent's cancel.
+            // We need to update the game state in the store.
+            // For now, we'll just log it.
+            console.log('[WebSocket] Received opponent duel cancel.');
+        }
+    }
+
+    private handleDuelOutcome(data: { type: 'duel_outcome'; winner_id: string; loser_id: string; analysis: string; room_id: string; timestamp: string }) {
+        console.log('[WebSocket] Handling duel outcome:', data);
+        const store = useGameStore.getState();
+        const player = store.player;
+
+        if (!player) {
+            console.error('[WebSocket] Player not found for duel outcome.');
+            return;
+        }
+
+        // Show both players' moves now that the duel is resolved
+        if (store.myDuelMove) {
+            store.addMessage({
+                player_id: 'system',
+                room_id: data.room_id,
+                message: `⚔️ You prepared: "${store.myDuelMove}"`,
+                message_type: 'system',
+                timestamp: data.timestamp
+            });
+        }
+        
+        if (store.opponentDuelMove) {
+            const opponent = store.duelOpponent;
+            const opponentName = opponent?.name || 'Unknown';
+            store.addMessage({
+                player_id: 'system',
+                room_id: data.room_id,
+                message: `⚔️ ${opponentName} prepared: "${store.opponentDuelMove}"`,
+                message_type: 'system',
+                timestamp: data.timestamp
+            });
+        }
+
+        // Add the analysis to chat
+        store.addMessage({
+            player_id: 'system',
+            room_id: data.room_id,
+            message: data.analysis,
+            message_type: 'system',
+            timestamp: data.timestamp
+        });
+
+        // End the duel
+        store.endDuel();
+
+        // Add winner/loser message to chat
+        if (player.id === data.winner_id) {
+            store.addMessage({
+                player_id: 'system',
+                room_id: data.room_id,
+                message: `🏆 ${player.name} won the duel!`,
+                message_type: 'system',
+                timestamp: data.timestamp
+            });
+        } else if (player.id === data.loser_id) {
+            store.addMessage({
+                player_id: 'system',
+                room_id: data.room_id,
+                message: `💀 ${player.name} lost the duel.`,
+                message_type: 'system',
+                timestamp: data.timestamp
+            });
+        } else if (data.winner_id === null || data.winner_id === 'null') {
+            store.addMessage({
+                player_id: 'system',
+                room_id: data.room_id,
+                message: `⚔️ The duel ended in a draw!`,
+                message_type: 'system',
+                timestamp: data.timestamp
+            });
+        }
+    }
+
+    private handleDuelRoundResult(data: { 
+        type: 'duel_round_result'; 
+        round: number;
+        player1_id: string; 
+        player2_id: string; 
+        player1_move: string;
+        player2_move: string;
+        player1_condition: string;
+        player2_condition: string;
+        player1_tags: Array<{ name: string; severity: number; type: 'positive' | 'negative' }>;
+        player2_tags: Array<{ name: string; severity: number; type: 'positive' | 'negative' }>;
+        player1_total_severity: number;
+        player2_total_severity: number;
+        description: string;
+        combat_ends: boolean;
+        room_id: string; 
+        timestamp: string 
+    }) {
+        console.log('[WebSocket] Handling duel round result:', data);
+        const store = useGameStore.getState();
+        const player = store.player;
+
+        if (!player) {
+            console.error('[WebSocket] Player not found for duel round result.');
+            return;
+        }
+
+        // Show both players' moves for this round
+        if (data.player1_move) {
+            store.addMessage({
+                player_id: 'system',
+                room_id: data.room_id,
+                message: `⚔️ You prepared: "${data.player1_move}"`,
+                message_type: 'system',
+                timestamp: data.timestamp
+            });
+        }
+        
+        if (data.player2_move) {
+            const opponent = store.duelOpponent;
+            const opponentName = opponent?.name || 'Unknown';
+            store.addMessage({
+                player_id: 'system',
+                room_id: data.room_id,
+                message: `⚔️ ${opponentName} prepared: "${data.player2_move}"`,
+                message_type: 'system',
+                timestamp: data.timestamp
+            });
+        }
+
+        // Add the round description to chat
+        store.addMessage({
+            player_id: 'system',
+            room_id: data.room_id,
+            message: data.description,
+            message_type: 'system',
+            timestamp: data.timestamp
+        });
+
+        // Update duel state with new conditions and tags
+        store.updateDuelConditions(data.player1_condition, data.player2_condition);
+        store.updateDuelTags(data.player1_tags, data.player2_tags, data.player1_total_severity, data.player2_total_severity);
+
+        if (data.combat_ends) {
+            // Combat is over - end the duel
+            store.endDuel();
+        } else {
+            // Combat continues - prepare for next round
+            store.prepareNextRound(data.round + 1);
+        }
+    }
+
+    private handleDuelNextRound(data: { 
+        type: 'duel_next_round'; 
+        round: number;
+        player1_condition: string;
+        player2_condition: string;
+        player1_tags: Array<{ name: string; severity: number; type: 'positive' | 'negative' }>;
+        player2_tags: Array<{ name: string; severity: number; type: 'positive' | 'negative' }>;
+        player1_total_severity: number;
+        player2_total_severity: number;
+        room_id: string; 
+        timestamp: string 
+    }) {
+        console.log('[WebSocket] Handling duel next round:', data);
+        const store = useGameStore.getState();
+        const player = store.player;
+
+        if (!player) {
+            console.error('[WebSocket] Player not found for duel next round.');
+            return;
+        }
+
+        // Update duel state for next round
+        store.prepareNextRound(data.round);
+        store.updateDuelConditions(data.player1_condition, data.player2_condition);
+        store.updateDuelTags(data.player1_tags, data.player2_tags, data.player1_total_severity, data.player2_total_severity);
+
+        // Add a message to chat about the next round
+        store.addMessage({
+            player_id: 'system',
+            room_id: data.room_id,
+            message: `🔄 Round ${data.round} begins! Both players prepare their next moves...`,
+            message_type: 'system',
+            timestamp: data.timestamp
+        });
+    }
+
+
 
     private handleRoomUpdate(room: Room) {
         const store = useGameStore.getState();
@@ -498,7 +865,65 @@ class WebSocketService {
         this.socket.send(JSON.stringify(chatMessage));
     }
 
-    // sendAction method removed - actions now only go through streaming endpoint
+    sendDuelChallenge(targetPlayerId: string) {
+        if (!this.socket || !this.roomId || !this.playerId) return;
+
+        const duelMessage = {
+            type: 'duel_challenge',
+            challenger_id: this.playerId,
+            target_id: targetPlayerId,
+            room_id: this.roomId,
+            timestamp: new Date().toISOString()
+        };
+
+        this.socket.send(JSON.stringify(duelMessage));
+    }
+
+    sendDuelResponse(challengerId: string, response: 'accept' | 'decline') {
+        if (!this.socket || !this.roomId || !this.playerId) return;
+
+        const duelResponse = {
+            type: 'duel_response',
+            challenger_id: challengerId,
+            responder_id: this.playerId,
+            response,
+            room_id: this.roomId,
+            timestamp: new Date().toISOString()
+        };
+
+        this.socket.send(JSON.stringify(duelResponse));
+    }
+
+    sendDuelMove(opponentId: string, move: string) {
+        if (!this.socket || !this.roomId || !this.playerId) return;
+
+        const duelMove = {
+            type: 'duel_move',
+            player_id: this.playerId,
+            opponent_id: opponentId,
+            move,
+            room_id: this.roomId,
+            timestamp: new Date().toISOString()
+        };
+
+        this.socket.send(JSON.stringify(duelMove));
+    }
+
+    sendDuelCancel(opponentId: string) {
+        if (!this.socket || !this.roomId || !this.playerId) return;
+
+        const duelCancel = {
+            type: 'duel_cancel',
+            player_id: this.playerId,
+            opponent_id: opponentId,
+            room_id: this.roomId,
+            timestamp: new Date().toISOString()
+        };
+
+        this.socket.send(JSON.stringify(duelCancel));
+    }
+
+
 }
 
 // Create a singleton instance

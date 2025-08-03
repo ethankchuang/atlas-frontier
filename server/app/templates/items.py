@@ -10,20 +10,20 @@ from .base import ItemTemplate
 class GenericItemTemplate(ItemTemplate):
     """Template for generating generic items"""
     
-    def __init__(self):
+    def __init__(self, item_type_manager=None):
         super().__init__("generic_item")
-        
-
+        self.item_type_manager = item_type_manager
         
         self.system_prompt = """You are an expert at creating fantasy items for a text-based adventure game. 
 Generate a unique item with the following specifications:
 
-1. NAME: Create a creative, thematic name for the item (1-4 words)
+1. NAME: Create a creative, thematic name for the item (1-4 words) that clearly indicates what type of item it is
 2. SPECIAL_EFFECTS: Generate special effects that allow the player to perform actions in combat.
 
 IMPORTANT: Special effects are ONLY allowed for rarity 3 and 4 items. For rarity 1 and 2 items, you MUST NOT generate any special effects.
 
 CRITICAL: Keep all descriptions concise and focused. Remove all fluff and unnecessary elaboration.
+CRITICAL: The item name MUST contain the actual item type word. A sword MUST be named like "Iron Sword" or "Steel Sword", not "metallic fragment" or "crystal shard".
 
 The special effects should be phrased as "allows player to [action]" and should be appropriate for the item's rarity level:
 - Rarity 3: Generate 1 powerful special effect
@@ -44,7 +44,7 @@ Respond in JSON format with exactly these fields: "name" and "special_effects".
 
 Example response for rarity 3+:
 {
-    "name": "Crystal of Eternal Light",
+    "name": "Staff of Eternal Light",
     "special_effects": "allows player to fly freely and allows player to become completely invisible"
 }
 
@@ -65,6 +65,27 @@ Example response for rarity 1-2:
         # Store rarity in context for later use
         context['rarity'] = rarity
         
+        # Get item type if available
+        item_type = None
+        # Use item_type from context if provided, otherwise get random one
+        if 'item_type' in context and context['item_type']:
+            # If item_type is already a string (from item_type.name), we need to get the actual object
+            if isinstance(context['item_type'], str):
+                # Try to find the item type by name
+                try:
+                    item_type = self.item_type_manager.get_item_type_by_name(context['item_type'])
+                except ValueError:
+                    # If not found, get a random one
+                    if self.item_type_manager and self.item_type_manager.item_types:
+                        item_type = self.item_type_manager.get_random_item_type()
+            else:
+                # If it's already an object, use it directly
+                item_type = context['item_type']
+        elif self.item_type_manager and self.item_type_manager.item_types:
+            # No item_type in context, get random one
+            item_type = self.item_type_manager.get_random_item_type()
+            context['item_type'] = item_type
+        
         # Add rarity-specific instructions
         if rarity == 3:
             rarity_instruction = "This is a RARITY 3 item. Generate exactly 1 powerful special effect."
@@ -73,7 +94,13 @@ Example response for rarity 1-2:
         else:
             rarity_instruction = "This is a RARITY 1 or 2 item. No special effects needed."
         
-        prompt = f"{self.system_prompt}\n\n{rarity_instruction}\n\nGenerate an item that would be found in {location_context} with a {theme_context} theme."
+        # Add item type information if available
+        if item_type and hasattr(item_type, 'name') and item_type.name:
+            type_instruction = f"\n\nITEM TYPE: {item_type.name}\nDESCRIPTION: {item_type.description}\nCAPABILITIES: {', '.join(item_type.capabilities)}\n\nCRITICAL: The item name MUST contain the word '{item_type.name}' or a clear synonym. For example:\n- If type is 'Sword', name MUST be like 'Iron Sword', 'Steel Sword', 'Crystal Sword', 'Ancient Sword'\n- If type is 'Map', name MUST be like 'Treasure Map', 'Ancient Map', 'Navigation Map', 'Secret Map'\n- If type is 'Potion', name MUST be like 'Healing Potion', 'Magic Potion', 'Restoration Potion', 'Elixir Potion'\n- If type is 'Key', name MUST be like 'Ancient Key', 'Crystal Key', 'Mystic Key', 'Golden Key'\n- If type is 'Shield', name MUST be like 'Iron Shield', 'Steel Shield', 'Magic Shield', 'Ancient Shield'\n- If type is 'Bow', name MUST be like 'Wooden Bow', 'Elven Bow', 'Magic Bow', 'Ancient Bow'\n\nDO NOT create generic names like 'metallic fragment' or 'crystal shard'. The name MUST clearly indicate it is a {item_type.name.lower()}."
+        else:
+            type_instruction = ""
+        
+        prompt = f"{self.system_prompt}\n\n{rarity_instruction}{type_instruction}\n\nGenerate an item that would be found in {location_context} with a {theme_context} theme."
         return prompt
     
     def parse_response(self, response: str, context: Dict[str, Any] = None) -> Dict[str, Any]:
@@ -109,11 +136,23 @@ Example response for rarity 1-2:
                 # FORCE no special effects for rarity 1 and 2, regardless of AI output
                 special_effects = "No special effects"
             
-            return {
+            # Include item type information if available
+            item_data = {
                 'name': data['name'],
                 'special_effects': special_effects,
                 'rarity': rarity
             }
+            
+            # Add item type information if available
+            if 'item_type' in context and context['item_type']:
+                item_type = context['item_type']
+                if hasattr(item_type, 'name') and item_type.name:
+                    item_data['type'] = item_type.name
+                    item_data['type_description'] = item_type.description
+                    item_data['type_capabilities'] = item_type.capabilities
+
+            
+            return item_data
             
         except (json.JSONDecodeError, ValueError, KeyError) as e:
             # Fallback parsing for malformed responses
@@ -134,11 +173,23 @@ Example response for rarity 1-2:
             if rarity < 3:
                 special_effects = "No special effects"
             
-            return {
+            # Include item type information if available
+            item_data = {
                 'name': name,
                 'special_effects': special_effects,
                 'rarity': rarity
             }
+            
+            # Add item type information if available
+            if 'item_type' in context and context['item_type']:
+                item_type = context['item_type']
+                if hasattr(item_type, 'name') and item_type.name:
+                    item_data['type'] = item_type.name
+                    item_data['type_description'] = item_type.description
+                    item_data['type_capabilities'] = item_type.capabilities
+
+            
+            return item_data
     
     def validate_output(self, output: Dict[str, Any]) -> bool:
         """Validate that the output meets template requirements"""
