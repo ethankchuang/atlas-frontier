@@ -189,6 +189,64 @@ class Database:
             raise
 
     @staticmethod
+    async def get_monster_types() -> Optional[List[Dict[str, Any]]]:
+        """Get monster types for the current world"""
+        try:
+            monster_types_data = redis_client.get("monster_types")
+            if monster_types_data:
+                if isinstance(monster_types_data, bytes):
+                    monster_types_data = monster_types_data.decode('utf-8')
+                return json.loads(monster_types_data)
+            return None
+        except Exception as e:
+            logger.error(f"Error getting monster types: {str(e)}")
+            raise
+
+    @staticmethod
+    async def set_monster_types(monster_types_data: List[Dict[str, Any]]) -> bool:
+        """Save monster types for the current world"""
+        try:
+            logger.debug(f"Setting monster types with data: {monster_types_data}")
+            # For lists, we need to serialize each item individually
+            serializable_data = []
+            for monster_data in monster_types_data:
+                serializable_monster = {}
+                for key, value in monster_data.items():
+                    serializable_monster[key] = Database._serialize_value(value)
+                serializable_data.append(serializable_monster)
+            logger.debug(f"Serialized monster types data: {serializable_data}")
+            return redis_client.set("monster_types", json.dumps(serializable_data))
+        except Exception as e:
+            logger.error(f"Error setting monster types: {str(e)}")
+            raise
+
+    @staticmethod
+    async def get_monster(monster_id: str) -> Optional[Dict[str, Any]]:
+        """Get monster data from Redis"""
+        try:
+            monster_data = redis_client.get(f"monster:{monster_id}")
+            if monster_data:
+                if isinstance(monster_data, bytes):
+                    monster_data = monster_data.decode('utf-8')
+                return json.loads(monster_data)
+            return None
+        except Exception as e:
+            logger.error(f"Error getting monster {monster_id}: {str(e)}")
+            raise
+
+    @staticmethod
+    async def set_monster(monster_id: str, monster_data: Dict[str, Any]) -> bool:
+        """Save monster data to Redis"""
+        try:
+            logger.debug(f"Setting monster {monster_id} with data: {monster_data}")
+            serializable_data = Database._serialize_data(monster_data)
+            logger.debug(f"Serialized monster data: {serializable_data}")
+            return redis_client.set(f"monster:{monster_id}", json.dumps(serializable_data))
+        except Exception as e:
+            logger.error(f"Error setting monster {monster_id}: {str(e)}")
+            raise
+
+    @staticmethod
     async def add_npc_memory(npc_id: str, memory: str, metadata: Dict[str, Any]) -> None:
         """Add a memory to NPC's vector store"""
         npc_memory_collection.add(
@@ -443,9 +501,9 @@ class Database:
     async def reset_world() -> None:
         """Reset the entire game world by clearing all data"""
         try:
-            # Clear all Redis data (includes coordinate mappings, saved biomes, chunk biome assignments, and item types)
+            # Clear all Redis data (includes coordinate mappings, saved biomes, chunk biome assignments, item types, and monster types)
             redis_client.flushall()
-            logger.info("Redis data cleared (including coordinate mappings, saved biomes, chunk biome assignments, and item types)")
+            logger.info("Redis data cleared (including coordinate mappings, saved biomes, chunk biome assignments, item types, and monster types)")
 
             # Clear ChromaDB collections
             try:

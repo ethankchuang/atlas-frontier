@@ -1,4 +1,4 @@
-import { ActionRequest, ActionResponse, ChatMessage, GameState, NPCInteraction, Player, RoomInfo } from '@/types/game';
+import { ActionRequest, ActionResponse, ChatMessage, GameState, NPCInteraction, Player, RoomInfo, Monster } from '@/types/game';
 import useGameStore from '@/store/gameStore';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';

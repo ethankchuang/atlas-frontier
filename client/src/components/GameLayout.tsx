@@ -56,6 +56,9 @@ const GameLayout: React.FC<GameLayoutProps> = ({ playerId }) => {
                 addVisitedCoordinate(roomInfo.room.x, roomInfo.room.y);
 
                 // Add initial room description to chat
+                const atmosphericPresence = (roomInfo as any).atmospheric_presence || '';
+                console.log('[GameLayout] Initial room atmospheric presence:', atmosphericPresence);
+                
                 const roomMessage: ChatMessage = {
                     player_id: 'system',
                     room_id: roomInfo.room.id,
@@ -66,6 +69,8 @@ const GameLayout: React.FC<GameLayoutProps> = ({ playerId }) => {
                     description: roomInfo.room.description,
                     biome: roomInfo.room.biome,
                     players: roomInfo.players,
+                    monsters: roomInfo.monsters || [],
+                    atmospheric_presence: atmosphericPresence,
                     x: roomInfo.room.x,
                     y: roomInfo.room.y
                 };
@@ -117,15 +122,22 @@ const GameLayout: React.FC<GameLayoutProps> = ({ playerId }) => {
 
                 // Get updated room info
                 const roomInfo = await apiService.getRoomInfo(currentRoom.id);
-                console.log('[GameLayout] Got room info:', roomInfo);
+                console.log('[GameLayout] Got room info:', {
+                    roomId: roomInfo.room.id,
+                    monstersCount: roomInfo.monsters?.length || 0,
+                    atmosphericPresence: (roomInfo as any).atmospheric_presence || 'none'
+                });
+                console.log('[GameLayout] Full room info:', roomInfo);
 
-                // Only update if we're still in the same room AND we haven't received a WebSocket update
-                // Check image_url to determine if we've received a WebSocket update
+                // Only update room state, but don't add duplicate room messages on initial load
                 if (currentRoom.id === roomInfo.room.id && currentRoom.image_url === roomInfo.room.image_url) {
-                    console.log('[GameLayout] Updating room state with fresh data');
+                    console.log('[GameLayout] Updating room state with fresh data (no duplicate message)');
                     setCurrentRoom(roomInfo.room);
                     setNPCs(roomInfo.npcs);
                     setPlayersInRoom(roomInfo.players);
+                    
+                    // Don't add room description message here - it was already added during initialization
+                    // This prevents duplicate room messages
                 } else {
                     console.log('[GameLayout] Skipping room update - already have newer data');
                 }

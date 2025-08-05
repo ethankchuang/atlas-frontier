@@ -173,6 +173,8 @@ class GameManager:
             logger.error(f"[Item Types] Error loading item types: {str(e)}")
             # Continue without item types - they'll be generated on next world initialization
 
+
+
     async def initialize_game(self) -> GameState:
         """Initialize a new game world"""
         start_time = time.time()
@@ -208,6 +210,8 @@ class GameManager:
             logger.info(f"[Item Types] - {item_type.name}: {item_type.description}")
             logger.info(f"[Item Types]   Capabilities: {', '.join(item_type.capabilities)}")
         
+
+        
         elapsed = time.time() - start_time
         logger.info(f"[Performance] Game initialization completed in {elapsed:.2f}s")
         return game_state
@@ -218,28 +222,86 @@ class GameManager:
         logger.info(f"[Performance] Creating player: {name}")
         
         player_id = f"player_{str(uuid.uuid4())}"
-        starting_room = "room_start"  # We'll create this if it doesn't exist
-
+        starting_room = await self.ensure_starting_room()
+        
         player = Player(
             id=player_id,
             name=name,
-            current_room=starting_room,
+            current_room=starting_room.id,
             inventory=[],
             quest_progress={},
-            memory_log=["Entered the world"]
+            memory_log=[],
+            last_action=None,
+            last_action_text=None
         )
-
+        
         await self.db.set_player(player_id, player.dict())
-        await self.ensure_starting_room()
-        await self.db.add_to_room_players(starting_room, player_id)
-
-        # Create a new game session for the player
-        session_id = await self.db.create_game_session(player_id)
-        logger.info(f"[GameManager] Created session {session_id} for player {player_id}")
-
+        
+        # Add player to the starting room's player list
+        await self.db.add_to_room_players(starting_room.id, player_id)
+        
         elapsed = time.time() - start_time
         logger.info(f"[Performance] Player creation completed in {elapsed:.2f}s for {name}")
         return player
+
+    async def generate_room_monsters(self, room_context: Dict[str, Any]) -> List[str]:
+        """Generate 0-3 monsters for a room based on biome and environment"""
+        import random
+        import uuid
+        from .templates.monsters import GenericMonsterTemplate
+        
+        # Use pre-determined number if provided, otherwise random
+        monster_count = room_context.get('monster_count')
+        if monster_count is None:
+            # Higher chance of monsters: 1-3 monsters more likely
+            num_monsters = random.choice([0, 1, 1, 2, 2, 3])
+        else:
+            num_monsters = monster_count
+        
+        if num_monsters == 0:
+            return []
+            
+        monster_template = GenericMonsterTemplate()
+        monster_ids = []
+        
+        for i in range(num_monsters):
+            try:
+                # Generate base monster data with random attributes
+                base_data = monster_template.generate_monster_data(room_context)
+                
+                # Generate AI content (name, description, special effects)
+                prompt = monster_template.generate_prompt(room_context)
+                ai_response = await self.ai_handler.generate_text(prompt)
+                
+                generated_data = monster_template.parse_response(ai_response)
+                
+                # Create complete monster data
+                monster_id = f"monster_{uuid.uuid4()}"
+                monster_data = {
+                    'id': monster_id,
+                    'name': generated_data['name'],
+                    'description': generated_data['description'],
+                    'aggressiveness': base_data['aggressiveness'],
+                    'intelligence': base_data['intelligence'],
+                    'size': base_data['size'],
+                    'special_effects': generated_data['special_effects'],
+                    'location': room_context.get('room_id', ''),
+                    'health': base_data['health'],
+                    'is_alive': True,
+                    'properties': {}
+                }
+                
+                # Store monster in database
+                await self.db.set_monster(monster_id, monster_data)
+                monster_ids.append(monster_id)
+                
+                logger.info(f"[Monsters] Generated monster {generated_data['name']} ({monster_id}) for room {room_context.get('room_id', 'unknown')}")
+                
+            except Exception as e:
+                logger.error(f"[Monsters] Error generating monster {i+1}: {str(e)}")
+                continue
+        
+        return monster_ids
 
     async def ensure_starting_room(self) -> Room:
         """Ensure the starting room exists"""
@@ -297,11 +359,16 @@ class GameManager:
             await self.db.save_biome(biome_data)
             logger.info(f"[GameManager] Generated fallback biome: {starting_biome}")
         
+        # Pre-generate monster count for room description
+        import random
+        monster_count = random.choice([0, 0, 1, 1, 2, 3])  # Same weighting as monster generation
+        
         title, description, image_prompt = await self.ai_handler.generate_room_description(
             context={
                 "is_starting_room": True,
                 "biome": starting_biome,
-                "biome_description": starting_biome_desc
+                "biome_description": starting_biome_desc,
+                "monster_count": monster_count
             }
         )
         content_time = time.time() - content_start
@@ -320,6 +387,7 @@ class GameManager:
             biome=starting_biome,
             image_url="",  # No image yet
             players=players_in_room,
+            monster_count=monster_count,  # Pass monster count to room creation
             mark_discovered=True  # Starting room is always discovered
         )
 
@@ -410,11 +478,19 @@ class GameManager:
             response = ""
             updates = {}
             
+            # Load monster details for AI context
+            monsters = []
+            for monster_id in room.monsters:
+                monster_data = await self.db.get_monster(monster_id)
+                if monster_data:
+                    monsters.append(monster_data)
+            
             async for chunk in self.ai_handler.stream_action(
                 player=player,
                 room=room,
                 game_state=game_state,
                 npcs=npcs,
+                monsters=monsters,
                 action=action
             ):
                 if isinstance(chunk, dict):
@@ -795,6 +871,18 @@ class GameManager:
         logger.info(f"[GameManager] Creating room {room_id} with biome: {biome}")
         logger.info(f"[GameManager] kwargs: {kwargs}")
 
+        # Generate monsters for the room  
+        monster_context = {
+            'room_id': room_id,
+            'room_title': title,
+            'room_description': description,
+            'biome': kwargs.get('biome', 'unknown'),
+            'x': x,
+            'y': y,
+            'monster_count': kwargs.get('monster_count')  # Use pre-determined count if available
+        }
+        monsters = await self.generate_room_monsters(monster_context)
+        
         # Create the room object
         room = Room(
             id=room_id,
@@ -806,6 +894,7 @@ class GameManager:
             connections={},
             npcs=[],
             items=[],
+            monsters=monsters,
             players=players,
             visited=True,
             properties={},
@@ -986,6 +1075,10 @@ class GameManager:
                     biome_time = time.time() - biome_start
                     logger.info(f"[Performance] Biome generation took {biome_time:.2f}s for {room_id}: {biome}")
                     
+                    # Pre-generate monster count for room description
+                    import random
+                    monster_count = random.choice([0, 0, 1, 1, 2, 3])  # Same weighting as monster generation
+                    
                     # Generate room description with biome context
                     content_start = time.time()
                     title, description, image_prompt = await self.ai_handler.generate_room_description(
@@ -996,7 +1089,8 @@ class GameManager:
                             "biome": biome,
                             "biome_description": biome_desc,
                             "discovering_new_area": True,
-                            "is_preload": True
+                            "is_preload": True,
+                            "monster_count": monster_count
                         }
                     )
                     content_time = time.time() - content_start
@@ -1012,6 +1106,7 @@ class GameManager:
                         biome=biome,  # Include biome in room creation
                         image_url="",  # No image yet
                         players=[],  # No players in preloaded room
+                        monster_count=monster_count,  # Pass monster count to room creation
                         mark_discovered=True
                     )
                     

@@ -1,5 +1,6 @@
 import useGameStore from '@/store/gameStore';
 import { ChatMessage, Player, Room } from '@/types/game';
+import apiService from './api';
 
 class WebSocketService {
     private socket: WebSocket | null = null;
@@ -33,7 +34,7 @@ class WebSocketService {
         if (this.nextRoomId) {
             console.log('[WebSocket] Using next room:', this.nextRoomId, 'instead of:', roomId);
             roomId = this.nextRoomId;
-            this.nextRoomId = null;
+            // Don't clear nextRoomId here - wait until room description is added
         }
 
         this.roomId = roomId;
@@ -67,7 +68,8 @@ class WebSocketService {
         this.roomId = null;
         this.playerId = null;
         this.pendingRoomUpdate = null;
-        this.nextRoomId = null;
+        // Don't clear nextRoomId - we need it to persist through reconnection
+        // this.nextRoomId = null;
         this.isReconnecting = false;
         useGameStore.getState().setIsConnected(false);
         
@@ -168,6 +170,9 @@ class WebSocketService {
                     break;
                 case 'duel_next_round':
                     this.handleDuelNextRound(data);
+                    break;
+                case 'monster_combat_outcome':
+                    this.handleMonsterCombatOutcome(data);
                     break;
                 
                 case 'room_update':
@@ -321,7 +326,7 @@ class WebSocketService {
                 player_id: 'system',
                 room_id: this.roomId!,
                 message: data.message,
-                message_type: 'item_obtained',
+                                    message_type: 'system',
                 timestamp: data.timestamp,
                 item_name: data.item_name,
                 item_rarity: data.item_rarity,
@@ -350,7 +355,7 @@ class WebSocketService {
         }
     }
 
-    private handleDuelResponse(data: { type: 'duel_response'; challenger_id: string; responder_id: string; response: 'accept' | 'decline'; room_id: string; timestamp: string }) {
+    private handleDuelResponse(data: { type: 'duel_response'; challenger_id: string; responder_id: string; response: 'accept' | 'decline'; room_id: string; timestamp: string; monster_name?: string; is_monster_duel?: boolean }) {
         console.log('[WebSocket] Handling duel response:', data);
         const store = useGameStore.getState();
         const player = store.player;
@@ -360,8 +365,31 @@ class WebSocketService {
             return;
         }
 
-        // Add a message to chat about the duel response
-        // Note: playersInRoom only contains other players, not the current player
+        // Handle monster duels
+        if (data.is_monster_duel && data.monster_name) {
+            if (data.response === 'accept') {
+                console.log('[WebSocket] Monster duel accepted! Starting duel with:', data.monster_name);
+                
+                // Start the duel with the monster
+                if (player.id === data.challenger_id) {
+                    // Player challenged monster, monster accepted
+                    console.log('[WebSocket] Starting monster duel as challenger');
+                    store.startDuel({ id: data.responder_id, name: data.monster_name });
+                    
+                    const message = `The ${data.monster_name} accepts your challenge! The duel begins!`;
+                    store.addMessage({
+                        player_id: 'system',
+                        room_id: data.room_id,
+                        message,
+                        message_type: 'system',
+                        timestamp: data.timestamp
+                    });
+                }
+            }
+            return;
+        }
+
+        // Handle regular player duels (existing code)
         const responder = store.playersInRoom.find(p => p.id === data.responder_id) || 
                          (player.id === data.responder_id ? player : null);
         const challenger = store.playersInRoom.find(p => p.id === data.challenger_id) || 
@@ -441,13 +469,35 @@ class WebSocketService {
         }
     }
 
-    private handleDuelMove(data: { type: 'duel_move'; player_id: string; opponent_id: string; move: string; room_id: string; timestamp: string }) {
+    private handleDuelMove(data: { type: 'duel_move'; player_id: string; opponent_id?: string; move: string; room_id: string; timestamp: string; is_monster_move?: boolean; monster_name?: string }) {
         console.log('[WebSocket] Handling duel move:', data);
         const store = useGameStore.getState();
         const player = store.player;
 
         if (!player) {
             console.error('[WebSocket] Player not found for duel move.');
+            return;
+        }
+
+        // Handle monster moves
+        if (data.is_monster_move && data.monster_name) {
+            console.log('[WebSocket] Received monster duel move:', data.monster_name);
+            store.setOpponentMove(data.move);
+            
+            // Check if both moves have been submitted
+            if (store.myDuelMove && store.opponentDuelMove) {
+                console.log('[WebSocket] Both moves submitted, setting flag');
+                store.setBothMovesSubmitted(true);
+            }
+            
+            // Add a message that the monster is preparing
+            store.addMessage({
+                player_id: 'system',
+                room_id: data.room_id,
+                message: `⚔️ The ${data.monster_name} prepares its combat move...`,
+                message_type: 'system',
+                timestamp: data.timestamp
+            });
             return;
         }
 
@@ -565,6 +615,65 @@ class WebSocketService {
                 timestamp: data.timestamp
             });
         }
+    }
+
+    private handleMonsterCombatOutcome(data: any) {
+        console.log('[WebSocket] Handling monster combat outcome:', data);
+        const store = useGameStore.getState();
+        const player = store.player;
+
+        if (!player) {
+            console.error('[WebSocket] Player not found for monster combat outcome.');
+            return;
+        }
+
+        // Show the combat moves
+        store.addMessage({
+            player_id: 'system',
+            room_id: player.current_room,
+            message: `⚔️ Round ${data.round}: You attempt "${data.player_move}"`,
+            message_type: 'system',
+            timestamp: new Date().toISOString()
+        });
+
+        store.addMessage({
+            player_id: 'system',
+            room_id: player.current_room,
+            message: `⚔️ ${data.monster_name} ${data.monster_move}`,
+            message_type: 'system',
+            timestamp: new Date().toISOString()
+        });
+
+        // Show the narrative
+        store.addMessage({
+            player_id: 'system',
+            room_id: player.current_room,
+            message: data.narrative,
+            message_type: 'monster_combat_outcome',
+            timestamp: new Date().toISOString()
+        });
+
+        // Show result and conditions
+        let resultMessage = '';
+        if (data.combat_ends) {
+            if (data.monster_defeated) {
+                resultMessage = `🏆 Victory! You have defeated the ${data.monster_name}!`;
+            } else if (data.player_severity >= 50) {
+                resultMessage = `💀 Defeat! The ${data.monster_name} has overwhelmed you...`;
+            } else {
+                resultMessage = `⚔️ Combat ends. Both combatants withdraw...`;
+            }
+        } else {
+            resultMessage = `⚔️ Combat continues... (Your condition: ${data.player_condition}, ${data.monster_name} condition: ${data.monster_condition})`;
+        }
+
+        store.addMessage({
+            player_id: 'system',
+            room_id: player.current_room,
+            message: resultMessage,
+            message_type: 'system',
+            timestamp: new Date().toISOString()
+        });
     }
 
     private handleDuelRoundResult(data: { 
@@ -715,7 +824,10 @@ class WebSocketService {
                 timestamp: new Date().toISOString(),
                 title: room.title,
                 description: room.description,
+                biome: room.biome,
                 players: store.playersInRoom, // Use current player list
+                monsters: [], // Will be populated by room info API
+                atmospheric_presence: '',
                 x: room.x,
                 y: room.y
             };
@@ -758,20 +870,57 @@ class WebSocketService {
             store.addVisitedCoordinate(room.x, room.y);
 
             // Add room description to chat if this is a new room
-            if (store.currentRoom?.id !== room.id) {
-                const roomMessage: ChatMessage = {
-                    player_id: 'system',
-                    room_id: room.id,
-                    message: '',
-                    message_type: 'room_description',
-                    timestamp: new Date().toISOString(),
-                    title: room.title,
-                    description: room.description,
-                    players: store.playersInRoom, // Use current player list for chat display
-                    x: room.x,
-                    y: room.y
-                };
-                store.addMessage(roomMessage);
+            if (this.nextRoomId === room.id) {
+                console.log('[WebSocket] Adding room description for new room with atmospheric presence');
+                
+                // Get atmospheric presence from room info API
+                apiService.getRoomInfo(room.id)
+                    .then((roomInfo: any) => {
+                        const atmosphericPresence = roomInfo.atmospheric_presence || '';
+                        console.log('[WebSocket] Got atmospheric presence for room message:', atmosphericPresence);
+                        
+                        const roomMessage: ChatMessage = {
+                            player_id: 'system',
+                            room_id: room.id,
+                            message: '',
+                            message_type: 'room_description',
+                            timestamp: new Date().toISOString(),
+                            title: room.title,
+                            description: room.description,
+                            biome: room.biome,
+                            players: roomInfo.players || [],
+                            monsters: roomInfo.monsters || [],
+                            atmospheric_presence: atmosphericPresence,
+                            x: room.x,
+                            y: room.y
+                        };
+                        store.addMessage(roomMessage);
+                        
+                        // Clear nextRoomId after successfully adding the message
+                        this.nextRoomId = null;
+                    })
+                    .catch((error: any) => {
+                        console.error('[WebSocket] Failed to get room info for atmospheric presence:', error);
+                        // Fallback: add room message without atmospheric presence
+                        const roomMessage: ChatMessage = {
+                            player_id: 'system',
+                            room_id: room.id,
+                            message: '',
+                            message_type: 'room_description',
+                            timestamp: new Date().toISOString(),
+                            title: room.title,
+                            description: room.description,
+                            biome: room.biome,
+                            players: store.playersInRoom,
+                            monsters: [],
+                            x: room.x,
+                            y: room.y
+                        };
+                        store.addMessage(roomMessage);
+                        
+                        // Clear nextRoomId after adding fallback message too
+                        this.nextRoomId = null;
+                    });
             }
             return;
         }

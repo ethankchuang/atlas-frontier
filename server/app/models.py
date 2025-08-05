@@ -19,6 +19,19 @@ class Item(BaseModel):
     is_takeable: bool = True
     properties: Dict[str, str] = Field(default_factory=dict)
 
+class Monster(BaseModel):
+    id: str
+    name: str
+    description: str
+    aggressiveness: str  # passive, aggressive, neutral, territorial
+    intelligence: str    # human, subhuman, animal, omnipotent
+    size: str           # colossal, dinosaur, horse, human, chicken, insect
+    special_effects: str = ""  # AI-generated special abilities
+    location: str       # room_id
+    health: int = 100
+    is_alive: bool = True
+    properties: Dict[str, str] = Field(default_factory=dict)
+
 class NPC(BaseModel):
     id: str
     name: str
@@ -42,6 +55,7 @@ class Room(BaseModel):
     connections: Dict[Direction, str] = Field(default_factory=dict)  # direction -> room_id
     npcs: List[str] = Field(default_factory=list)  # List of NPC IDs
     items: List[str] = Field(default_factory=list)  # List of Item IDs
+    monsters: List[str] = Field(default_factory=list)  # List of Monster IDs
     players: List[str] = Field(default_factory=list)  # List of Player IDs
     visited: bool = False
     properties: Dict[str, Any] = Field(default_factory=dict)

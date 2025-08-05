@@ -33,6 +33,7 @@ export interface Room {
     connections: Record<string, string>;
     npcs: string[];
     items: string[];
+    monsters: string[];
     players: string[];
     visited: boolean;
     properties: Record<string, any>;
@@ -71,13 +72,21 @@ export interface ActionResponse {
     image_url?: string;
 }
 
-export type ChatMessageType = 
-  | 'chat' 
-  | 'emote' 
-  | 'system' 
-  | 'room_description' 
-  | 'item_obtained' 
-  | 'duel_challenge';
+export type ChatMessageType = 'chat' | 'emote' | 'system' | 'room_description' | 'action_result' | 'narration' | 'item_found' | 'duel_outcome' | 'monster_combat_outcome';
+
+export interface Monster {
+    id: string;
+    name: string;
+    description: string;
+    aggressiveness: string;
+    intelligence: string;
+    size: string;
+    special_effects: string;
+    location: string;
+    health: number;
+    is_alive: boolean;
+    properties: Record<string, string>;
+}
 
 export interface ChatMessage {
     player_id: string;
@@ -91,6 +100,8 @@ export interface ChatMessage {
     description?: string;
     biome?: string;
     players?: Player[];
+    monsters?: Monster[];
+    atmospheric_presence?: string;
     x?: number;
     y?: number;
     item_name?: string;
@@ -111,4 +122,23 @@ export interface RoomInfo {
     room: Room;
     players: Player[];
     npcs: NPC[];
+    items: Item[];
+    monsters: Monster[];
+}
+
+export interface MonsterCombatOutcome {
+    type: 'monster_combat_outcome';
+    round: number;
+    monster_name: string;
+    player_move: string;
+    monster_move: string;
+    player_condition: string;
+    monster_condition: string;
+    player_new_tags: Array<{name: string, type: string, severity: number}>;
+    monster_new_tags: Array<{name: string, type: string, severity: number}>;
+    player_severity: number;
+    monster_severity: number;
+    narrative: string;
+    combat_ends: boolean;
+    monster_defeated: boolean;
 }

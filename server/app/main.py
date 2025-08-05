@@ -19,7 +19,8 @@ from .models import (
     CreatePlayerRequest,
     PresenceRequest,
     Direction,
-    ActionRecord
+    ActionRecord,
+    Monster
 )
 from .game_manager import GameManager
 from .config import settings
@@ -116,6 +117,17 @@ game_manager = GameManager()
 game_manager.set_connection_manager(manager)
 
 # Item types will be loaded when game manager is first accessed
+@app.on_event("startup")
+async def startup_event():
+    """Load item types for existing worlds on startup"""
+    try:
+        # Load item types from database for existing worlds
+        await game_manager.load_item_types()
+        
+        logger.info("Server startup completed - types loaded successfully")
+    except Exception as e:
+        logger.error(f"Error during startup: {str(e)}")
+        # Continue starting up even if type loading fails
 
 def get_game_manager():
     return game_manager
@@ -124,113 +136,566 @@ def get_game_manager():
 duel_moves = {}  # {duel_id: {player_id: move}}
 duel_pending = {}  # {duel_id: {player1_id, player2_id, room_id, round, player1_condition, player2_condition, player1_tags, player2_tags}}
 
+# Monster combat globals
+monster_combat_pending = {}  # {combat_id: {player_id, monster_id, room_id, round, player_condition, monster_condition, player_tags, monster_tags}}
+monster_combat_moves = {}   # {combat_id: {player_id: move, monster_id: move}}
+
 async def handle_duel_message(message: dict, room_id: str, player_id: str, game_manager: GameManager):
     """Handle duel-related messages and coordinate AI analysis"""
     global duel_moves, duel_pending
     
-    message_type = message.get('type')
+    message_type = message.get("type")
     
-    if message_type == 'duel_challenge':
-        # Broadcast challenge to target player
-        target_id = message.get('target_id')
-        await manager.send_to_player(room_id, target_id, message)
+    if message_type == "duel_move":
+        # Store the move
+        duel_id = message.get("duel_id")
         
-    elif message_type == 'duel_response':
-        # Broadcast response to challenger
-        challenger_id = message.get('challenger_id')
-        responder_id = message.get('responder_id')
-        logger.info(f"[Duel] Processing duel response: {message.get('response')} from {responder_id} to {challenger_id}")
+        # If no duel_id provided, find it based on player and opponent (for monster duels)
+        if not duel_id:
+            opponent_id = message.get("opponent_id")
+            if opponent_id:
+                # Find active duel involving this player and opponent
+                for potential_duel_id, duel_info in duel_pending.items():
+                    if ((duel_info["player1_id"] == player_id and duel_info["player2_id"] == opponent_id) or
+                        (duel_info["player1_id"] == opponent_id and duel_info["player2_id"] == player_id)):
+                        duel_id = potential_duel_id
+                        logger.info(f"[handle_duel_message] Found duel_id {duel_id} for player {player_id} vs {opponent_id}")
+                        break
         
-        # Send response to challenger
-        await manager.send_to_player(room_id, challenger_id, message)
+        if not duel_id:
+            logger.error(f"[handle_duel_message] Could not find duel_id for player {player_id}")
+            return
+            
+        move = message["move"]
         
-        # Also send response to responder so they know the duel is accepted
-        await manager.send_to_player(room_id, responder_id, message)
-        
-        # If accepted, initialize duel tracking
-        if message.get('response') == 'accept':
-            duel_id = f"{challenger_id}_{responder_id}"
-            logger.info(f"[Duel] Initializing duel tracking with ID: {duel_id}")
-            duel_pending[duel_id] = {
-                'player1_id': challenger_id,
-                'player2_id': responder_id,
-                'room_id': room_id,
-                'round': 1,
-                'player1_condition': 'fighting',
-                'player2_condition': 'fighting',
-                'player1_tags': [],
-                'player2_tags': []
-            }
+        if duel_id not in duel_moves:
             duel_moves[duel_id] = {}
-            logger.info(f"[Duel] Duel state initialized: {duel_pending[duel_id]}")
-            
-    elif message_type == 'duel_move':
-        # Store the move and check if both players have moved
-        opponent_id = message.get('opponent_id')
-        move_text = message.get('move')
-        logger.info(f"[Duel] Processing duel move: '{move_text}' from {player_id} against {opponent_id}")
         
-        # Validate the move before processing
-        is_valid, reason, suggestion = await MoveValidator.validate_move(player_id, move_text, game_manager)
+        duel_moves[duel_id][player_id] = move
         
-        # Store invalid move information for narrative incorporation
-        invalid_move_info = None
-        if not is_valid:
-            invalid_move_info = {
-                'player_id': player_id,
-                'original_move': move_text,
-                'reason': reason,
-                'suggestion': suggestion
-            }
-            # Keep the original move - let the narrative explain why it failed
-            logger.info(f"[Duel] Invalid move from {player_id}: '{move_text}' - {reason}")
-        
-        duel_id = f"{player_id}_{opponent_id}"
-        if duel_id not in duel_moves:
-            duel_id = f"{opponent_id}_{player_id}"  # Try reverse order
-            
-        logger.info(f"[Duel] Using duel ID: {duel_id}")
-        logger.info(f"[Duel] Current duel moves: {duel_moves}")
-        logger.info(f"[Duel] Current duel pending: {duel_pending}")
-        
-        if duel_id in duel_moves:
-            duel_moves[duel_id][player_id] = move_text
-            
-            # Store invalid move info if present
-            if invalid_move_info:
-                if 'invalid_moves' not in duel_moves[duel_id]:
-                    duel_moves[duel_id]['invalid_moves'] = {}
-                duel_moves[duel_id]['invalid_moves'][player_id] = invalid_move_info
-            
-            logger.info(f"[Duel] Stored move for {player_id}: {move_text}")
-            logger.info(f"[Duel] Updated duel moves: {duel_moves[duel_id]}")
-            
-            # Broadcast the move to both players so they can see each other's moves
-            await manager.send_to_player(room_id, opponent_id, message)
-            
-            # Check if both players have submitted moves
-            if len([k for k in duel_moves[duel_id].keys() if k != 'invalid_moves']) == 2:
-                logger.info(f"[Duel] Both moves received! Analyzing duel...")
-                # Both moves received, analyze with AI
-                await analyze_duel_moves(duel_id, game_manager)
-            else:
-                logger.info(f"[Duel] Waiting for more moves. Current count: {len([k for k in duel_moves[duel_id].keys() if k != 'invalid_moves'])}")
-        else:
-            logger.error(f"[Duel] Duel ID {duel_id} not found in duel_moves!")
-                
-    elif message_type == 'duel_cancel':
-        # Cancel the duel and notify opponent
-        opponent_id = message.get('opponent_id')
-        await manager.send_to_player(room_id, opponent_id, message)
-        
-        # Clean up duel state
-        duel_id = f"{player_id}_{opponent_id}"
-        if duel_id not in duel_moves:
-            duel_id = f"{opponent_id}_{player_id}"
-        if duel_id in duel_moves:
-            del duel_moves[duel_id]
+        # Check if both players have submitted moves
         if duel_id in duel_pending:
-            del duel_pending[duel_id]
+            pending_duel = duel_pending[duel_id]
+            player_ids = {pending_duel["player1_id"], pending_duel["player2_id"]}
+            
+            # For monster duels, auto-submit monster move when player submits
+            if pending_duel.get('is_monster_duel') and player_id == pending_duel["player1_id"]:
+                # Player submitted move, now auto-submit monster move
+                monster_id = pending_duel["player2_id"]
+                player_data = await game_manager.db.get_player(player_id)
+                monster_data = pending_duel.get('monster_data', {})
+                room_id = pending_duel["room_id"]
+                current_round = pending_duel["round"]
+                
+                await auto_submit_monster_move(duel_id, monster_id, player_data, monster_data, room_id, current_round, game_manager)
+            elif player_ids.issubset(set(duel_moves[duel_id].keys())):
+                # Both moves received, process the round
+                await analyze_duel_moves(duel_id, game_manager)
+
+async def get_room_monsters_description(room_id: str, game_manager: GameManager) -> str:
+    """Get a description of monsters in the room for display to players"""
+    try:
+        room_data = await game_manager.db.get_room(room_id)
+        if not room_data or not room_data.get('monsters'):
+            return ""
+        
+        monster_descriptions = []
+        for monster_id in room_data['monsters']:
+            monster_data = await game_manager.db.get_monster(monster_id)
+            if monster_data and monster_data.get('is_alive', True):
+                name = monster_data['name']
+                aggressiveness = monster_data['aggressiveness']
+                size = monster_data['size']
+                
+                # Create descriptive text based on attributes
+                size_desc = {
+                    'insect': 'tiny',
+                    'chicken': 'small', 
+                    'human': 'medium-sized',
+                    'horse': 'large',
+                    'dinosaur': 'enormous',
+                    'colossal': 'massive'
+                }.get(size, 'strange')
+                
+                aggr_desc = {
+                    'passive': 'peaceful',
+                    'neutral': 'watchful',
+                    'territorial': 'defensive',
+                    'aggressive': 'menacing'
+                }.get(aggressiveness, 'mysterious')
+                
+                monster_descriptions.append(f"A {size_desc}, {aggr_desc} {name}")
+        
+        if monster_descriptions:
+            if len(monster_descriptions) == 1:
+                return f"🐲 {monster_descriptions[0]} is here."
+            else:
+                monsters_text = ", ".join(monster_descriptions[:-1]) + f", and {monster_descriptions[-1]}"
+                return f"🐲 You see {monsters_text} in this area."
+        
+        return ""
+        
+    except Exception as e:
+        logger.error(f"Error getting room monsters description: {str(e)}")
+        return ""
+
+async def generate_monster_combat_move(monster_data: Dict[str, Any], player_data: Dict[str, Any], room_data: Dict[str, Any], round_number: int, game_manager: GameManager) -> str:
+    """Generate a contextual combat move for a monster using AI"""
+    try:
+        # Build context for AI
+        monster_name = monster_data.get('name', 'Unknown Monster')
+        monster_size = monster_data.get('size', 'human')
+        monster_aggressiveness = monster_data.get('aggressiveness', 'neutral')
+        monster_intelligence = monster_data.get('intelligence', 'animal')
+        monster_description = monster_data.get('description', '')
+        monster_special_effects = monster_data.get('special_effects', '')
+        monster_health = monster_data.get('health', 100)
+        
+        player_name = player_data.get('name', 'Unknown Player')
+        
+        room_title = room_data.get('title', 'Unknown Room')
+        room_biome = room_data.get('biome', 'unknown')
+        
+        # Create AI prompt for monster move generation
+        prompt = f"""You are controlling a monster in combat. Generate a single combat move for this creature.
+
+MONSTER DETAILS:
+- Name: {monster_name}
+- Size: {monster_size}
+- Aggressiveness: {monster_aggressiveness}
+- Intelligence: {monster_intelligence}
+- Description: {monster_description}
+- Special Effects: {monster_special_effects}
+- Current Health: {monster_health}
+
+COMBAT CONTEXT:
+- Round: {round_number}
+- Fighting: {player_name}
+- Location: {room_title} ({room_biome})
+
+MOVE GENERATION RULES:
+1. Generate ONE specific combat action (2-5 words)
+2. Match the monster's aggressiveness level:
+   - passive: defensive moves, retreating, minimal attacks
+   - neutral: balanced offense and defense
+   - aggressive: fierce attacks, advancing moves
+   - territorial: protective attacks, warning strikes
+3. Match the monster's intelligence:
+   - animal: instinctive moves (bite, claw, pounce)
+   - subhuman: simple tactics (charge, strike, dodge)
+   - human: tactical moves (feint, combo attacks, positioning)
+   - omnipotent: complex strategies (multi-stage attacks)
+4. Use size appropriately:
+   - insect/chicken: quick, darting moves
+   - human/horse: standard combat moves
+   - dinosaur/colossal: powerful, crushing moves
+5. Incorporate special effects when relevant
+6. Use basic combat actions (no equipment needed)
+
+EXAMPLES:
+- "lunges with claws extended"
+- "breathes a cone of fire"
+- "charges with lowered horns"
+- "strikes with venomous fangs"
+- "dodges and counterattacks"
+
+Generate ONLY the move, nothing else:"""
+
+        # Get AI response
+        ai_response = await game_manager.ai_handler.generate_text(prompt)
+        move = ai_response.strip()
+        
+        # Ensure reasonable length
+        if len(move) > 100:
+            move = move[:100]
+        
+        logger.info(f"[generate_monster_combat_move] Generated move for {monster_name}: '{move}'")
+        return move
+        
+    except Exception as e:
+        logger.error(f"Error generating monster combat move: {str(e)}")
+        # Fallback based on aggressiveness
+        aggressiveness = monster_data.get('aggressiveness', 'neutral')
+        fallback_moves = {
+            'aggressive': 'lunges forward aggressively',
+            'territorial': 'strikes defensively',
+            'passive': 'moves cautiously away',
+            'neutral': 'attacks with claws'
+        }
+        return fallback_moves.get(aggressiveness, 'attacks')
+
+async def detect_monster_attack(action_text: str, player_id: str, room_data: Dict[str, Any], game_manager: GameManager) -> str:
+    """Detect if a player action is attacking a monster and return monster_id if so"""
+    try:
+        if not room_data or not room_data.get('monsters'):
+            return None
+            
+        # Get monster data
+        monsters_in_room = []
+        for monster_id in room_data['monsters']:
+            monster_data = await game_manager.db.get_monster(monster_id)
+            if monster_data and monster_data.get('is_alive', True):
+                monsters_in_room.append((monster_id, monster_data))
+        
+        if not monsters_in_room:
+            return None
+        
+        # Check for attack keywords
+        attack_keywords = [
+            'attack', 'fight', 'strike', 'hit', 'punch', 'kick', 'slash', 'stab',
+            'shoot', 'fire', 'cast', 'throw', 'charge', 'tackle', 'grapple',
+            'kill', 'slay', 'destroy', 'harm', 'hurt', 'wound', 'damage'
+        ]
+        
+        action_lower = action_text.lower()
+        
+        # Check if action contains attack keywords
+        is_attack = any(keyword in action_lower for keyword in attack_keywords)
+        if not is_attack:
+            return None
+        
+        # For now, attack the first monster in the room
+        # TODO: Later we can add logic to target specific monsters by name
+        target_monster_id, target_monster_data = monsters_in_room[0]
+        
+        logger.info(f"[detect_monster_attack] Player {player_id} attacking monster {target_monster_data.get('name', 'Unknown')} with action: '{action_text}'")
+        return target_monster_id
+        
+    except Exception as e:
+        logger.error(f"Error detecting monster attack: {str(e)}")
+        return None
+
+async def initiate_monster_duel(player_id: str, monster_id: str, player_action: str, room_id: str, game_manager: GameManager):
+    """Start a duel between a player and a monster using the existing duel system"""
+    try:
+        import uuid
+        duel_id = f"monster_duel_{uuid.uuid4()}"
+        
+        logger.info(f"[initiate_monster_duel] Starting duel {duel_id}: {player_id} vs {monster_id}")
+        
+        # Get player and monster data
+        player_data = await game_manager.db.get_player(player_id)
+        monster_data = await game_manager.db.get_monster(monster_id)
+        
+        if not player_data or not monster_data:
+            logger.error(f"[initiate_monster_duel] Missing data - player: {bool(player_data)}, monster: {bool(monster_data)}")
+            return
+        
+        # Send duel challenge from player to monster
+        duel_challenge = {
+            "type": "duel_challenge",
+            "challenger_id": player_id,
+            "target_id": monster_id,  # Monster ID as target
+            "room_id": room_id,
+            "timestamp": datetime.now().isoformat()
+        }
+        await manager.broadcast_to_room(room_id, duel_challenge)
+        
+        # Immediately auto-accept the duel as the monster
+        await asyncio.sleep(0.1)  # Small delay for realism
+        
+        duel_response = {
+            "type": "duel_response", 
+            "challenger_id": player_id,
+            "responder_id": monster_id,  # Monster ID as responder
+            "response": "accept",
+            "room_id": room_id,
+            "timestamp": datetime.now().isoformat(),
+            "monster_name": monster_data.get('name', 'Unknown Monster'),  # Add monster name for frontend
+            "is_monster_duel": True  # Flag to indicate this is a monster duel
+        }
+        await manager.broadcast_to_room(room_id, duel_response)
+        
+        # Initialize the duel in the pending duels system
+        duel_pending[duel_id] = {
+            "player1_id": player_id,
+            "player2_id": monster_id,  # Use monster_id as player2
+            "room_id": room_id,
+            "round": 1,
+            "player1_condition": "healthy",
+            "player2_condition": "healthy", 
+            "player1_tags": [],
+            "player2_tags": [],
+            "player1_total_severity": 0,
+            "player2_total_severity": 0,
+            "is_monster_duel": True,  # Flag for special handling
+            "monster_data": monster_data  # Store monster data for AI move generation
+        }
+        
+        # Don't store the initial attack - let player choose their combat move
+        # The initial action was just to initiate the duel
+        
+        # Since player hasn't submitted a move yet, wait for them to do so
+        # The auto_submit_monster_move will be called when player submits their move
+        logger.info(f"[initiate_monster_duel] Duel setup complete. Player must now choose their combat move.")
+        
+    except Exception as e:
+        logger.error(f"Error initiating monster duel: {str(e)}")
+
+async def auto_submit_monster_move(duel_id: str, monster_id: str, player_data: dict, monster_data: dict, room_id: str, round_number: int, game_manager: GameManager):
+    """Automatically generate and submit a move for a monster in a duel"""
+    try:
+        # Get room data
+        room_data = await game_manager.db.get_room(room_id)
+        
+        # Generate monster move
+        monster_move = await generate_monster_combat_move(
+            monster_data, player_data, room_data, round_number, game_manager
+        )
+        
+        # Submit the monster's move
+        if duel_id not in duel_moves:
+            duel_moves[duel_id] = {}
+        duel_moves[duel_id][monster_id] = monster_move
+        
+        logger.info(f"[auto_submit_monster_move] Monster {monster_data.get('name')} submitted move: '{monster_move}'")
+        
+        # Send duel move message for the monster (so frontend knows monster submitted)
+        duel_move_message = {
+            "type": "duel_move",
+            "player_id": monster_id,
+            "move": "preparing combat action...",  # Don't reveal the actual move
+            "room_id": room_id,
+            "timestamp": datetime.now().isoformat(),
+            "is_monster_move": True,
+            "monster_name": monster_data.get('name', 'Unknown Monster')
+        }
+        await manager.broadcast_to_room(room_id, duel_move_message)
+        
+        # Check if both moves are now ready for processing
+        if duel_id in duel_pending:
+            pending_duel = duel_pending[duel_id]
+            player_ids = {pending_duel["player1_id"], pending_duel["player2_id"]}
+            
+            if player_ids.issubset(set(duel_moves[duel_id].keys())):
+                # Both moves received, process the round
+                logger.info(f"[auto_submit_monster_move] Both moves ready, processing duel round for {duel_id}")
+                await analyze_duel_moves(duel_id, game_manager)
+                
+    except Exception as e:
+        logger.error(f"Error auto-submitting monster move: {str(e)}")
+
+async def prepare_next_monster_duel_round(duel_id: str, game_manager: GameManager):
+    """Prepare the next round for a monster duel by auto-generating monster moves"""
+    try:
+        if duel_id not in duel_pending:
+            return
+            
+        duel_info = duel_pending[duel_id]
+        if not duel_info.get('is_monster_duel'):
+            return
+            
+        player_id = duel_info['player1_id']
+        monster_id = duel_info['player2_id']
+        room_id = duel_info['room_id']
+        next_round = duel_info['round'] + 1
+        
+        # Update round number (don't clear moves here, they'll be cleared when new moves arrive)
+        duel_info['round'] = next_round
+        
+        # Send "next round" message to prepare UI
+        next_round_message = {
+            "type": "duel_next_round",
+            "round": next_round,
+            "player1_condition": duel_info['player1_condition'],
+            "player2_condition": duel_info['player2_condition'],
+            "player1_total_severity": duel_info['player1_total_severity'],
+            "player2_total_severity": duel_info['player2_total_severity'],
+            "room_id": room_id,
+            "timestamp": datetime.now().isoformat()
+        }
+        await manager.broadcast_to_room(room_id, next_round_message)
+        
+        logger.info(f"[prepare_next_monster_duel_round] Prepared round {next_round} for monster duel {duel_id}")
+        
+    except Exception as e:
+        logger.error(f"Error preparing next monster duel round: {str(e)}")
+
+async def analyze_monster_combat(combat_id: str, game_manager: GameManager):
+    """Analyze combat between a player and monster (similar to analyze_duel_moves)"""
+    try:
+        logger.info(f"[analyze_monster_combat] Starting analysis for combat {combat_id}")
+        
+        combat_info = monster_combat_pending[combat_id]
+        player_id = combat_info['player_id']
+        monster_id = combat_info['monster_id']
+        room_id = combat_info['room_id']
+        current_round = combat_info['round']
+        
+        # Get moves
+        moves = monster_combat_moves[combat_id]
+        player_move = moves.get(player_id, 'do nothing')
+        monster_move = moves.get(monster_id, 'do nothing')
+        
+        logger.info(f"[analyze_monster_combat] Round {current_round}: {player_id} vs {monster_id}")
+        logger.info(f"[analyze_monster_combat] Moves: '{player_move}' vs '{monster_move}'")
+        
+        # Get player and monster data
+        player_data = await game_manager.db.get_player(player_id)
+        monster_data = await game_manager.db.get_monster(monster_id)
+        player_name = player_data.get('name', 'Unknown') if player_data else "Unknown"
+        monster_name = monster_data.get('name', 'Unknown Monster') if monster_data else "Unknown Monster"
+        player_inventory = player_data.get('inventory', []) if player_data else []
+        
+        # Get room information
+        room_data = await game_manager.db.get_room(room_id)
+        room_name = room_data.get('title', 'Unknown Room') if room_data else "Unknown Room"
+        room_description = room_data.get('description', 'An unknown location') if room_data else "An unknown location"
+        
+        # Get current conditions and tags
+        player_condition = combat_info.get('player_condition', 'healthy')
+        monster_condition = combat_info.get('monster_condition', 'healthy')
+        player_current_tags = combat_info.get('player_tags', [])
+        monster_current_tags = combat_info.get('monster_tags', [])
+        
+        # Validate equipment (monsters don't have inventory, so only validate player)
+        equipment_result = await validate_equipment(
+            player_name, player_move, player_inventory,
+            monster_name, monster_move, [],  # Monster has no inventory
+            game_manager
+        )
+        
+        # Determine invalid moves
+        player_invalid = None if equipment_result['player1_valid'] else {
+            'move': player_move,
+            'reason': equipment_result['player1_reason']
+        }
+        monster_invalid = None  # Monsters always use valid basic attacks
+        
+        logger.info(f"[analyze_monster_combat] Equipment validation complete:")
+        logger.info(f"[analyze_monster_combat] {player_name}: {'VALID' if equipment_result['player1_valid'] else 'INVALID'} - {equipment_result['player1_reason']}")
+        logger.info(f"[analyze_monster_combat] {monster_name}: VALID (monster attacks)")
+        
+        # Analyze combat outcome
+        logger.info(f"[analyze_monster_combat] Analyzing combat outcome...")
+        combat_outcome = await analyze_combat_outcome(
+            player_name, player_move, player_condition, equipment_result['player1_valid'],
+            monster_name, monster_move, monster_condition, True,  # Monster moves always valid
+            player_invalid, monster_invalid, player_inventory, [],
+            room_name, room_description, game_manager
+        )
+        
+        logger.info(f"[analyze_monster_combat] Combat outcome:")
+        logger.info(f"[analyze_monster_combat] {player_name}: {combat_outcome['player1_result']['condition']} (can_continue: {combat_outcome['player1_result']['can_continue']})")
+        logger.info(f"[analyze_monster_combat] {monster_name}: {combat_outcome['player2_result']['condition']} (can_continue: {combat_outcome['player2_result']['can_continue']})")
+        
+        # Generate narrative
+        logger.info(f"[analyze_monster_combat] Generating combat narrative...")
+        narrative = await generate_combat_narrative(
+            player_name, player_move, combat_outcome['player1_result'],
+            monster_name, monster_move, combat_outcome['player2_result'],
+            player_invalid, monster_invalid, current_round,
+            room_name, room_description, game_manager
+        )
+        
+        logger.info(f"[analyze_monster_combat] Narrative generated: {narrative[:100]}...")
+        
+        # Generate tags based on narrative
+        logger.info(f"[analyze_monster_combat] Generating tags from narrative...")
+        tags_result = await generate_combat_tags_from_narrative(
+            player_name, monster_name, narrative, player_current_tags, monster_current_tags,
+            game_manager
+        )
+        
+        logger.info(f"[analyze_monster_combat] Tags generated:")
+        logger.info(f"[analyze_monster_combat] {player_name} new tags: {[tag['name'] for tag in tags_result['player1_new_tags']]}")
+        logger.info(f"[analyze_monster_combat] {monster_name} new tags: {[tag['name'] for tag in tags_result['player2_new_tags']]}")
+        
+        # Calculate total severity
+        player_current_total = combat_info.get('player_total_severity', 0)
+        monster_current_total = combat_info.get('monster_total_severity', 0)
+        
+        player_new_severity = sum(tag['severity'] for tag in tags_result['player1_new_tags'] if tag['type'] == 'negative')
+        monster_new_severity = sum(tag['severity'] for tag in tags_result['player2_new_tags'] if tag['type'] == 'negative')
+        
+        player_total_severity = player_current_total + player_new_severity
+        monster_total_severity = monster_current_total + monster_new_severity
+        
+        # Check if combat should end
+        combat_ends = (
+            combat_outcome['player1_result']['can_continue'] == False or
+            combat_outcome['player2_result']['can_continue'] == False or
+            player_total_severity >= 50 or
+            monster_total_severity >= 50
+        )
+        
+        logger.info(f"[analyze_monster_combat] Severity totals: {player_name}={player_total_severity}, {monster_name}={monster_total_severity}")
+        logger.info(f"[analyze_monster_combat] Combat ends: {combat_ends}")
+        
+        # Update combat state
+        combat_info['player_condition'] = combat_outcome['player1_result']['condition']
+        combat_info['monster_condition'] = combat_outcome['player2_result']['condition']
+        combat_info['player_tags'].extend(tags_result['player1_new_tags'])
+        combat_info['monster_tags'].extend(tags_result['player2_new_tags'])
+        combat_info['player_total_severity'] = player_total_severity
+        combat_info['monster_total_severity'] = monster_total_severity
+        
+        # Update monster health if severely damaged
+        if monster_total_severity >= 50:
+            monster_data['is_alive'] = False
+            await game_manager.db.set_monster(monster_id, monster_data)
+            logger.info(f"[analyze_monster_combat] {monster_name} has been defeated!")
+        
+        # Send results to player
+        await send_monster_combat_results(
+            room_id, player_id, monster_id, current_round,
+            player_move, monster_move,
+            combat_outcome['player1_result']['condition'],
+            combat_outcome['player2_result']['condition'],
+            tags_result['player1_new_tags'], tags_result['player2_new_tags'],
+            player_total_severity, monster_total_severity,
+            narrative, combat_ends, game_manager
+        )
+        
+        # Clean up if combat ends
+        if combat_ends:
+            if combat_id in monster_combat_pending:
+                del monster_combat_pending[combat_id]
+            if combat_id in monster_combat_moves:
+                del monster_combat_moves[combat_id]
+        else:
+            # Prepare for next round
+            combat_info['round'] = current_round + 1
+        
+    except Exception as e:
+        logger.error(f"Error analyzing monster combat: {str(e)}")
+
+async def send_monster_combat_results(room_id: str, player_id: str, monster_id: str, round_number: int,
+                                    player_move: str, monster_move: str, player_condition: str, monster_condition: str,
+                                    player_new_tags: List[Dict], monster_new_tags: List[Dict],
+                                    player_total_severity: int, monster_total_severity: int,
+                                    narrative: str, combat_ends: bool, game_manager: GameManager):
+    """Send monster combat results to the player via WebSocket"""
+    try:
+        # Get monster name
+        monster_data = await game_manager.db.get_monster(monster_id)
+        monster_name = monster_data.get('name', 'Unknown Monster') if monster_data else "Unknown Monster"
+        
+        # Format combat message
+        combat_message = {
+            "type": "monster_combat_outcome",
+            "round": round_number,
+            "monster_name": monster_name,
+            "player_move": player_move,
+            "monster_move": monster_move,
+            "player_condition": player_condition,
+            "monster_condition": monster_condition,
+            "player_new_tags": player_new_tags,
+            "monster_new_tags": monster_new_tags,
+            "player_severity": player_total_severity,
+            "monster_severity": monster_total_severity,
+            "narrative": narrative,
+            "combat_ends": combat_ends,
+            "monster_defeated": monster_total_severity >= 50
+        }
+        
+        # Send to room
+        await manager.broadcast_to_room(room_id, combat_message)
+        
+        logger.info(f"[send_monster_combat_results] Sent combat results to room {room_id}")
+        
+    except Exception as e:
+        logger.error(f"Error sending monster combat results: {str(e)}")
 
 async def analyze_duel_moves(duel_id: str, game_manager: GameManager):
     """Analyze the moves for a duel and determine the outcome"""
@@ -253,11 +718,21 @@ async def analyze_duel_moves(duel_id: str, game_manager: GameManager):
         
         # Get player names and inventory
         player1_data = await game_manager.db.get_player(player1_id)
-        player2_data = await game_manager.db.get_player(player2_id)
         player1_name = player1_data.get('name', 'Unknown') if player1_data else "Unknown"
-        player2_name = player2_data.get('name', 'Unknown') if player2_data else "Unknown"
         player1_inventory = player1_data.get('inventory', []) if player1_data else []
-        player2_inventory = player2_data.get('inventory', []) if player2_data else []
+        
+        # Handle monster duels
+        is_monster_duel = duel_info.get('is_monster_duel', False)
+        if is_monster_duel:
+            # Player2 is a monster
+            monster_data = duel_info.get('monster_data', {})
+            player2_name = monster_data.get('name', 'Unknown Monster')
+            player2_inventory = []  # Monsters don't have inventories
+        else:
+            # Player2 is a regular player
+            player2_data = await game_manager.db.get_player(player2_id)
+            player2_name = player2_data.get('name', 'Unknown') if player2_data else "Unknown"
+            player2_inventory = player2_data.get('inventory', []) if player2_data else []
         
         # Get room information for environment context
         room_data = await game_manager.db.get_room(room_id)
@@ -270,11 +745,12 @@ async def analyze_duel_moves(duel_id: str, game_manager: GameManager):
         player1_current_tags = duel_info.get('player1_tags', [])
         player2_current_tags = duel_info.get('player2_tags', [])
         
-        # Validate equipment
+        # Validate equipment (skip validation for monsters)
+        is_monster_duel = duel_info.get('is_monster_duel', False)
         equipment_result = await validate_equipment(
             player1_name, player1_move, player1_inventory,
             player2_name, player2_move, player2_inventory,
-            game_manager
+            game_manager, is_monster_duel
         )
         
         # Determine invalid moves
@@ -357,7 +833,7 @@ async def analyze_duel_moves(duel_id: str, game_manager: GameManager):
     
         # Send results to players
         await send_duel_results(
-            room_id, player1_id, player2_id, current_round,
+            duel_id, room_id, player1_id, player2_id, current_round,
             player1_move, player2_move,
             combat_outcome['player1_result']['condition'],
             combat_outcome['player2_result']['condition'],
@@ -365,6 +841,12 @@ async def analyze_duel_moves(duel_id: str, game_manager: GameManager):
             player1_total_severity, player2_total_severity,
             narrative, combat_ends, game_manager
         )
+        
+        # Handle monster duel continuation
+        if not combat_ends and duel_info.get('is_monster_duel'):
+            # For monster duels, don't call prepare_next_monster_duel_round here
+            # The next round will be handled when the player submits their next move
+            logger.info(f"[analyze_duel_moves] Monster duel continues to round {current_round + 1}")
     
     except Exception as e:
         logger.error(f"Error analyzing duel round: {str(e)}")
@@ -388,7 +870,7 @@ async def analyze_duel_moves(duel_id: str, game_manager: GameManager):
 
 async def validate_equipment(player1_name: str, player1_move: str, player1_inventory: List[str], 
                            player2_name: str, player2_move: str, player2_inventory: List[str], 
-                           game_manager: GameManager) -> Dict[str, Any]:
+                           game_manager: GameManager, is_monster_duel: bool = False) -> Dict[str, Any]:
     """Validate if moves are possible with current equipment using enhanced move validator"""
     
     logger.info(f"[validate_equipment] Starting enhanced validation for duel moves")
@@ -420,26 +902,51 @@ async def validate_equipment(player1_name: str, player1_move: str, player1_inven
                     logger.error(f"[validate_equipment] Error getting player {pid}: {str(e)}")
                     continue
         
-        if not player1_id or not player2_id:
-            logger.warning(f"[validate_equipment] Could not find player IDs for {player1_name} or {player2_name}")
-            logger.warning(f"[validate_equipment] player1_id: {player1_id}, player2_id: {player2_id}")
+        # Handle monster duels - skip validation for monsters
+        if is_monster_duel:
+            # In monster duels, player2 is the monster - always valid
+            if not player1_id:
+                logger.warning(f"[validate_equipment] Could not find player ID for {player1_name}")
+                return {
+                    "player1_valid": False,
+                    "player1_reason": f"Could not find player {player1_name}",
+                    "player2_valid": True,
+                    "player2_reason": "Monster moves are always valid"
+                }
+            else:
+                # Validate only the player, monster is always valid
+                logger.info(f"[validate_equipment] Monster duel detected - skipping validation for {player2_name}")
+                
+                # Use enhanced move validator for player only
+                logger.info(f"[validate_equipment] Calling MoveValidator for {player1_name} (ID: {player1_id})")
+                player1_valid, player1_reason, player1_suggestion = await MoveValidator.validate_move(player1_id, player1_move, game_manager)
+                
+                logger.info(f"[validate_equipment] Monster {player2_name} moves are always valid")
+                player2_valid = True
+                player2_reason = "Monster moves are always valid"
+                player2_suggestion = None
+        else:
+            # Regular player vs player duel
+            if not player1_id or not player2_id:
+                logger.warning(f"[validate_equipment] Could not find player IDs for {player1_name} or {player2_name}")
+                logger.warning(f"[validate_equipment] player1_id: {player1_id}, player2_id: {player2_id}")
+                
+                # Try alternative approach - search all players in database
+                logger.info(f"[validate_equipment] Trying alternative player lookup...")
+                
+                # For now, use a simple approach - create mock player IDs based on names
+                # This is a temporary fix until we can properly resolve player IDs
+                player1_id = f"player_{player1_name.lower().replace(' ', '_')}"
+                player2_id = f"player_{player2_name.lower().replace(' ', '_')}"
+                
+                logger.info(f"[validate_equipment] Using generated IDs: {player1_id}, {player2_id}")
             
-            # Try alternative approach - search all players in database
-            logger.info(f"[validate_equipment] Trying alternative player lookup...")
+            # Use enhanced move validator for both players
+            logger.info(f"[validate_equipment] Calling MoveValidator for {player1_name} (ID: {player1_id})")
+            player1_valid, player1_reason, player1_suggestion = await MoveValidator.validate_move(player1_id, player1_move, game_manager)
             
-            # For now, use a simple approach - create mock player IDs based on names
-            # This is a temporary fix until we can properly resolve player IDs
-            player1_id = f"player_{player1_name.lower().replace(' ', '_')}"
-            player2_id = f"player_{player2_name.lower().replace(' ', '_')}"
-            
-            logger.info(f"[validate_equipment] Using generated IDs: {player1_id}, {player2_id}")
-        
-        # Use enhanced move validator for both players
-        logger.info(f"[validate_equipment] Calling MoveValidator for {player1_name} (ID: {player1_id})")
-        player1_valid, player1_reason, player1_suggestion = await MoveValidator.validate_move(player1_id, player1_move, game_manager)
-        
-        logger.info(f"[validate_equipment] Calling MoveValidator for {player2_name} (ID: {player2_id})")
-        player2_valid, player2_reason, player2_suggestion = await MoveValidator.validate_move(player2_id, player2_move, game_manager)
+            logger.info(f"[validate_equipment] Calling MoveValidator for {player2_name} (ID: {player2_id})")
+            player2_valid, player2_reason, player2_suggestion = await MoveValidator.validate_move(player2_id, player2_move, game_manager)
         
         # Log enhanced validation results
         logger.info(f"[validate_equipment] Enhanced Validation Results:")
@@ -533,10 +1040,15 @@ CRITICAL RULES:
    - {player2_name}'s move targets {player1_name}
    - Successful attacks harm the TARGET, not the attacker
    - VALID ATTACKS ALWAYS HAVE IMPACT unless countered by defensive actions
+   - Monster attacks are ALWAYS VALID and should ALWAYS have some effect
    - Only invalid moves (missing equipment) have no effect
+   - If {player2_name} is a monster, their attacks should ALWAYS affect {player1_name} unless {player1_name} uses defensive moves
 
 3. MOVE IMPACT RULES:
    - VALID ATTACKS MUST CAUSE DAMAGE unless the target is actively defending
+   - Monster moves should ALWAYS have some effect (physical, mental, or status effect)
+   - Mind control, fear, confusion, and other mental attacks should affect the target
+   - If a player is NOT using defensive moves (block, dodge, parry), they take full damage
    - If {player1_name} attacks with a valid move, {player2_name} takes damage UNLESS {player2_name} is blocking/dodging
    - If {player2_name} attacks with a valid move, {player1_name} takes damage UNLESS {player1_name} is blocking/dodging
    - Defensive moves (block, dodge, parry) can reduce or prevent damage
@@ -854,11 +1366,15 @@ async def generate_combat_tags_from_narrative(
            - If {player1_name} attacks {player2_name}, {player2_name} gets negative tags
            - If {player2_name} attacks {player1_name}, {player1_name} gets negative tags
            - Attackers should NOT get negative tags for successful attacks
+           - READ THE NARRATIVE CAREFULLY: If it says "{player1_name} punched {player2_name} and left him bruised", then {player2_name} gets the "bruised" tag, NOT {player1_name}
+           - COMMON MISTAKE: Do NOT give the attacker injury tags for their own successful attacks
         
         2. SUCCESSFUL ATTACKS ALWAYS CAUSE DAMAGE:
            - If the narrative says an attack "connected", "landed", "hit", "struck", etc., the target MUST get a negative tag
            - If the narrative says someone is "injured", "hurt", "shaken", "wounded", etc., they MUST get a negative tag
            - Even minor hits should result in injury tags (1-3 severity)
+           - MENTAL ATTACKS (mind control, fear, confusion, etc.) should also cause negative tags
+           - ANY attack that affects the target should result in appropriate tags
         
         3. SEVERITY GUIDELINES:
            - Basic injuries (bruises, minor cuts, shaken): 1-3 severity
@@ -882,6 +1398,8 @@ async def generate_combat_tags_from_narrative(
            - Look for words like: "connected", "landed", "hit", "struck", "injured", "hurt", "shaken", "wounded", "damaged"
            - If these words appear, someone should get a negative tag
            - "none" is NOT a valid tag name - use actual injury descriptions
+           - EXAMPLE: "Player A punched Player B, leaving Player B bruised" → Player B gets "bruised" tag
+           - EXAMPLE: "Player B attacked Player A, causing Player A to be wounded" → Player A gets "wounded" tag
 
         Return a JSON object with this structure:
         {{
@@ -920,7 +1438,7 @@ async def generate_combat_tags_from_narrative(
         }
 
 async def send_duel_results(
-    room_id: str, player1_id: str, player2_id: str, current_round: int,
+    duel_id: str, room_id: str, player1_id: str, player2_id: str, current_round: int,
     player1_move: str, player2_move: str,
     player1_condition: str, player2_condition: str,
     player1_tags: List[Dict[str, Any]], player2_tags: List[Dict[str, Any]],
@@ -937,10 +1455,7 @@ async def send_duel_results(
     player1_name = player1_data.get('name', 'Unknown') if player1_data else 'Unknown'
     player2_name = player2_data.get('name', 'Unknown') if player2_data else 'Unknown'
     
-    # Get duel_id for cleanup
-    duel_id = f"{player1_id}_{player2_id}"
-    if duel_id not in duel_moves:
-        duel_id = f"{player2_id}_{player1_id}"
+    # duel_id is now passed as parameter - no need to reconstruct it
     
     round_message = {
         "type": "duel_round_result",
@@ -1073,7 +1588,8 @@ async def send_duel_results(
         duel_pending[duel_id]['player2_condition'] = player2_condition
         duel_pending[duel_id]['player1_tags'] = player1_tags
         duel_pending[duel_id]['player2_tags'] = player2_tags
-        duel_moves[duel_id] = {}  # Clear moves for next round
+        if duel_id in duel_moves:
+            del duel_moves[duel_id]  # Clear moves for next round
         
         # Send next round message
         next_round_message = {
@@ -1219,6 +1735,13 @@ async def process_action_stream(
                 npc_data = await game_manager.db.get_npc(npc_id)
                 if npc_data:
                     npcs.append(NPC(**npc_data))
+            
+            # Get monster details for AI context
+            monsters = []
+            for monster_id in room.monsters:
+                monster_data = await game_manager.db.get_monster(monster_id)
+                if monster_data:
+                    monsters.append(monster_data)
 
             # Check rate limit before processing action
             is_allowed, rate_limit_info = await game_manager.rate_limiter.check_rate_limit(
@@ -1249,6 +1772,26 @@ async def process_action_stream(
                 })
                 return
             
+            # Check for monster attacks first
+            monster_target_id = await detect_monster_attack(action_request.action, action_request.player_id, room_data, game_manager)
+            if monster_target_id:
+                logger.info(f"[Stream] Monster attack detected - initiating duel with {monster_target_id}")
+                
+                # Get monster name for the message
+                monster_data = await game_manager.db.get_monster(monster_target_id)
+                monster_name = monster_data.get('name', 'Unknown Monster') if monster_data else "Unknown Monster"
+                
+                # Initiate monster duel using the existing duel system
+                await initiate_monster_duel(action_request.player_id, monster_target_id, action_request.action, player.current_room, game_manager)
+                
+                # Return a simple acknowledgment - the duel system will handle the rest
+                yield json.dumps({
+                    "type": "final", 
+                    "content": f"⚔️ You challenge the {monster_name} to combat!",
+                    "updates": {}
+                })
+                return
+            
             # All actions go through AI processing for rich narrative responses
             logger.info(f"[Stream] Processing action with AI: {action_request.action}")
             
@@ -1268,13 +1811,15 @@ async def process_action_stream(
             # Use the pending type if available
             item_type_for_ai = pending_item_type
             
-            # Use AI processing for all actions (including movement)
+            # Use AI processing for all actions (including movement) 
+            logger.info(f"[Stream] AI context includes {len(monsters)} monsters: {[m.get('name', 'Unknown') for m in monsters]}")
             async for chunk in game_manager.ai_handler.stream_action(
                 action=action_request.action,
                 player=player,
                 room=room,
                 game_state=game_state,
                 npcs=npcs,
+                monsters=monsters,
                 potential_item_type=item_type_for_ai
             ):
                 if isinstance(chunk, dict):
@@ -1587,21 +2132,137 @@ async def process_action_stream(
 
 # Room information endpoint
 @app.get("/room/{room_id}")
-async def get_room(
-    room_id: str,
-    game_manager: GameManager = Depends(get_game_manager)
-):
+async def get_room_info(room_id: str, game_manager: GameManager = Depends(get_game_manager)):
+    """Get room information including players, NPCs, and items"""
     try:
-        room_info = await game_manager.get_room_info(room_id)
-        
-        # TEMPORARY FIX: Ensure biome field is included from database
+        # Get room data
         room_data = await game_manager.db.get_room(room_id)
-        if room_data and 'biome' in room_data:
-            room_info['room']['biome'] = room_data['biome']
+        if not room_data:
+            raise HTTPException(status_code=404, detail="Room not found")
         
-        return room_info
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        room = Room(**room_data)
+        
+        # Get players in room
+        players = []
+        for player_id in room.players:
+            player_data = await game_manager.db.get_player(player_id)
+            if player_data:
+                players.append(Player(**player_data))
+        
+        # Get NPCs in room
+        npcs = []
+        for npc_id in room.npcs:
+            npc_data = await game_manager.db.get_npc(npc_id)
+            if npc_data:
+                npcs.append(NPC(**npc_data))
+        
+        # Get items in room
+        items = []
+        for item_id in room.items:
+            item_data = await game_manager.db.get_item(item_id)
+            if item_data:
+                items.append(Item(**item_data))
+        
+        # Get monsters in room
+        monsters = []
+        for monster_id in room.monsters:
+            monster_data = await game_manager.db.get_monster(monster_id)
+            if monster_data:
+                monsters.append(Monster(**monster_data))
+        
+        # Generate atmospheric monster presence description
+        atmospheric_presence = ""
+        if room.monsters:
+            logger.info(f"[get_room_info] Generating atmospheric presence for {len(room.monsters)} monsters in room {room.id}")
+            atmospheric_presence = await get_atmospheric_monster_presence(room_data, game_manager)
+            logger.info(f"[get_room_info] Generated atmospheric presence: '{atmospheric_presence[:100]}...' (length: {len(atmospheric_presence)})")
+        else:
+            logger.info(f"[get_room_info] No monsters in room {room.id}, skipping atmospheric presence")
+        
+        return {
+            "room": room,
+            "players": players,
+            "npcs": npcs,
+            "items": items,
+            "monsters": monsters,
+            "atmospheric_presence": atmospheric_presence
+        }
+    except Exception as e:
+        logger.error(f"Error getting room info: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+async def get_atmospheric_monster_presence(room_data: Dict[str, Any], game_manager: GameManager = None) -> str:
+    """Generate AI-powered atmospheric descriptions of monsters in a room"""
+    try:
+        if not room_data or not room_data.get('monsters'):
+            return ""
+        
+        # Get monster data
+        monsters_info = []
+        for monster_id in room_data['monsters']:
+            if game_manager:
+                monster_data = await game_manager.db.get_monster(monster_id)
+                if monster_data and monster_data.get('is_alive', True):
+                    monsters_info.append(monster_data)
+        
+        if not monsters_info:
+            return ""
+            
+        # Create AI prompt for atmospheric description
+        biome = room_data.get('biome', 'unknown area')
+        room_title = room_data.get('title', 'this location')
+        
+        # Build monster context for AI
+        monster_context = []
+        for monster in monsters_info:
+            monster_context.append({
+                'name': monster['name'],
+                'size': monster['size'],
+                'description': monster['description'],
+                'aggressiveness': monster['aggressiveness']
+            })
+        
+        # Generate AI description
+        if game_manager and hasattr(game_manager, 'ai_handler'):
+            prompt = f"""You are describing what a player sees when entering a room with monsters. Write an atmospheric description from the player's perspective, as if observing these creatures from a distance.
+
+IMPORTANT GUIDELINES:
+- Write from the player's perspective ("You see...", "You notice...")
+- Describe what the creatures LOOK like, not their stats or abilities
+- Make it feel like distant observation - mysterious but visual
+- Keep it atmospheric and immersive
+- Don't mention creature names directly
+- Focus on visual appearance and behavior
+- 2-3 sentences maximum
+- Make it fit the {biome} environment
+
+LOCATION: {room_title}
+BIOME: {biome}
+MONSTERS: {len(monsters_info)} creature(s)
+
+CREATURE DETAILS:
+""" + "\n".join([f"- A {m['size']}-sized creature: {m['description']} (appears {m['aggressiveness']})" for m in monster_context])
+
+            prompt += f"\n\nWrite an atmospheric description of what the player observes from a distance:"
+            
+            try:
+                ai_response = await game_manager.ai_handler.generate_text(prompt)
+                return ai_response.strip()
+            except Exception as e:
+                logger.error(f"Error generating AI monster description: {str(e)}")
+                # Fallback to basic description
+                pass
+        
+        # Fallback: Simple description if AI fails
+        if len(monsters_info) == 1:
+            monster = monsters_info[0]
+            return f"You notice a {monster['size']} creature moving through the {biome}..."
+        else:
+            return f"You observe {len(monsters_info)} creatures inhabiting this {biome}..."
+        
+    except Exception as e:
+        logger.error(f"Error generating atmospheric monster presence: {str(e)}")
+        return ""
 
 # World structure endpoint for debugging
 @app.get("/world/structure")

@@ -34,11 +34,20 @@ class AIHandler:
     "image_prompt": "A detailed prompt for image generation"
 }
 '''
+        # Check if monsters will be present in the room
+        monsters_info = ""
+        monster_count = context.get("monster_count", 0)
+        if monster_count > 0:
+            monsters_info = f"\nMonsters: {monster_count} creatures will inhabit this area"
+        
         prompt = f"""Generate a concise room description for a fantasy MUD game.
         Context: {json.dumps(context)}
         Style: {style}
+        {monsters_info}
 
         CRITICAL: Keep descriptions to 1-2 sentences maximum. Focus only on the most important visual and atmospheric details. Remove all fluff and unnecessary elaboration.
+
+        If monsters are present in the room, subtly hint at their presence in the description without being too explicit (e.g., "strange sounds echo from the shadows" or "movement can be seen in the underbrush").
 
         Return a JSON object with these exact fields:
         {json_template}
@@ -49,7 +58,7 @@ class AIHandler:
             response = await client.chat.completions.create(
                 model="gpt-4.1-nano-2025-04-14",
                 messages=[
-                    {"role": "system", "content": "You are a concise writer for a fantasy MUD game. Always return clean JSON without comments. Keep descriptions to 1-2 sentences maximum. Focus only on essential details and remove all fluff."},
+                    {"role": "system", "content": "You are a concise writer for a fantasy MUD game. Always return clean JSON without comments. Keep descriptions to 1-2 sentences maximum. Focus only on essential details and remove all fluff. When monsters are present, subtly hint at danger or mysterious presences."},
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0.7
@@ -196,7 +205,8 @@ class AIHandler:
         room: Room,
         game_state: GameState,
         npcs: List[NPC],
-        potential_item_type=None
+        potential_item_type=None,
+        monsters: List[Dict[str, any]] = None
     ) -> AsyncGenerator[Union[str, Dict[str, any]], None]:
         """Process a player's action using the LLM with streaming"""
         context = {
@@ -204,6 +214,7 @@ class AIHandler:
             "room": room.dict(),
             "game_state": game_state.dict(),
             "npcs": [npc.dict() for npc in npcs],
+            "monsters": monsters or [],
             "action": action,
             "timestamp": datetime.utcnow().isoformat()
         }
@@ -239,6 +250,22 @@ class AIHandler:
             f"Context: {json.dumps(context)}",
             "",
         ]
+        
+        # Add monster description context if there are monsters in the room
+        if monsters and len(monsters) > 0:
+            prompt_parts.extend([
+                "MONSTER OBSERVATION GUIDELINES:",
+                "- When players examine, observe, or ask about creatures/monsters/enemies:",
+                "- You HAVE DETAILED monster information in the context - use it!",
+                "- Provide DETAILED visual descriptions based on monster attributes",
+                "- Include size, appearance, behavior, and atmospheric details", 
+                "- Mention special effects subtly in their behavior",
+                "- DO NOT reveal direct stats, aggressiveness levels, or game mechanics",
+                "- Make descriptions immersive and atmospheric",
+                "- Vary descriptions to avoid repetition",
+                f"- IMPORTANT: There are {len(monsters)} monsters in this room - acknowledge their presence!",
+                "",
+            ])
         
         # Add item discovery context if applicable
         if potential_item_type:

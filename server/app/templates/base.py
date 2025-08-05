@@ -45,4 +45,11 @@ class ItemTemplate(BaseTemplate):
         elif rand < 0.95:
             return 3
         else:
-            return 4 
+            return 4
+
+
+class MonsterTemplate(BaseTemplate):
+    """Base class for monster templates"""
+    
+    def __init__(self, name: str):
+        super().__init__(name, "monster") 
