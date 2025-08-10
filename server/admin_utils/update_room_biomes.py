@@ -8,7 +8,7 @@ from pathlib import Path
 # Add the app directory to the Python path
 sys.path.append(str(Path(__file__).parent / '..'))
 
-from app.database import Database
+from app.hybrid_database import HybridDatabase as Database
 from app.game_manager import get_chunk_id
 
 async def update_room_biomes():

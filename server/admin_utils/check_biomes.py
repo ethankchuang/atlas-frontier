@@ -10,7 +10,7 @@ import os
 # Add the app directory to the path
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
-from app.database import Database
+from app.hybrid_database import HybridDatabase as Database
 
 async def check_biomes():
     """Check biomes stored in the database"""

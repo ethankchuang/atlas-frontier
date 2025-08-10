@@ -5,7 +5,7 @@ Test the new loading behavior - only show loading spinner when rooms are being g
 
 import asyncio
 from app.game_manager import GameManager
-from app.database import Database
+from app.hybrid_database import HybridDatabase as Database
 from app.models import Room
 
 async def test_loading_behavior():

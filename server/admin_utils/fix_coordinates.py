@@ -8,7 +8,7 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import asyncio
-from app.database import Database, redis_client
+from app.hybrid_database import HybridDatabase as Database, redis_client
 from app.models import Room
 import logging
 

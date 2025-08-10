@@ -10,7 +10,7 @@ import os
 # Add the server directory to the path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'app'))
 
-from app.database import Database
+from app.hybrid_database import HybridDatabase as Database
 from app.rate_limiter import RateLimiter
 
 async def test_rate_limiting():

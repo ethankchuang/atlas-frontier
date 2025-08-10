@@ -14,7 +14,7 @@ from typing import Dict, Any
 # Add the server directory to the path so we can import the app modules
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
-from app.database import Database
+from app.hybrid_database import HybridDatabase as Database
 from app.templates.monsters import GenericMonsterTemplate
 from app.ai_handler import AIHandler
 

@@ -9,7 +9,7 @@ import noise  # Perlin noise library, make sure it's in requirements.txt
 import os # Added for local image saving
 
 from .models import Room, Player, NPC, GameState, Direction, ActionRecord
-from .database import Database
+from .hybrid_database import HybridDatabase as Database
 from .ai_handler import AIHandler
 from .rate_limiter import RateLimiter
 from .biome_manager import BiomeManager
@@ -655,7 +655,7 @@ class GameManager:
         discovery_check_start = time.time()
         is_discovered = await self.db.is_coordinate_discovered(new_x, new_y)
         discovery_check_time = time.time() - discovery_check_start
-        logger.info(f"[Performance] Discovery check took {discovery_check_time:.2f}s")
+        logger.info(f"[Discovery] Coordinate ({new_x}, {new_y}) discovery status: {is_discovered} (check took {discovery_check_time:.2f}s)")
         
         if is_discovered:
             # DISCOVERED COORDINATE: Load existing room data
@@ -931,14 +931,14 @@ class GameManager:
             existing_room_data = await self.db.get_room_by_coordinates(x, y)
             if existing_room_data:
                 elapsed = time.time() - start_time
-                logger.debug(f"[Performance] Room already exists at ({x}, {y}) - skipped in {elapsed:.2f}s")
+                logger.info(f"[Preload] Room already exists at ({x}, {y}) - skipped in {elapsed:.2f}s")
                 return existing_room_data["id"]
             
             # Check if coordinate is already discovered
             is_discovered = await self.db.is_coordinate_discovered(x, y)
             if is_discovered:
                 elapsed = time.time() - start_time
-                logger.debug(f"[Performance] Coordinate ({x}, {y}) already discovered - skipped in {elapsed:.2f}s")
+                logger.warning(f"[Preload] Coordinate ({x}, {y}) marked as discovered but no room found! This shouldn't happen. Skipped in {elapsed:.2f}s")
                 return None
             
             # Check if coordinate is locked (being operated on by another process)
