@@ -8,7 +8,7 @@ from pathlib import Path
 # Add the app directory to the Python path
 sys.path.append(str(Path(__file__).parent / '..'))
 
-from app.database import Database, redis_client
+from app.hybrid_database import HybridDatabase as Database, redis_client
 
 async def fix_biome_case():
     """Fix case sensitivity issues in existing biomes"""

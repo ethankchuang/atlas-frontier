@@ -7,7 +7,7 @@ import asyncio
 import time
 from datetime import datetime, timedelta
 from typing import Optional, Tuple
-from .database import Database
+from .hybrid_database import HybridDatabase as Database
 import logging
 
 logger = logging.getLogger(__name__)

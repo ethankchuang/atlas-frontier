@@ -7,6 +7,11 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str = ""
     REPLICATE_API_TOKEN: str = ""
     REDIS_URL: str = "redis://localhost:6379"
+    
+    # Supabase Settings
+    SUPABASE_URL: str = ""
+    SUPABASE_ANON_KEY: str = ""
+    SUPABASE_SERVICE_ROLE_KEY: str = ""
 
     # Game Settings
     DEFAULT_WORLD_SEED: str = "fantasy_world_v1"

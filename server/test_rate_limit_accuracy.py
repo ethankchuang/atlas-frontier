@@ -11,7 +11,7 @@ import json
 server_dir = Path(__file__).parent
 sys.path.append(str(server_dir))
 
-from app.database import Database
+from app.hybrid_database import HybridDatabase as Database
 from app.rate_limiter import RateLimiter
 from app.models import ActionRecord
 

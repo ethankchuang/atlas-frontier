@@ -48,4 +48,10 @@ def setup_logging():
     # Add handler to logger
     logger.addHandler(console_handler)
 
+    # Suppress verbose HTTP/2 logs from supabase/httpx/hpack
+    logging.getLogger('hpack').setLevel(logging.WARNING)  # Covers all hpack submodules
+    logging.getLogger('httpx').setLevel(logging.WARNING)
+    logging.getLogger('httpcore').setLevel(logging.WARNING)
+    logging.getLogger('supabase').setLevel(logging.INFO)
+
     return logger

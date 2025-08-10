@@ -10,7 +10,7 @@ sys.path.append(server_dir)
 
 from app.logger import setup_logging
 from app.config import settings
-from app.database import Database
+from app.hybrid_database import HybridDatabase as Database
 from app.game_manager import GameManager
 
 # Set up logging

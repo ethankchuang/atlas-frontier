@@ -8,7 +8,8 @@ from pathlib import Path
 # Add the app directory to the Python path
 sys.path.append(str(Path(__file__).parent / '..'))
 
-from app.database import Database, redis_client
+from app.hybrid_database import HybridDatabase as Database
+from app.database import redis_client
 from app.game_manager import get_chunk_id, assign_biome_to_chunk
 
 async def test_new_biome_system():

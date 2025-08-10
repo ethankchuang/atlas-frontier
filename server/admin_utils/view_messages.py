@@ -15,7 +15,7 @@ from typing import Dict, List, Optional
 # Add the server directory to the path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from app.database import Database
+from app.hybrid_database import HybridDatabase as Database
 from app.models import ActionRecord, ChatMessage
 
 class MessageViewer:

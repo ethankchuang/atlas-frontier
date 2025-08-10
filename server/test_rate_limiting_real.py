@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'app'))
 from app.game_manager import GameManager
 from app.models import Player, Room, GameState
 from app.rate_limiter import RateLimiter
-from app.database import Database
+from app.hybrid_database import HybridDatabase as Database
 
 async def test_real_rate_limiting():
     """Test rate limiting with a real player and actions"""

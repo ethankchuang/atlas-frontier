@@ -6,7 +6,7 @@ import logging
 import random
 from typing import Dict, List, Set, Optional
 from .ai_handler import AIHandler
-from .database import Database
+from .hybrid_database import HybridDatabase as Database
 
 logger = logging.getLogger(__name__)
 

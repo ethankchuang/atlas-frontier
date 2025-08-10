@@ -34,7 +34,7 @@ import logging
 from datetime import datetime, timedelta
 import asyncio
 from .game_manager import GameManager
-from .database import Database
+from .hybrid_database import HybridDatabase as Database
 from .move_validator import MoveValidator
 from .logger import setup_logging
 
