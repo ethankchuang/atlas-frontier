@@ -152,22 +152,29 @@ Example response:
 
     def generate_monster_data(self, context: Dict[str, Any] = None) -> Dict[str, Any]:
         """Generate complete monster data including base attributes"""
+        import random
+        
         if context is None:
             context = {}
         
-        # Randomly select attributes if not provided
+        # Define attribute options with weighted distributions for better variety
         aggressiveness_options = ["passive", "aggressive", "neutral", "territorial"]
         intelligence_options = ["human", "subhuman", "animal", "omnipotent"]
         size_options = ["colossal", "dinosaur", "horse", "human", "chicken", "insect"]
         
+        # Use weighted selection to ensure better distribution
+        # Avoid too many colossal/omnipotent monsters
+        size_weights = [1, 2, 3, 3, 2, 1]  # Less colossal/insect, more human/horse sized
+        intelligence_weights = [2, 3, 4, 1]  # Less omnipotent, more animal intelligence
+        
         aggressiveness = context.get("aggressiveness", random.choice(aggressiveness_options))
-        intelligence = context.get("intelligence", random.choice(intelligence_options))
-        size = context.get("size", random.choice(size_options))
+        intelligence = context.get("intelligence", random.choices(intelligence_options, weights=intelligence_weights)[0])
+        size = context.get("size", random.choices(size_options, weights=size_weights)[0])
         
         # Calculate health based on size
         health = self._calculate_health(size)
         
-        # Add attributes to context for AI generation
+        # Add attributes to context for AI generation (modify the context for AI prompt)
         context["aggressiveness"] = aggressiveness
         context["intelligence"] = intelligence
         context["size"] = size
@@ -186,15 +193,15 @@ Example response:
     def _calculate_health(self, size: str) -> int:
         """Calculate monster health based on size"""
         size_multipliers = {
-            "insect": 0.2,
-            "chicken": 0.5,
-            "human": 1.0,
-            "horse": 1.5,
-            "dinosaur": 2.5,
-            "colossal": 4.0
+            "insect": 0.25,     # tiny (25%)
+            "chicken": 0.5,     # small (50%)
+            "human": 1.0,       # medium (100%)
+            "horse": 1.5,       # big (150%)
+            "dinosaur": 2.0,    # large (200%)
+            "colossal": 3.0     # colossal (300%)
         }
         
-        base_health = 50
+        base_health = 20
         size_mult = size_multipliers.get(size, 1.0)
         
         return int(base_health * size_mult) 

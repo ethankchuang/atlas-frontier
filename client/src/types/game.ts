@@ -134,11 +134,11 @@ export interface MonsterCombatOutcome {
     monster_move: string;
     player_condition: string;
     monster_condition: string;
-    player_new_tags: Array<{name: string, type: string, severity: number}>;
-    monster_new_tags: Array<{name: string, type: string, severity: number}>;
-    player_severity: number;
-    monster_severity: number;
     narrative: string;
     combat_ends: boolean;
     monster_defeated: boolean;
+    player_vital?: number;
+    monster_vital?: number;
+    player_control?: number;
+    monster_control?: number;
 }

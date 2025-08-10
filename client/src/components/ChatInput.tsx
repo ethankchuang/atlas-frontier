@@ -5,34 +5,6 @@ import websocketService from '@/services/websocket';
 import { ChatMessage } from '@/types/game';
 import { PaperAirplaneIcon, FaceSmileIcon } from '@heroicons/react/24/solid';
 
-// Tag display component
-const CombatTags: React.FC<{ tags: Array<{ name: string; severity: number; type: 'positive' | 'negative' }>; totalSeverity: number }> = ({ tags, totalSeverity }) => {
-    if (tags.length === 0) return null;
-
-    return (
-        <div className="flex flex-wrap gap-1 mb-2">
-            {tags.map((tag, index) => (
-                <span
-                    key={index}
-                    className={`px-2 py-1 text-xs rounded-full ${
-                        tag.type === 'positive' 
-                            ? 'bg-green-100 text-green-800 border border-green-200' 
-                            : 'bg-red-100 text-red-800 border border-red-200'
-                    }`}
-                >
-                    {tag.name}
-                    {tag.severity > 0 && <span className="ml-1 font-bold">({tag.severity})</span>}
-                </span>
-            ))}
-            {totalSeverity > 0 && (
-                <span className="px-2 py-1 text-xs rounded-full bg-orange-100 text-orange-800 border border-orange-200 font-bold">
-                    Total Severity: {totalSeverity}/50
-                </span>
-            )}
-        </div>
-    );
-};
-
 const ChatInput: React.FC = () => {
     const [input, setInput] = useState('');
     const [isEmote, setIsEmote] = useState(false);
@@ -48,10 +20,6 @@ const ChatInput: React.FC = () => {
         bothMovesSubmitted,
         player1Condition,
         player2Condition,
-        player1Tags,
-        player2Tags,
-        player1TotalSeverity,
-        player2TotalSeverity,
         addMessage,
         updateMessage,
         submitDuelMove
@@ -210,10 +178,11 @@ const ChatInput: React.FC = () => {
                     // Handle errors
                     (error) => {
                         console.error('[ChatInput] Action error:', error);
+                        const friendly = "That didn’t go through. Please try again.";
                         if (streamMessageIdRef.current) {
                             updateMessage(streamMessageIdRef.current, (prev) => ({
                                 ...prev,
-                                message: `Error: ${error}`,
+                                message: friendly,
                                 isStreaming: false
                             }));
                         }
@@ -253,14 +222,12 @@ const ChatInput: React.FC = () => {
                     <div className="flex justify-between items-center mb-2">
                         <div className="flex items-center gap-2">
                             <span className="text-amber-100 text-sm font-mono">You: {player1Condition}</span>
-                            <CombatTags tags={player1Tags} totalSeverity={player1TotalSeverity} />
                         </div>
                         <span className="text-amber-100 text-sm font-mono">
                             {myDuelMove ? "Move submitted" : "Enter move"}
                         </span>
                         <div className="flex items-center gap-2">
                             <span className="text-amber-100 text-sm font-mono">{duelOpponent.name}: {player2Condition}</span>
-                            <CombatTags tags={player2Tags} totalSeverity={player2TotalSeverity} />
                         </div>
                     </div>
                 </div>

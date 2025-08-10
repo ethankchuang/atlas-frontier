@@ -6,24 +6,19 @@ from collections import defaultdict
 import sys
 import os
 import logging
-from pathlib import Path
 
-# Add the server directory to the Python path so we can import from app
-server_dir = Path(__file__).parent.parent
-sys.path.append(str(server_dir))
-
-from app.logger import setup_logging
-from app.config import settings
-
-# Set up logging
-setup_logging()
+# Set up basic logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+# Redis connection URL - adjust if needed
+REDIS_URL = os.getenv('REDIS_URL', 'redis://localhost:6379/0')
 
 def check_rooms():
     """Check all rooms in the database and analyze their data."""
     try:
         # Connect to Redis
-        redis_client = redis.Redis.from_url(settings.REDIS_URL)
+        redis_client = redis.Redis.from_url(REDIS_URL)
 
         # Get all room keys
         room_keys = redis_client.keys('room:*')
@@ -82,6 +77,22 @@ def check_rooms():
                 players = redis_client.smembers(players_key)
                 players = [p.decode('utf-8') if isinstance(p, bytes) else p for p in players]
 
+                # Get monsters in this room with full data
+                monsters = []
+                monster_ids = room.get('monsters', [])
+                for monster_id in monster_ids:
+                    try:
+                        monster_key = "monster:{}".format(monster_id)
+                        monster_data = redis_client.get(monster_key)
+                        if monster_data:
+                            if isinstance(monster_data, bytes):
+                                monster_data = monster_data.decode('utf-8')
+                            monster = json.loads(monster_data)
+                            monsters.append(monster)
+                    except Exception as e:
+                        logger.error("Error loading monster {}: {}".format(monster_id, str(e)))
+                        monsters.append({"id": monster_id, "error": "Failed to load"})
+
                 image_url = room.get('image_url', 'No image')
                 image_urls[image_url].append(room_id)
                 
@@ -98,6 +109,53 @@ def check_rooms():
                 print("Biome: {}".format(room.get('biome', 'No biome')))
                 print("Connections: {}".format(room.get('connections', {})))
                 print("Players: {}".format(players))
+                
+                # Show territorial blocking if persisted in room properties
+                props = room.get('properties', {}) or {}
+                terr_blocks = props.get('territorial_blocks') or {}
+                if terr_blocks:
+                    print("Territorial Blocks:")
+                    for m_id, dir_blocked in terr_blocks.items():
+                        print("  - Monster {} blocks {}".format(m_id, dir_blocked))
+
+                # Display monster information
+                if monsters:
+                    print("Monsters ({} total):".format(len(monsters)))
+                    for monster in monsters:
+                        if "error" in monster:
+                            print("  - {} (ERROR: {})".format(monster.get('id', 'Unknown'), monster['error']))
+                        else:
+                            print("  - {} (ID: {})".format(monster.get('name', 'Unnamed Monster'), monster.get('id', 'No ID')))
+                            print("    Aggressiveness: {} | Intelligence: {} | Size: {}".format(
+                                monster.get('aggressiveness', 'Unknown'),
+                                monster.get('intelligence', 'Unknown'),
+                                monster.get('size', 'Unknown')
+                            ))
+                            print("    Health: {} | Alive: {}".format(
+                                monster.get('health', 'Unknown'),
+                                monster.get('is_alive', 'Unknown')
+                            ))
+                            if monster.get('description'):
+                                desc = monster['description']
+                                if len(desc) > 80:
+                                    desc = desc[:80] + "..."
+                                print("    Description: {}".format(desc))
+                            if monster.get('special_effects'):
+                                effects = monster['special_effects']
+                                if len(effects) > 60:
+                                    effects = effects[:60] + "..."
+                                print("    Special Effects: {}".format(effects))
+                            
+                            # If territorial, show persisted blocking direction if available
+                            if monster.get('aggressiveness') == 'territorial':
+                                blocked = terr_blocks.get(monster.get('id')) if isinstance(terr_blocks, dict) else None
+                                if blocked:
+                                    print("    🛡️ TERRITORIAL: Blocking {} exit".format(blocked))
+                                else:
+                                    print("    🛡️ TERRITORIAL: Not currently blocking (no persisted info)")
+                else:
+                    print("Monsters: None")
+                
                 print("Image URL: {}".format(image_url))
                 print("Coordinates: ({}, {})".format(room.get('x', 'N/A'), room.get('y', 'N/A')))
                 print("Visited: {}".format(room.get('visited', 'N/A')))
@@ -171,6 +229,64 @@ def check_rooms():
                         x, y, coordinates_map[coord_key], room_id))
                 else:
                     coordinates_map[coord_key] = room_id
+
+        # Monster statistics
+        print("\n=== Monster Statistics ===\n")
+        total_monsters = 0
+        aggressiveness_stats = defaultdict(int)
+        intelligence_stats = defaultdict(int)
+        size_stats = defaultdict(int)
+        alive_monsters = 0
+        dead_monsters = 0
+        rooms_with_monsters = 0
+        
+        for room_id, room in rooms_by_id.items():
+            monster_ids = room.get('monsters', [])
+            if monster_ids:
+                rooms_with_monsters += 1
+                
+            for monster_id in monster_ids:
+                try:
+                    monster_key = "monster:{}".format(monster_id)
+                    monster_data = redis_client.get(monster_key)
+                    if monster_data:
+                        if isinstance(monster_data, bytes):
+                            monster_data = monster_data.decode('utf-8')
+                        monster = json.loads(monster_data)
+                        
+                        total_monsters += 1
+                        aggressiveness_stats[monster.get('aggressiveness', 'Unknown')] += 1
+                        intelligence_stats[monster.get('intelligence', 'Unknown')] += 1
+                        size_stats[monster.get('size', 'Unknown')] += 1
+                        
+                        if monster.get('is_alive', True):
+                            alive_monsters += 1
+                        else:
+                            dead_monsters += 1
+                except Exception as e:
+                    logger.error("Error processing monster {} for stats: {}".format(monster_id, str(e)))
+        
+        print("Total monsters: {}".format(total_monsters))
+        print("Alive: {} | Dead: {}".format(alive_monsters, dead_monsters))
+        rooms_percentage = (float(rooms_with_monsters) / len(rooms_by_id) * 100) if rooms_by_id else 0
+        print("Rooms with monsters: {} / {} ({:.1f}%)".format(
+            rooms_with_monsters, len(rooms_by_id), rooms_percentage
+        ))
+        
+        print("\nAggressiveness Distribution:")
+        for aggressiveness, count in sorted(aggressiveness_stats.items()):
+            percentage = (float(count) / total_monsters * 100) if total_monsters > 0 else 0
+            print("  {}: {} ({:.1f}%)".format(aggressiveness, count, percentage))
+        
+        print("\nIntelligence Distribution:")
+        for intelligence, count in sorted(intelligence_stats.items()):
+            percentage = (float(count) / total_monsters * 100) if total_monsters > 0 else 0
+            print("  {}: {} ({:.1f}%)".format(intelligence, count, percentage))
+        
+        print("\nSize Distribution:")
+        for size, count in sorted(size_stats.items()):
+            percentage = (float(count) / total_monsters * 100) if total_monsters > 0 else 0
+            print("  {}: {} ({:.1f}%)".format(size, count, percentage))
 
         print("\nTotal rooms processed: {}".format(len(rooms_by_id)))
         print("Unique coordinates: {}".format(len(coordinates_map)))

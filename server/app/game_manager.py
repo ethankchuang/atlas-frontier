@@ -6,6 +6,7 @@ import asyncio
 import random
 import logging
 import noise  # Perlin noise library, make sure it's in requirements.txt
+import os # Added for local image saving
 
 from .models import Room, Player, NPC, GameState, Direction, ActionRecord
 from .database import Database
@@ -266,11 +267,26 @@ class GameManager:
         
         for i in range(num_monsters):
             try:
+                # Create a fresh context for each monster to ensure diversity
+                # Don't pass room_context directly as it gets modified
+                fresh_context = {
+                    'room_id': room_context.get('room_id', ''),
+                    'room_title': room_context.get('room_title', ''),
+                    'room_description': room_context.get('room_description', ''),
+                    'biome': room_context.get('biome', '')
+                    # Deliberately exclude aggressiveness, intelligence, size to force random generation
+                }
+                
                 # Generate base monster data with random attributes
-                base_data = monster_template.generate_monster_data(room_context)
+                base_data = monster_template.generate_monster_data(fresh_context)
+                # Enforce: no aggressive monsters in the starting room
+                if room_context.get('room_id') == 'room_start' and base_data.get('aggressiveness') == 'aggressive':
+                    # Re-roll to a safe aggressiveness
+                    base_data['aggressiveness'] = random.choice(['passive', 'neutral', 'territorial'])
                 
                 # Generate AI content (name, description, special effects)
-                prompt = monster_template.generate_prompt(room_context)
+                # Use the fresh context that now includes the generated attributes
+                prompt = monster_template.generate_prompt(fresh_context)
                 ai_response = await self.ai_handler.generate_text(prompt)
                 
                 generated_data = monster_template.parse_response(ai_response)
@@ -318,6 +334,18 @@ class GameManager:
             players_in_room = await self.db.get_room_players(room_id)
             room.players = players_in_room
             await self.db.set_room(room_id, room.dict())
+
+            # Sanitize: ensure no aggressive monsters in starting room
+            try:
+                if room.monsters:
+                    for monster_id in room.monsters:
+                        m = await self.db.get_monster(monster_id)
+                        if m and m.get('is_alive', True) and m.get('aggressiveness') == 'aggressive':
+                            m['aggressiveness'] = 'neutral'
+                            await self.db.set_monster(monster_id, m)
+                            logger.info(f"[GameManager] Sanitized starting room monster {monster_id}: set aggressiveness to neutral")
+            except Exception as e:
+                logger.error(f"[GameManager] Failed to sanitize starting room monsters: {str(e)}")
             
             elapsed = time.time() - start_time
             logger.info(f"[Performance] Starting room already exists, loaded in {elapsed:.2f}s")
@@ -708,121 +736,7 @@ class GameManager:
             
             return room_id, new_room
 
-    async def handle_room_movement(
-        self, 
-        player: Player, 
-        current_room: Room, 
-        action: str, 
-        ai_suggested_room_id: str
-    ) -> Tuple[str, Room]:
-        """
-        Handle player movement to a new room using discovery system.
-        Each coordinate has two states: discovered and undiscovered.
-        Returns (actual_room_id, room_object)
-        DEPRECATED: Use handle_room_movement_by_direction instead
-        """
-        # Determine direction based on action
-        action_lower = action.lower()
-        if "north" in action_lower:
-            direction = Direction.NORTH
-        elif "south" in action_lower:
-            direction = Direction.SOUTH
-        elif "east" in action_lower:
-            direction = Direction.EAST
-        elif "west" in action_lower:
-            direction = Direction.WEST
-        elif "up" in action_lower or "climb" in action_lower:
-            direction = Direction.UP
-        elif "down" in action_lower or "descend" in action_lower:
-            direction = Direction.DOWN
-        else:
-            # Default to north if no direction is specified
-            direction = Direction.NORTH
-
-        # Calculate destination coordinates
-        current_x, current_y = current_room.x, current_room.y
-        new_x, new_y = self._get_coordinates_for_direction(current_x, current_y, direction)
-        
-        logger.info(f"[Discovery] Player moving from ({current_x}, {current_y}) to ({new_x}, {new_y})")
-        
-        # Check if destination coordinates have been discovered
-        is_discovered = await self.db.is_coordinate_discovered(new_x, new_y)
-        
-        if is_discovered:
-            # DISCOVERED COORDINATE: Load existing room data
-            existing_room_data = await self.db.get_room_by_coordinates(new_x, new_y)
-            if existing_room_data:
-                existing_room_id = existing_room_data["id"]
-                logger.info(f"[Discovery] Loading discovered room {existing_room_id} at ({new_x}, {new_y})")
-                # Update room data with current players
-                players_in_room = await self.db.get_room_players(existing_room_id)
-                existing_room_data["players"] = players_in_room
-                room = Room(**existing_room_data)
-                return existing_room_id, room
-            else:
-                logger.error(f"[Discovery] Coordinate ({new_x}, {new_y}) marked as discovered but no room found!")
-                # Fallback: treat as undiscovered
-                is_discovered = False
-        
-        if not is_discovered:
-            # UNDISCOVERED COORDINATE: Trigger preloading and wait for completion
-            logger.info(f"[Discovery] Coordinate ({new_x}, {new_y}) not discovered - triggering preloading")
-            room_id = f"room_{new_x}_{new_y}"
-            
-            # Check if room is already being generated
-            if await self.db.is_room_generation_locked(room_id):
-                logger.info(f"[Discovery] Room {room_id} is already being generated - waiting for completion")
-            else:
-                # Try to acquire generation lock and start generation
-                lock_acquired = await self.db.set_room_generation_lock(room_id)
-                if lock_acquired:
-                    logger.info(f"[Discovery] Starting generation for room {room_id}")
-                    # Start generation in background
-                    asyncio.create_task(self._generate_room_details_async(
-                        room_id, current_room, direction, player
-                    ))
-                else:
-                    logger.info(f"[Discovery] Could not acquire lock for {room_id} - waiting for completion")
-            
-            # Wait for room to be generated (with timeout)
-            timeout = 60  # 60 seconds timeout
-            start_wait = time.time()
-            while time.time() - start_wait < timeout:
-                # Check if room exists and has content ready
-                room_data = await self.db.get_room(room_id)
-                if room_data and room_data.get('image_status') in ['content_ready', 'ready']:
-                    logger.info(f"[Discovery] Room {room_id} is ready after generation")
-                    players_in_room = await self.db.get_room_players(room_id)
-                    room_data["players"] = players_in_room
-                    room = Room(**room_data)
-                    return room_id, room
-                
-                # Check if room is still being generated
-                if room_data and room_data.get('image_status') == 'generating':
-                    logger.info(f"[Discovery] Room {room_id} is still generating, waiting...")
-                    await asyncio.sleep(1.0)
-                    continue
-                
-                # Room doesn't exist yet, wait a bit more
-                await asyncio.sleep(0.5)
-            
-            # Timeout reached, create fallback room
-            logger.warning(f"[Discovery] Timeout waiting for generation at ({new_x}, {new_y}), creating fallback")
-            placeholder_title = f"Unexplored Area ({direction.title()})"
-            placeholder_description = f"You venture {direction} into an unexplored area. The details of this place are still forming in your mind..."
-            
-            new_room = await self.create_room_with_coordinates(
-                room_id=room_id,
-                x=new_x,
-                y=new_y,
-                title=placeholder_title,
-                description=placeholder_description,
-                image_url="",
-                players=[player.id],
-                mark_discovered=True
-            )
-            return room_id, new_room
-
+    
     def _get_coordinates_for_direction(self, current_x: int, current_y: int, direction: Direction) -> Tuple[int, int]:
         """Get coordinates for moving in a direction"""
         if direction == Direction.NORTH:
@@ -1256,13 +1170,35 @@ class GameManager:
                     "room": room_data
                 })
             
-            # Generate the image
+            # Generate the image (remote URL)
             image_url = await self.ai_handler.generate_room_image(image_prompt)
             
-            # Update room with image URL
+            # Save image locally for stability
+            local_url = image_url
+            try:
+                import aiohttp
+                from pathlib import Path
+                from .main import _static_dir
+                
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(image_url) as resp:
+                        if resp.status == 200:
+                            data = await resp.read()
+                            Path(_static_dir).mkdir(parents=True, exist_ok=True)
+                            file_name = f"room_{room_id}.webp"
+                            file_path = os.path.join(_static_dir, file_name)
+                            with open(file_path, 'wb') as f:
+                                f.write(data)
+                            local_url = f"/static/{file_name}"
+                        else:
+                            logger.warning(f"[Image Generation] Failed to fetch remote image ({resp.status}), keeping remote URL")
+            except Exception as e:
+                logger.error(f"[Image Generation] Error saving local image: {str(e)}")
+            
+            # Update room with final image URL
             room_data = await self.db.get_room(room_id)
             if room_data:
-                room_data['image_url'] = image_url
+                room_data['image_url'] = local_url
                 room_data['image_status'] = 'ready'
                 await self.db.set_room(room_id, room_data)
                 

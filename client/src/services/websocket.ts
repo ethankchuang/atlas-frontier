@@ -326,13 +326,14 @@ class WebSocketService {
                 player_id: 'system',
                 room_id: this.roomId!,
                 message: data.message,
-                                    message_type: 'system',
+                message_type: 'system',
                 timestamp: data.timestamp,
                 item_name: data.item_name,
                 item_rarity: data.item_rarity,
                 rarity_stars: data.rarity_stars
             };
-            useGameStore.getState().addMessage(itemMessage);
+            const store = useGameStore.getState();
+            store.addMessage(itemMessage);
             console.log('[WebSocket] Added item obtained message to chat:', data.message);
         }
     }
@@ -366,7 +367,7 @@ class WebSocketService {
         }
 
         // Handle monster duels
-        if (data.is_monster_duel && data.monster_name) {
+        if ((data as any).is_monster_duel && data.monster_name) {
             if (data.response === 'accept') {
                 console.log('[WebSocket] Monster duel accepted! Starting duel with:', data.monster_name);
                 
@@ -375,6 +376,10 @@ class WebSocketService {
                     // Player challenged monster, monster accepted
                     console.log('[WebSocket] Starting monster duel as challenger');
                     store.startDuel({ id: data.responder_id, name: data.monster_name });
+                    // Apply max vitals immediately if provided
+                    const p1Max = (data as any).player1_max_vital ?? 6;
+                    const p2Max = (data as any).player2_max_vital ?? 6;
+                    useGameStore.getState().setMaxVitals(p1Max, p2Max);
                     
                     const message = `The ${data.monster_name} accepts your challenge! The duel begins!`;
                     store.addMessage({
@@ -678,21 +683,23 @@ class WebSocketService {
 
     private handleDuelRoundResult(data: { 
         type: 'duel_round_result'; 
-        round: number;
+        round: number; 
         player1_id: string; 
         player2_id: string; 
-        player1_move: string;
-        player2_move: string;
-        player1_condition: string;
-        player2_condition: string;
-        player1_tags: Array<{ name: string; severity: number; type: 'positive' | 'negative' }>;
-        player2_tags: Array<{ name: string; severity: number; type: 'positive' | 'negative' }>;
-        player1_total_severity: number;
-        player2_total_severity: number;
-        description: string;
-        combat_ends: boolean;
+        player1_move: string; 
+        player2_move: string; 
+        player1_condition: string; 
+        player2_condition: string; 
+        player1_vital?: number; 
+        player2_vital?: number; 
+        player1_control?: number; 
+        player2_control?: number; 
+        player1_max_vital?: number;
+        player2_max_vital?: number;
+        description: string; 
+        combat_ends: boolean; 
         room_id: string; 
-        timestamp: string 
+        timestamp: string; 
     }) {
         console.log('[WebSocket] Handling duel round result:', data);
         const store = useGameStore.getState();
@@ -703,7 +710,7 @@ class WebSocketService {
             return;
         }
 
-        // Show both players' moves for this round
+        // Show what each side prepared
         if (data.player1_move) {
             store.addMessage({
                 player_id: 'system',
@@ -713,7 +720,6 @@ class WebSocketService {
                 timestamp: data.timestamp
             });
         }
-        
         if (data.player2_move) {
             const opponent = store.duelOpponent;
             const opponentName = opponent?.name || 'Unknown';
@@ -735,9 +741,23 @@ class WebSocketService {
             timestamp: data.timestamp
         });
 
-        // Update duel state with new conditions and tags
+        // Update duel state with new conditions and clocks
         store.updateDuelConditions(data.player1_condition, data.player2_condition);
-        store.updateDuelTags(data.player1_tags, data.player2_tags, data.player1_total_severity, data.player2_total_severity);
+        if (typeof data.player1_vital === 'number' && typeof data.player2_vital === 'number') {
+            store.updateDuelClocks(
+                data.player1_vital,
+                data.player2_vital,
+                data.player1_control ?? store.player1Control,
+                data.player2_control ?? store.player2Control
+            );
+        }
+
+        // Persist dynamic max vitals for rendering if present
+        if (typeof (data as any).player1_max_vital === 'number' || typeof (data as any).player2_max_vital === 'number') {
+            const p1Max = (data as any).player1_max_vital ?? ((useGameStore.getState() as any).player1MaxVital ?? 6);
+            const p2Max = (data as any).player2_max_vital ?? ((useGameStore.getState() as any).player2MaxVital ?? 6);
+            useGameStore.getState().setMaxVitals(p1Max, p2Max);
+        }
 
         if (data.combat_ends) {
             // Combat is over - end the duel
@@ -753,10 +773,6 @@ class WebSocketService {
         round: number;
         player1_condition: string;
         player2_condition: string;
-        player1_tags: Array<{ name: string; severity: number; type: 'positive' | 'negative' }>;
-        player2_tags: Array<{ name: string; severity: number; type: 'positive' | 'negative' }>;
-        player1_total_severity: number;
-        player2_total_severity: number;
         room_id: string; 
         timestamp: string 
     }) {
@@ -772,7 +788,6 @@ class WebSocketService {
         // Update duel state for next round
         store.prepareNextRound(data.round);
         store.updateDuelConditions(data.player1_condition, data.player2_condition);
-        store.updateDuelTags(data.player1_tags, data.player2_tags, data.player1_total_severity, data.player2_total_severity);
 
         // Add a message to chat about the next round
         store.addMessage({

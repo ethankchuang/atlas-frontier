@@ -160,7 +160,10 @@ class APIService {
                                 store.setIsMovementLoading(false);
                             }
                             
-                            if (data.error.includes('Room not found')) {
+                            // Graceful user-facing message
+                            onError('That didn’t go through. Please try again.');
+                            
+                            if (typeof data.error === 'string' && data.error.includes('Room not found')) {
                                 const player = store.player;
                                 if (player && player.current_room) {
                                     console.log('[API] Room error detected. Attempting to reconnect to current room:', player.current_room);
@@ -192,6 +195,12 @@ class APIService {
                         if (data.type === 'chunk') {
                             onChunk(data.content);
                         } else if (data.type === 'final') {
+                            // Guard against malformed updates by ensuring object shape
+                            if (data.updates && typeof data.updates !== 'object') {
+                                console.warn('[API] Malformed updates payload; prompting retry');
+                                onError('That didn’t go through. Please try again.');
+                                return;
+                            }
                             console.log('[API] Final stream data:', data);
 
                             // Handle room generation status
@@ -206,6 +215,12 @@ class APIService {
                                     console.log('[API] Room is ready, hiding loading spinner');
                                     store.setIsRoomGenerating(false);
                                 }
+                            }
+
+                            // Upsert any newly created item from updates to populate inventory UI
+                            if (data.updates?.new_item) {
+                                const store = useGameStore.getState();
+                                store.upsertItems([data.updates.new_item]);
                             }
 
                             // Handle room change
@@ -236,18 +251,18 @@ class APIService {
                     }
                 }
             }
-        } catch (error) {
-            console.error('[API] Stream error:', error);
-            
-            // Clear movement loading state on error
-            const store = useGameStore.getState();
-            const isMovement = /(north|south|east|west|up|down|move)/i.test(action.action);
-            if (isMovement) {
-                store.setIsMovementLoading(false);
+                    } catch (error) {
+                console.error('[API] Stream error:', error);
+                
+                // Clear movement loading state on error
+                const store = useGameStore.getState();
+                const isMovement = /(north|south|east|west|up|down|move)/i.test(action.action);
+                if (isMovement) {
+                    store.setIsMovementLoading(false);
+                }
+                
+                onError('That didn’t go through. Please try again.');
             }
-            
-            onError(error instanceof Error ? error.message : 'An error occurred');
-        }
     }
 
     // Legacy action processing - REMOVED

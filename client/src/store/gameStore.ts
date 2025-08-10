@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { Player, Room, NPC, GameState, ChatMessage } from '@/types/game';
+import { Player, Room, NPC, GameState, ChatMessage, Item } from '@/types/game';
 
 // Extend ChatMessage type to support streaming
 interface ExtendedChatMessage extends ChatMessage {
@@ -68,6 +68,16 @@ interface GameStore {
     isMinimapFullscreen: boolean;
     setIsMinimapFullscreen: (fullscreen: boolean) => void;
 
+    // Pause/Menu state
+    isMenuOpen: boolean;
+    setIsMenuOpen: (open: boolean) => void;
+    isInventoryOpen: boolean;
+    setIsInventoryOpen: (open: boolean) => void;
+
+    // Item registry for client-side lookup
+    itemsById: { [id: string]: Item };
+    upsertItems: (items: Item[]) => void;
+
     // Duel challenge state
     duelChallenge: { challengerName: string; challengerId: string } | null;
     setDuelChallenge: (challenge: { challengerName: string; challengerId: string } | null) => void;
@@ -81,10 +91,14 @@ interface GameStore {
     currentRound: number;
     player1Condition: string;
     player2Condition: string;
-    player1Tags: Array<{ name: string; severity: number; type: 'positive' | 'negative' }>;
-    player2Tags: Array<{ name: string; severity: number; type: 'positive' | 'negative' }>;
-    player1TotalSeverity: number;
-    player2TotalSeverity: number;
+    // New Health/Advantage clocks (Vital/Control backend)
+    player1Vital: number;
+    player2Vital: number;
+    player1Control: number;
+    player2Control: number;
+    player1MaxVital?: number;
+    player2MaxVital?: number;
+    setMaxVitals: (p1Max: number, p2Max: number) => void;
     
     // Duel actions
     startDuel: (opponent: { id: string; name: string }) => void;
@@ -92,7 +106,7 @@ interface GameStore {
     setOpponentMove: (move: string) => void;
     setBothMovesSubmitted: (submitted: boolean) => void;
     updateDuelConditions: (player1Condition: string, player2Condition: string) => void;
-    updateDuelTags: (player1Tags: any[], player2Tags: any[], player1TotalSeverity: number, player2TotalSeverity: number) => void;
+    updateDuelClocks: (p1Vital: number, p2Vital: number, p1Control: number, p2Control: number) => void;
     prepareNextRound: (round: number) => void;
     endDuel: () => void;
 }
@@ -123,6 +137,14 @@ const useGameStore = create<GameStore>((set, get) => ({
     isRoomGenerating: false,
     error: null,
     isMinimapFullscreen: false,
+    
+    // Menu/Inventory state
+    isMenuOpen: false,
+    isInventoryOpen: false,
+
+    // Item registry
+    itemsById: {},
+
     duelChallenge: null,
     isInDuel: false,
     duelOpponent: null,
@@ -132,10 +154,13 @@ const useGameStore = create<GameStore>((set, get) => ({
     currentRound: 1,
     player1Condition: "Healthy",
     player2Condition: "Healthy",
-    player1Tags: [],
-    player2Tags: [],
-    player1TotalSeverity: 0,
-    player2TotalSeverity: 0,
+    // New Vital/Control
+    player1Vital: 0,
+    player2Vital: 0,
+    player1Control: 0,
+    player2Control: 0,
+    player1MaxVital: 6,
+    player2MaxVital: 6,
 
     // Setters
     setPlayer: (player) => set({ player }),
@@ -161,6 +186,7 @@ const useGameStore = create<GameStore>((set, get) => ({
     }),
     setNPCs: (npcs) => set({ npcs }),
     setPlayersInRoom: (players) => set({ playersInRoom: players }),
+    setMaxVitals: (p1Max, p2Max) => set({ player1MaxVital: p1Max, player2MaxVital: p2Max }),
     setGameState: (state) => set({ gameState: state }),
     addMessage: (message) => set((state) => ({
         messages: [...state.messages, message]
@@ -197,6 +223,21 @@ const useGameStore = create<GameStore>((set, get) => ({
     setIsRoomGenerating: (generating) => set({ isRoomGenerating: generating }),
     setError: (error) => set({ error }),
     setIsMinimapFullscreen: (fullscreen) => set({ isMinimapFullscreen: fullscreen }),
+
+    // Menu/Inventory actions
+    setIsMenuOpen: (open) => set({ isMenuOpen: open }),
+    setIsInventoryOpen: (open) => set({ isInventoryOpen: open }),
+
+    // Items registry actions
+    upsertItems: (items: Item[]) => set((state) => {
+        const updated = { ...state.itemsById };
+        for (const item of items || []) {
+            if (item && item.id) {
+                updated[item.id] = item;
+            }
+        }
+        return { itemsById: updated };
+    }),
     setDuelChallenge: (challenge) => set({ duelChallenge: challenge }),
     
     // Duel actions
@@ -211,10 +252,6 @@ const useGameStore = create<GameStore>((set, get) => ({
             currentRound: 1,
             player1Condition: "Healthy",
             player2Condition: "Healthy",
-            player1Tags: [],
-            player2Tags: [],
-            player1TotalSeverity: 0,
-            player2TotalSeverity: 0,
         });
         console.log('[GameStore] Duel state updated');
     },
@@ -243,7 +280,7 @@ const useGameStore = create<GameStore>((set, get) => ({
     }),
     setBothMovesSubmitted: (submitted) => set({ bothMovesSubmitted: submitted }),
     updateDuelConditions: (player1Condition, player2Condition) => set({ player1Condition, player2Condition }),
-    updateDuelTags: (player1Tags, player2Tags, player1TotalSeverity, player2TotalSeverity) => set({ player1Tags, player2Tags, player1TotalSeverity, player2TotalSeverity }),
+    updateDuelClocks: (p1Vital: number, p2Vital: number, p1Control: number, p2Control: number) => set({ player1Vital: p1Vital, player2Vital: p2Vital, player1Control: p1Control, player2Control: p2Control }),
     prepareNextRound: (round) => set({ 
         currentRound: round,
         myDuelMove: null,
@@ -259,10 +296,12 @@ const useGameStore = create<GameStore>((set, get) => ({
         currentRound: 1,
         player1Condition: "Healthy",
         player2Condition: "Healthy",
-        player1Tags: [],
-        player2Tags: [],
-        player1TotalSeverity: 0,
-        player2TotalSeverity: 0,
+        player1Vital: 0,
+        player2Vital: 0,
+        player1Control: 0,
+        player2Control: 0,
+        player1MaxVital: 6,
+        player2MaxVital: 6,
     })
 }));
 

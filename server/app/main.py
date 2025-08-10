@@ -26,6 +26,7 @@ from .game_manager import GameManager
 from .config import settings
 from .logger import setup_logging
 from .templates.items import GenericItemTemplate
+from .monster_behavior import monster_behavior_manager
 import uuid
 from pydantic import BaseModel
 from typing import Optional, Dict, Any, List
@@ -146,7 +147,96 @@ async def handle_duel_message(message: dict, room_id: str, player_id: str, game_
     
     message_type = message.get("type")
     
-    if message_type == "duel_move":
+    if message_type == "duel_challenge":
+        try:
+            challenger_id = message.get("challenger_id") or player_id
+            target_id = message.get("target_id")
+            if not target_id:
+                logger.error("[handle_duel_message] duel_challenge missing target_id")
+                return
+            import uuid as _uuid
+            duel_id = f"pvp_duel_{_uuid.uuid4()}"
+            duel_pending[duel_id] = {
+                "player1_id": challenger_id,
+                "player2_id": target_id,
+                "room_id": room_id,
+                "round": 1,
+                "player1_condition": "healthy",
+                "player2_condition": "healthy",
+                "player1_tags": [],
+                "player2_tags": [],
+                "player1_total_severity": 0,
+                "player2_total_severity": 0,
+                "is_monster_duel": False,
+                "history": [],
+                "player1_vital": 0,
+                "player2_vital": 0,
+                "player1_control": 0,
+                "player2_control": 0,
+                "finishing_window_owner": None
+            }
+            await manager.broadcast_to_room(room_id, {
+                "type": "duel_challenge",
+                "challenger_id": challenger_id,
+                "target_id": target_id,
+                "room_id": room_id,
+                "timestamp": datetime.now().isoformat()
+            })
+            return
+        except Exception as e:
+            logger.error(f"[handle_duel_message] Error handling duel_challenge: {str(e)}")
+            return
+    
+    if message_type == "duel_response":
+        try:
+            challenger_id = message.get("challenger_id")
+            responder_id = message.get("responder_id") or player_id
+            response = message.get("response")
+            duel_id = None
+            for potential_duel_id, duel_info in duel_pending.items():
+                if (duel_info.get("room_id") == room_id and
+                    {duel_info.get("player1_id"), duel_info.get("player2_id")} == {challenger_id, responder_id} and
+                    not duel_info.get("is_monster_duel")):
+                    duel_id = potential_duel_id
+                    break
+            if not duel_id and response == "accept" and challenger_id and responder_id:
+                import uuid as _uuid
+                duel_id = f"pvp_duel_{_uuid.uuid4()}"
+                duel_pending[duel_id] = {
+                    "player1_id": challenger_id,
+                    "player2_id": responder_id,
+                    "room_id": room_id,
+                    "round": 1,
+                    "player1_condition": "healthy",
+                    "player2_condition": "healthy",
+                    "player1_tags": [],
+                    "player2_tags": [],
+                    "player1_total_severity": 0,
+                    "player2_total_severity": 0,
+                    "is_monster_duel": False,
+                    "history": [],
+                    "player1_vital": 0,
+                    "player2_vital": 0,
+                    "player1_control": 0,
+                    "player2_control": 0,
+                    "finishing_window_owner": None
+                }
+            await manager.broadcast_to_room(room_id, {
+                "type": "duel_response",
+                "challenger_id": challenger_id,
+                "responder_id": responder_id,
+                "response": response,
+                "room_id": room_id,
+                "timestamp": datetime.now().isoformat()
+            })
+            if response == "decline" and duel_id and duel_id in duel_pending:
+                del duel_pending[duel_id]
+            return
+        except Exception as e:
+            logger.error(f"[handle_duel_message] Error handling duel_response: {str(e)}")
+            return
+    
+    if message_type == "duel_move": 
         # Store the move
         duel_id = message.get("duel_id")
         
@@ -170,6 +260,12 @@ async def handle_duel_message(message: dict, room_id: str, player_id: str, game_
         
         if duel_id not in duel_moves:
             duel_moves[duel_id] = {}
+        
+        # Ensure duel has history container
+        try:
+            duel_pending.get(duel_id, {}).setdefault('history', [])
+        except Exception as e:
+            logger.error(f"[handle_duel_message] Error ensuring duel history exists: {str(e)}")
         
         duel_moves[duel_id][player_id] = move
         
@@ -239,9 +335,25 @@ async def get_room_monsters_description(room_id: str, game_manager: GameManager)
         logger.error(f"Error getting room monsters description: {str(e)}")
         return ""
 
-async def generate_monster_combat_move(monster_data: Dict[str, Any], player_data: Dict[str, Any], room_data: Dict[str, Any], round_number: int, game_manager: GameManager) -> str:
+async def generate_monster_combat_move(monster_data: Dict[str, Any], player_data: Dict[str, Any], room_data: Dict[str, Any], round_number: int, game_manager: GameManager, recent_rounds: Optional[List[Dict[str, Any]]] = None) -> str:
     """Generate a contextual combat move for a monster using AI"""
     try:
+        recent_rounds = recent_rounds or []
+        # Build concise recent monster move history
+        monster_history_lines: List[str] = []
+        try:
+            for r in recent_rounds[-5:]:
+                m = r.get('player2_move') or r.get('monster_move') or ''
+                if m:
+                    monster_history_lines.append(f"R{r.get('round')}: {m}")
+        except Exception:
+            monster_history_lines = []
+        history_block = "\n".join(monster_history_lines) if monster_history_lines else "None"
+        recent_moves = [
+            (r.get('player2_move') or r.get('monster_move') or '').strip().lower()
+            for r in recent_rounds[-5:]
+            if (r.get('player2_move') or r.get('monster_move'))
+        ]
         # Build context for AI
         monster_name = monster_data.get('name', 'Unknown Monster')
         monster_size = monster_data.get('size', 'human')
@@ -257,60 +369,98 @@ async def generate_monster_combat_move(monster_data: Dict[str, Any], player_data
         room_biome = room_data.get('biome', 'unknown')
         
         # Create AI prompt for monster move generation
-        prompt = f"""You are controlling a monster in combat. Generate a single combat move for this creature.
-
-MONSTER DETAILS:
-- Name: {monster_name}
-- Size: {monster_size}
-- Aggressiveness: {monster_aggressiveness}
-- Intelligence: {monster_intelligence}
-- Description: {monster_description}
-- Special Effects: {monster_special_effects}
-- Current Health: {monster_health}
-
-COMBAT CONTEXT:
-- Round: {round_number}
-- Fighting: {player_name}
-- Location: {room_title} ({room_biome})
-
-MOVE GENERATION RULES:
-1. Generate ONE specific combat action (2-5 words)
-2. Match the monster's aggressiveness level:
-   - passive: defensive moves, retreating, minimal attacks
-   - neutral: balanced offense and defense
-   - aggressive: fierce attacks, advancing moves
-   - territorial: protective attacks, warning strikes
-3. Match the monster's intelligence:
-   - animal: instinctive moves (bite, claw, pounce)
-   - subhuman: simple tactics (charge, strike, dodge)
-   - human: tactical moves (feint, combo attacks, positioning)
-   - omnipotent: complex strategies (multi-stage attacks)
-4. Use size appropriately:
-   - insect/chicken: quick, darting moves
-   - human/horse: standard combat moves
-   - dinosaur/colossal: powerful, crushing moves
-5. Incorporate special effects when relevant
-6. Use basic combat actions (no equipment needed)
-
-EXAMPLES:
-- "lunges with claws extended"
-- "breathes a cone of fire"
-- "charges with lowered horns"
-- "strikes with venomous fangs"
-- "dodges and counterattacks"
-
-Generate ONLY the move, nothing else:"""
-
+        prompt = f"""You are controlling a monster in combat. Generate FIVE distinct candidate combat moves for this creature.
+ 
+ RECENT MONSTER MOVES (avoid repeating, vary tactics):
+ {history_block}
+ 
+ MONSTER DETAILS:
+ - Name: {monster_name}
+ - Size: {monster_size}
+ - Aggressiveness: {monster_aggressiveness}
+ - Intelligence: {monster_intelligence}
+ - Description: {monster_description}
+ - Special Effects: {monster_special_effects}
+ - Current Health: {monster_health}
+ 
+ COMBAT CONTEXT:
+ - Round: {round_number}
+ - Fighting: {player_name}
+ - Location: {room_title} ({room_biome})
+ 
+ MOVE GENERATION RULES:
+ 1. Generate FIVE specific combat actions (2-5 words each)
+ 2. Match the monster's aggressiveness level:
+    - passive: NEVER directly attack the player - only defensive moves, retreating, evasion, or intimidation
+    - neutral: balanced offense and defense, only attacks when provoked
+    - aggressive: fierce attacks, advancing moves, relentless offense
+    - territorial: protective attacks, warning strikes, defending their space
+ 3. Match the monster's intelligence:
+    - animal: instinctive moves (bite, claw, pounce)
+    - subhuman: simple tactics (charge, strike, dodge)
+    - human: tactical moves (feint, combo attacks, positioning)
+    - omnipotent: complex strategies (multi-stage attacks)
+ 4. Use size appropriately:
+    - insect/chicken: quick, darting moves
+    - human/horse: standard combat moves
+    - dinosaur/colossal: powerful, crushing moves
+ 5. Incorporate special effects when relevant
+ 6. Use basic combat actions (no equipment needed)
+ 7. Avoid repeating recent moves; vary verbs and approach.
+ 
+ EXAMPLES:
+ - "lunges with claws extended"
+ - "breathes a cone of fire"
+ - "charges with lowered horns"
+ - "strikes with venomous fangs"
+ - "dodges and counterattacks"
+ 
+ Return STRICT JSON array of 5 strings, no prose, e.g.: ["option 1", "option 2", "option 3", "option 4", "option 5"]"""
+ 
         # Get AI response
         ai_response = await game_manager.ai_handler.generate_text(prompt)
-        move = ai_response.strip()
-        
-        # Ensure reasonable length
-        if len(move) > 100:
-            move = move[:100]
-        
-        logger.info(f"[generate_monster_combat_move] Generated move for {monster_name}: '{move}'")
-        return move
+        text = ai_response.strip()
+        # Parse JSON array of options
+        options: List[str] = []
+        try:
+            parsed = json.loads(text)
+            if isinstance(parsed, list):
+                options = [str(x).strip() for x in parsed if isinstance(x, (str, int, float))]
+        except Exception:
+            # Fallback: try to extract between [ ]
+            try:
+                start = text.find('[')
+                end = text.rfind(']')
+                if start != -1 and end != -1 and end > start:
+                    parsed = json.loads(text[start:end+1])
+                    if isinstance(parsed, list):
+                        options = [str(x).strip() for x in parsed if isinstance(x, (str, int, float))]
+            except Exception:
+                options = []
+        if not options:
+            # Last fallback: split by newlines and take up to 5
+            options = [line.strip('- ').strip() for line in text.splitlines() if line.strip()][:5]
+
+        # Choose option least similar to recent moves (avoid repetition) using difflib ratio
+        try:
+            from difflib import SequenceMatcher
+            def max_similarity(candidate: str) -> float:
+                cand = (candidate or '').strip().lower()
+                if not recent_moves:
+                    return 0.0
+                return max(SequenceMatcher(None, cand, prev).ratio() for prev in recent_moves)
+            # Rank by smallest maximum similarity; tie-break by length diversity
+            ranked = sorted(options, key=lambda o: (round(max_similarity(o), 4), len(o)))
+            chosen = ranked[0] if ranked else (options[0] if options else "attacks")
+        except Exception:
+            chosen = options[0] if options else "attacks"
+
+        # Trim overly long
+        if len(chosen) > 100:
+            chosen = chosen[:100]
+
+        logger.info(f"[generate_monster_combat_move] Generated move for {monster_name} (chosen): '{chosen}' from options: {options}")
+        return chosen
         
     except Exception as e:
         logger.error(f"Error generating monster combat move: {str(e)}")
@@ -381,6 +531,10 @@ async def initiate_monster_duel(player_id: str, monster_id: str, player_action: 
             logger.error(f"[initiate_monster_duel] Missing data - player: {bool(player_data)}, monster: {bool(monster_data)}")
             return
         
+        # Compute max vitals upfront and include immediately
+        player1_max_vital = 6
+        player2_max_vital = await get_monster_max_vital(monster_data)
+
         # Send duel challenge from player to monster
         duel_challenge = {
             "type": "duel_challenge",
@@ -402,7 +556,9 @@ async def initiate_monster_duel(player_id: str, monster_id: str, player_action: 
             "room_id": room_id,
             "timestamp": datetime.now().isoformat(),
             "monster_name": monster_data.get('name', 'Unknown Monster'),  # Add monster name for frontend
-            "is_monster_duel": True  # Flag to indicate this is a monster duel
+            "is_monster_duel": True,  # Flag to indicate this is a monster duel
+            "player1_max_vital": player1_max_vital,
+            "player2_max_vital": player2_max_vital
         }
         await manager.broadcast_to_room(room_id, duel_response)
         
@@ -419,7 +575,13 @@ async def initiate_monster_duel(player_id: str, monster_id: str, player_action: 
             "player1_total_severity": 0,
             "player2_total_severity": 0,
             "is_monster_duel": True,  # Flag for special handling
-            "monster_data": monster_data  # Store monster data for AI move generation
+            "monster_data": monster_data,  # Store monster data for AI move generation
+            "history": [],  # Keep last 10 rounds of combat history
+            "player1_vital": 0,
+            "player2_vital": 0,
+            "player1_control": 0,
+            "player2_control": 0,
+            "finishing_window_owner": None
         }
         
         # Don't store the initial attack - let player choose their combat move
@@ -438,9 +600,16 @@ async def auto_submit_monster_move(duel_id: str, monster_id: str, player_data: d
         # Get room data
         room_data = await game_manager.db.get_room(room_id)
         
+        # Fetch recent history to promote varied moves
+        recent_rounds = []
+        try:
+            recent_rounds = (duel_pending.get(duel_id, {}) or {}).get('history', [])[-5:]
+        except Exception:
+            recent_rounds = []
+
         # Generate monster move
         monster_move = await generate_monster_combat_move(
-            monster_data, player_data, room_data, round_number, game_manager
+            monster_data, player_data, room_data, round_number, game_manager, recent_rounds=recent_rounds
         )
         
         # Submit the monster's move
@@ -517,6 +686,8 @@ async def analyze_monster_combat(combat_id: str, game_manager: GameManager):
         logger.info(f"[analyze_monster_combat] Starting analysis for combat {combat_id}")
         
         combat_info = monster_combat_pending[combat_id]
+        # Ensure history list exists
+        combat_history = combat_info.setdefault('history', [])
         player_id = combat_info['player_id']
         monster_id = combat_info['monster_id']
         room_id = combat_info['room_id']
@@ -542,11 +713,9 @@ async def analyze_monster_combat(combat_id: str, game_manager: GameManager):
         room_name = room_data.get('title', 'Unknown Room') if room_data else "Unknown Room"
         room_description = room_data.get('description', 'An unknown location') if room_data else "An unknown location"
         
-        # Get current conditions and tags
+        # Current conditions
         player_condition = combat_info.get('player_condition', 'healthy')
         monster_condition = combat_info.get('monster_condition', 'healthy')
-        player_current_tags = combat_info.get('player_tags', [])
-        monster_current_tags = combat_info.get('monster_tags', [])
         
         # Validate equipment (monsters don't have inventory, so only validate player)
         equipment_result = await validate_equipment(
@@ -585,56 +754,36 @@ async def analyze_monster_combat(combat_id: str, game_manager: GameManager):
             player_name, player_move, combat_outcome['player1_result'],
             monster_name, monster_move, combat_outcome['player2_result'],
             player_invalid, monster_invalid, current_round,
-            room_name, room_description, game_manager
+            room_name, room_description, game_manager,
+            recent_rounds=combat_history[-10:]
         )
         
         logger.info(f"[analyze_monster_combat] Narrative generated: {narrative[:100]}...")
         
-        # Generate tags based on narrative
-        logger.info(f"[analyze_monster_combat] Generating tags from narrative...")
-        tags_result = await generate_combat_tags_from_narrative(
-            player_name, monster_name, narrative, player_current_tags, monster_current_tags,
-            game_manager
-        )
-        
-        logger.info(f"[analyze_monster_combat] Tags generated:")
-        logger.info(f"[analyze_monster_combat] {player_name} new tags: {[tag['name'] for tag in tags_result['player1_new_tags']]}")
-        logger.info(f"[analyze_monster_combat] {monster_name} new tags: {[tag['name'] for tag in tags_result['player2_new_tags']]}")
-        
-        # Calculate total severity
-        player_current_total = combat_info.get('player_total_severity', 0)
-        monster_current_total = combat_info.get('monster_total_severity', 0)
-        
-        player_new_severity = sum(tag['severity'] for tag in tags_result['player1_new_tags'] if tag['type'] == 'negative')
-        monster_new_severity = sum(tag['severity'] for tag in tags_result['player2_new_tags'] if tag['type'] == 'negative')
-        
-        player_total_severity = player_current_total + player_new_severity
-        monster_total_severity = monster_current_total + monster_new_severity
-        
-        # Check if combat should end
-        combat_ends = (
-            combat_outcome['player1_result']['can_continue'] == False or
-            combat_outcome['player2_result']['can_continue'] == False or
-            player_total_severity >= 50 or
-            monster_total_severity >= 50
-        )
-        
-        logger.info(f"[analyze_monster_combat] Severity totals: {player_name}={player_total_severity}, {monster_name}={monster_total_severity}")
-        logger.info(f"[analyze_monster_combat] Combat ends: {combat_ends}")
-        
         # Update combat state
         combat_info['player_condition'] = combat_outcome['player1_result']['condition']
         combat_info['monster_condition'] = combat_outcome['player2_result']['condition']
-        combat_info['player_tags'].extend(tags_result['player1_new_tags'])
-        combat_info['monster_tags'].extend(tags_result['player2_new_tags'])
-        combat_info['player_total_severity'] = player_total_severity
-        combat_info['monster_total_severity'] = monster_total_severity
         
-        # Update monster health if severely damaged
-        if monster_total_severity >= 50:
-            monster_data['is_alive'] = False
-            await game_manager.db.set_monster(monster_id, monster_data)
-            logger.info(f"[analyze_monster_combat] {monster_name} has been defeated!")
+        # Append round to history and cap at last 10
+        try:
+            combat_history.append({
+                'round': current_round,
+                'player_move': player_move,
+                'monster_move': monster_move,
+                'narrative': narrative,
+                'player_result': combat_outcome.get('player1_result', {}),
+                'monster_result': combat_outcome.get('player2_result', {})
+            })
+            if len(combat_history) > 10:
+                del combat_history[:-10]
+        except Exception as e:
+            logger.error(f"[analyze_monster_combat] Error updating combat history: {str(e)}")
+        
+        # End combat when someone cannot continue
+        combat_ends = (
+            combat_outcome['player1_result']['can_continue'] == False or
+            combat_outcome['player2_result']['can_continue'] == False
+        )
         
         # Send results to player
         await send_monster_combat_results(
@@ -642,8 +791,7 @@ async def analyze_monster_combat(combat_id: str, game_manager: GameManager):
             player_move, monster_move,
             combat_outcome['player1_result']['condition'],
             combat_outcome['player2_result']['condition'],
-            tags_result['player1_new_tags'], tags_result['player2_new_tags'],
-            player_total_severity, monster_total_severity,
+            0, 0,
             narrative, combat_ends, game_manager
         )
         
@@ -660,10 +808,45 @@ async def analyze_monster_combat(combat_id: str, game_manager: GameManager):
     except Exception as e:
         logger.error(f"Error analyzing monster combat: {str(e)}")
 
+async def get_monster_max_severity(monster_data: dict) -> int:
+    """Compute max severity threshold based on monster size using base 20."""
+    size = (monster_data or {}).get('size', 'human')
+    size_multipliers = {
+        'insect': 0.25,
+        'chicken': 0.5,
+        'human': 1.0,
+        'horse': 1.5,
+        'dinosaur': 2.0,
+        'colossal': 3.0,
+    }
+    return int(20 * size_multipliers.get(size, 1.0))
+
+async def get_monster_max_vital(monster_data: dict) -> int:
+    """Compute max vital (HP clock) based on monster size using base 6 with exact multipliers.
+    Mapping:
+      - colossal: 300% -> 18
+      - dinosaur: 200% -> 12
+      - horse: 150% -> 9
+      - human: 100% -> 6
+      - chicken: 50% -> 3
+      - insect: 25% -> 2 (rounded from 1.5)
+    """
+    size = (monster_data or {}).get('size', 'human')
+    size_multipliers = {
+        'insect': 0.25,
+        'chicken': 0.5,
+        'human': 1.0,
+        'horse': 1.5,
+        'dinosaur': 2.0,
+        'colossal': 3.0,
+    }
+    mult = size_multipliers.get(size, 1.0)
+    # Round to nearest, minimum 1
+    return max(1, int(round(6 * mult)))
+
 async def send_monster_combat_results(room_id: str, player_id: str, monster_id: str, round_number: int,
                                     player_move: str, monster_move: str, player_condition: str, monster_condition: str,
-                                    player_new_tags: List[Dict], monster_new_tags: List[Dict],
-                                    player_total_severity: int, monster_total_severity: int,
+                                    _player_total_severity: int, _monster_total_severity: int,
                                     narrative: str, combat_ends: bool, game_manager: GameManager):
     """Send monster combat results to the player via WebSocket"""
     try:
@@ -671,7 +854,7 @@ async def send_monster_combat_results(room_id: str, player_id: str, monster_id: 
         monster_data = await game_manager.db.get_monster(monster_id)
         monster_name = monster_data.get('name', 'Unknown Monster') if monster_data else "Unknown Monster"
         
-        # Format combat message
+        # Format combat message (tags and severity removed)
         combat_message = {
             "type": "monster_combat_outcome",
             "round": round_number,
@@ -680,13 +863,13 @@ async def send_monster_combat_results(room_id: str, player_id: str, monster_id: 
             "monster_move": monster_move,
             "player_condition": player_condition,
             "monster_condition": monster_condition,
-            "player_new_tags": player_new_tags,
-            "monster_new_tags": monster_new_tags,
-            "player_severity": player_total_severity,
-            "monster_severity": monster_total_severity,
             "narrative": narrative,
             "combat_ends": combat_ends,
-            "monster_defeated": monster_total_severity >= 50
+            "monster_defeated": False,
+            "player_vital": 0,
+            "monster_vital": 0,
+            "player_control": 0,
+            "monster_control": 0,
         }
         
         # Send to room
@@ -702,14 +885,18 @@ async def analyze_duel_moves(duel_id: str, game_manager: GameManager):
     try:
         logger.info(f"[analyze_duel_moves] Starting analysis for duel {duel_id}")
         
-        duel_info = duel_pending[duel_id]
+        duel_info = duel_pending.get(duel_id)
+        if not duel_info:
+            raise ValueError(f"Duel info not found for {duel_id}")
+        # Ensure history list exists
+        duel_history = duel_info.setdefault('history', [])
         player1_id = duel_info['player1_id']
         player2_id = duel_info['player2_id']
         room_id = duel_info['room_id']
         current_round = duel_info['round']
         
         # Get player moves
-        moves = duel_moves[duel_id]
+        moves = duel_moves.get(duel_id, {})
         player1_move = moves.get(player1_id, 'do nothing')
         player2_move = moves.get(player2_id, 'do nothing')
         
@@ -728,6 +915,7 @@ async def analyze_duel_moves(duel_id: str, game_manager: GameManager):
             monster_data = duel_info.get('monster_data', {})
             player2_name = monster_data.get('name', 'Unknown Monster')
             player2_inventory = []  # Monsters don't have inventories
+            player2_data = None  # Monsters don't have player data
         else:
             # Player2 is a regular player
             player2_data = await game_manager.db.get_player(player2_id)
@@ -740,8 +928,8 @@ async def analyze_duel_moves(duel_id: str, game_manager: GameManager):
         room_description = room_data.get('description', 'An unknown location') if room_data else "An unknown location"
         
         # Get current conditions and tags
-        player1_condition = duel_info.get('player1_condition', 'healthy')
-        player2_condition = duel_info.get('player2_condition', 'healthy')
+        player1_condition_prev = duel_info.get('player1_condition', 'healthy')
+        player2_condition_prev = duel_info.get('player2_condition', 'healthy')
         player1_current_tags = duel_info.get('player1_tags', [])
         player2_current_tags = duel_info.get('player2_tags', [])
         
@@ -770,76 +958,144 @@ async def analyze_duel_moves(duel_id: str, game_manager: GameManager):
         # Analyze combat outcome
         logger.info(f"[analyze_duel_moves] Analyzing combat outcome...")
         combat_outcome = await analyze_combat_outcome(
-            player1_name, player1_move, player1_condition, equipment_result['player1_valid'],
-            player2_name, player2_move, player2_condition, equipment_result['player2_valid'],
+            player1_name, player1_move, player1_condition_prev, equipment_result['player1_valid'],
+            player2_name, player2_move, player2_condition_prev, equipment_result['player2_valid'],
             player1_invalid, player2_invalid, player1_inventory, player2_inventory,
             room_name, room_description, game_manager
         )
-        
+ 
         logger.info(f"[analyze_duel_moves] Combat outcome:")
         logger.info(f"[analyze_duel_moves] {player1_name}: {combat_outcome['player1_result']['condition']} (can_continue: {combat_outcome['player1_result']['can_continue']})")
         logger.info(f"[analyze_duel_moves] {player2_name}: {combat_outcome['player2_result']['condition']} (can_continue: {combat_outcome['player2_result']['can_continue']})")
-        
+ 
         # Generate narrative FIRST
         logger.info(f"[analyze_duel_moves] Generating combat narrative...")
         narrative = await generate_combat_narrative(
             player1_name, player1_move, combat_outcome['player1_result'],
             player2_name, player2_move, combat_outcome['player2_result'],
             player1_invalid, player2_invalid, current_round,
-            room_name, room_description, game_manager
+            room_name, room_description, game_manager,
+            recent_rounds=duel_history[-10:]
         )
-        
+ 
         logger.info(f"[analyze_duel_moves] Narrative generated: {narrative[:100]}...")
-        
-        # Generate tags BASED ON the narrative
-        logger.info(f"[analyze_duel_moves] Generating tags from narrative...")
-        tags_result = await generate_combat_tags_from_narrative(
-            player1_name, player2_name, narrative, player1_current_tags, player2_current_tags,
-            game_manager
-        )
-        
-        logger.info(f"[analyze_duel_moves] Tags generated:")
-        logger.info(f"[analyze_duel_moves] {player1_name} new tags: {[tag['name'] for tag in tags_result['player1_new_tags']]}")
-        logger.info(f"[analyze_duel_moves] {player2_name} new tags: {[tag['name'] for tag in tags_result['player2_new_tags']]}")
-        
-        # Calculate total severity
-        player1_current_total = duel_info.get('player1_total_severity', 0)
-        player2_current_total = duel_info.get('player2_total_severity', 0)
-        
-        player1_new_severity = sum(tag['severity'] for tag in tags_result['player1_new_tags'] if tag['type'] == 'negative')
-        player2_new_severity = sum(tag['severity'] for tag in tags_result['player2_new_tags'] if tag['type'] == 'negative')
-        
-        player1_total_severity = player1_current_total + player1_new_severity
-        player2_total_severity = player2_current_total + player2_new_severity
-    
+ 
+        # NEW: Derive Vital/Control strictly from outcome (and lightly from narrative), not from separate AI ticks
+        def condition_to_severity(cond: str) -> int:
+            c = (cond or '').strip().lower()
+            if c in ('dead', 'unconscious', 'surrendered', 'maimed', 'incapacitated'):
+                return 3
+            if c in ('injured', 'hurt', 'wounded', 'dazed', 'shaken'):
+                return 1
+            return 0
+ 
+        p1_sev_prev = condition_to_severity(player1_condition_prev)
+        p2_sev_prev = condition_to_severity(player2_condition_prev)
+        p1_sev_new = condition_to_severity(combat_outcome['player1_result'].get('condition'))
+        p2_sev_new = condition_to_severity(combat_outcome['player2_result'].get('condition'))
+ 
+        # Vital deltas are the positive change in condition severity, clamped 0..3
+        p1_vital_delta = max(0, min(3, p1_sev_new - p1_sev_prev))
+        p2_vital_delta = max(0, min(3, p2_sev_new - p2_sev_prev))
+ 
+        # Control deltas: reward the side that caused damage this round; small defensive gain if clean evade indicated
+        p1_control_delta = 0
+        p2_control_delta = 0
+        if p2_vital_delta > 0 and p1_vital_delta == 0:
+            p1_control_delta += 1
+        if p1_vital_delta > 0 and p2_vital_delta == 0:
+            p2_control_delta += 1
+        # Defensive cues from narrative
+        narrative_l = (narrative or '').lower()
+        defend_terms = ('dodge', 'dodges', 'dodged', 'block', 'blocks', 'blocked', 'parry', 'parries', 'parried', 'evade', 'evades', 'evaded', 'retreat', 'retreats', 'hide', 'hides', 'hiding')
+        if any(t in narrative_l for t in defend_terms):
+            # Heuristically award +1 control to the side that did not take damage if any defense cue present
+            if p1_vital_delta == 0 and p2_vital_delta > 0:
+                p1_control_delta = max(p1_control_delta, 1)
+            if p2_vital_delta == 0 and p1_vital_delta > 0:
+                p2_control_delta = max(p2_control_delta, 1)
+ 
+        # Clamp deltas to allowed ranges
+        p1_control_delta = max(-2, min(2, p1_control_delta))
+        p2_control_delta = max(-2, min(2, p2_control_delta))
+ 
+        # Update Vital/Control clocks
+        p1_vital = max(0, duel_info.get('player1_vital', 0) + p1_vital_delta)
+        p2_vital = max(0, duel_info.get('player2_vital', 0) + p2_vital_delta)
+        p1_control = max(0, min(5, duel_info.get('player1_control', 0) + p1_control_delta))
+        p2_control = max(0, min(5, duel_info.get('player2_control', 0) + p2_control_delta))
+ 
+        duel_info['player1_vital'] = p1_vital
+        duel_info['player2_vital'] = p2_vital
+        duel_info['player1_control'] = p1_control
+        duel_info['player2_control'] = p2_control
+ 
+        # Compute win conditions for 2-track system
+        player1_max_vital = 6
+        player2_max_vital = 6
+        if is_monster_duel:
+            player2_max_vital = await get_monster_max_vital(monster_data)
+ 
+        finishing_owner = duel_info.get('finishing_window_owner')
+        finishing_now = None
+        if p1_control >= 5 and not finishing_owner:
+            duel_info['finishing_window_owner'] = 'player1'
+        elif p2_control >= 5 and not finishing_owner:
+            duel_info['finishing_window_owner'] = 'player2'
+ 
+        # End if Vital maxed, or Control full with successful follow-up
+        p1_broken = p1_vital >= player1_max_vital
+        p2_broken = p2_vital >= player2_max_vital
+ 
         # Check if combat should end
         combat_ends = (
             combat_outcome['player1_result']['can_continue'] == False or
             combat_outcome['player2_result']['can_continue'] == False or
-            player1_total_severity >= 50 or
-            player2_total_severity >= 50
+            p1_broken or p2_broken
         )
-        
-        logger.info(f"[analyze_duel_moves] Severity totals: {player1_name}={player1_total_severity}, {player2_name}={player2_total_severity}")
-        logger.info(f"[analyze_duel_moves] Combat ends: {combat_ends} (reason: {'player1_can_continue=False' if not combat_outcome['player1_result']['can_continue'] else ''} {'player2_can_continue=False' if not combat_outcome['player2_result']['can_continue'] else ''} {'player1_severity>=50' if player1_total_severity >= 50 else ''} {'player2_severity>=50' if player2_total_severity >= 50 else ''})")
-    
+  
+        logger.info(f"[analyze_duel_moves] Combat ends: {combat_ends} (reason: {'player1_can_continue=False' if not combat_outcome['player1_result']['can_continue'] else ''} {'player2_can_continue=False' if not combat_outcome['player2_result']['can_continue'] else ''} {'player1_vital_full' if p1_broken else ''} {'player2_vital_full' if p2_broken else ''})")
+  
         # Update duel state
         duel_info['player1_condition'] = combat_outcome['player1_result']['condition']
         duel_info['player2_condition'] = combat_outcome['player2_result']['condition']
-        duel_info['player1_tags'].extend(tags_result['player1_new_tags'])
-        duel_info['player2_tags'].extend(tags_result['player2_new_tags'])
-        duel_info['player1_total_severity'] = player1_total_severity
-        duel_info['player2_total_severity'] = player2_total_severity
-    
+        # Legacy fields kept for compatibility but set to zero
+        duel_info['player1_total_severity'] = 0
+        duel_info['player2_total_severity'] = 0
+        # Append round to history and cap at last 10
+        try:
+            duel_history.append({
+                'round': current_round,
+                'player1_move': player1_move,
+                'player2_move': player2_move,
+                'narrative': narrative,
+                'player1_result': combat_outcome.get('player1_result', {}),
+                'player2_result': combat_outcome.get('player2_result', {}),
+                'player1_vital_delta': p1_vital_delta,
+                'player2_vital_delta': p2_vital_delta,
+                'player1_control_delta': p1_control_delta,
+                'player2_control_delta': p2_control_delta,
+                'player1_vital': p1_vital,
+                'player2_vital': p2_vital,
+                'player1_control': p1_control,
+                'player2_control': p2_control
+            })
+            if len(duel_history) > 10:
+                del duel_history[:-10]
+        except Exception as e:
+            logger.error(f"[analyze_duel_moves] Error updating duel history: {str(e)}")
+  
         # Send results to players
         await send_duel_results(
             duel_id, room_id, player1_id, player2_id, current_round,
             player1_move, player2_move,
             combat_outcome['player1_result']['condition'],
             combat_outcome['player2_result']['condition'],
-            tags_result['player1_new_tags'], tags_result['player2_new_tags'],
-            player1_total_severity, player2_total_severity,
-            narrative, combat_ends, game_manager
+            [], [],
+            0, 0,
+            narrative, combat_ends, game_manager,
+            p1_vital, p2_vital, p1_control, p2_control,
+            player1_max_vital, player2_max_vital
         )
         
         # Handle monster duel continuation
@@ -925,6 +1181,13 @@ async def validate_equipment(player1_name: str, player1_move: str, player1_inven
                 player2_valid = True
                 player2_reason = "Monster moves are always valid"
                 player2_suggestion = None
+
+                return {
+                    'player1_valid': player1_valid,
+                    'player2_valid': player2_valid,
+                    'player1_reason': player1_reason,
+                    'player2_reason': player2_reason
+                }
         else:
             # Regular player vs player duel
             if not player1_id or not player2_id:
@@ -947,22 +1210,22 @@ async def validate_equipment(player1_name: str, player1_move: str, player1_inven
             
             logger.info(f"[validate_equipment] Calling MoveValidator for {player2_name} (ID: {player2_id})")
             player2_valid, player2_reason, player2_suggestion = await MoveValidator.validate_move(player2_id, player2_move, game_manager)
-        
-        # Log enhanced validation results
-        logger.info(f"[validate_equipment] Enhanced Validation Results:")
-        logger.info(f"[validate_equipment] {player1_name}: {player1_valid} - {player1_reason}")
-        if player1_suggestion:
-            logger.info(f"[validate_equipment] {player1_name} suggestion: {player1_suggestion}")
-        logger.info(f"[validate_equipment] {player2_name}: {player2_valid} - {player2_reason}")
-        if player2_suggestion:
-            logger.info(f"[validate_equipment] {player2_name} suggestion: {player2_suggestion}")
-        
-        return {
-            'player1_valid': player1_valid,
-            'player2_valid': player2_valid,
-            'player1_reason': player1_reason,
-            'player2_reason': player2_reason
-        }
+            
+            # Log enhanced validation results
+            logger.info(f"[validate_equipment] Enhanced Validation Results:")
+            logger.info(f"[validate_equipment] {player1_name}: {player1_valid} - {player1_reason}")
+            if player1_suggestion:
+                logger.info(f"[validate_equipment] {player1_name} suggestion: {player1_suggestion}")
+            logger.info(f"[validate_equipment] {player2_name}: {player2_valid} - {player2_reason}")
+            if player2_suggestion:
+                logger.info(f"[validate_equipment] {player2_name} suggestion: {player2_suggestion}")
+            
+            return {
+                'player1_valid': player1_valid,
+                'player2_valid': player2_valid,
+                'player1_reason': player1_reason,
+                'player2_reason': player2_reason
+            }
         
     except Exception as e:
         logger.error(f"[validate_equipment] Error in enhanced validation: {str(e)}")
@@ -1012,14 +1275,14 @@ Location: {room_name} - {room_description}
 
 {player1_name} vs {player2_name} in combat:
 
-{player1_name} (attacking {player2_name}):
+{player1_name} action toward {player2_name}:
 - Move: "{player1_move}"
 - Condition: {player1_condition}
 - Equipment Valid: {player1_equipment_valid}
 - Inventory: {player1_inventory}
 - Invalid Move Info: {player1_invalid_move if player1_invalid_move else 'None'}
 
-{player2_name} (attacking {player1_name}):
+{player2_name} action toward {player1_name}:
 - Move: "{player2_move}"
 - Condition: {player2_condition}
 - Equipment Valid: {player2_equipment_valid}
@@ -1035,77 +1298,28 @@ CRITICAL RULES:
    - Invalid moves (missing equipment) have NO EFFECT and cannot harm anyone
    - Valid moves can cause damage and affect the target
 
-2. ATTACKS TARGET THE OPPONENT:
-   - {player1_name}'s move targets {player2_name}
-   - {player2_name}'s move targets {player1_name}
-   - Successful attacks harm the TARGET, not the attacker
-   - VALID ATTACKS ALWAYS HAVE IMPACT unless countered by defensive actions
-   - Monster attacks are ALWAYS VALID and should ALWAYS have some effect
-   - Only invalid moves (missing equipment) have no effect
-   - If {player2_name} is a monster, their attacks should ALWAYS affect {player1_name} unless {player1_name} uses defensive moves
+2. DO NOT INVENT ACTIONS:
+   - ONLY use the exact moves provided above for each side
+   - If a player's move is defensive (defend, block, parry, dodge, retreat), treat it as DEFENSIVE. Do not describe them attacking
+   - Attacks must come from explicit attack-like moves (punch, stab, shoot, slash, strike, etc.)
 
-3. MOVE IMPACT RULES:
-   - VALID ATTACKS MUST CAUSE DAMAGE unless the target is actively defending
-   - Monster moves should ALWAYS have some effect (physical, mental, or status effect)
-   - Mind control, fear, confusion, and other mental attacks should affect the target
-   - If a player is NOT using defensive moves (block, dodge, parry), they take full damage
-   - If {player1_name} attacks with a valid move, {player2_name} takes damage UNLESS {player2_name} is blocking/dodging
-   - If {player2_name} attacks with a valid move, {player1_name} takes damage UNLESS {player1_name} is blocking/dodging
-   - Defensive moves (block, dodge, parry) can reduce or prevent damage
+3. TARGETING:
+   - {player1_name}'s attack-like moves target {player2_name}
+   - {player2_name}'s attack-like moves target {player1_name}
+   - Successful attacks harm the TARGET, not the attacker
+   - VALID ATTACKS should have impact unless countered by defensive actions
+   - Monster attacks are ALWAYS VALID and should have some effect
+
+4. DEFENSE:
+   - Defensive moves (block, dodge, parry) can reduce or prevent damage only when the player actually chose them
    - Invalid moves (missing equipment) cause NO DAMAGE and have NO EFFECT
 
-4. EXPLAIN MISSED ATTACKS:
-   - If an attack misses, EXPLAIN WHY it missed
-   - "Missing equipment" - player tried to use equipment they don't have
-   - "Target blocked" - target used a defensive move
-   - "Target dodged" - target used a dodge move
-   - "Attack missed" - attack was inaccurate or target moved
-   - "No effect" - invalid move due to missing equipment
+5. EXPLAIN MISSED/FAILED ATTACKS:
+   - If an attack fails or misses, explain WHY (invalid equipment, target blocked, target dodged, poor footing, etc.)
 
-3. DODGING/BLOCKING RULES:
-   - Players can ONLY dodge/block if their move explicitly includes dodging/blocking
-   - If a player's move is "punch", they cannot dodge - they are punching
-   - If a player's move is "dodge" or "block", then they can avoid attacks
-   - If a player's move is "kick", they cannot dodge - they are kicking
-   - Only allow dodging/blocking when it's part of the player's actual move
-
-4. ATTACKS MISS ONLY WITH SOLID DEFENSIVE REASONS:
-   - Target is actively blocking/defending against the attack (only if their move includes blocking)
-   - Target is dodging/moving away from the attack (only if their move includes dodging)
-   - Target is invisible/hidden from the attacker
-   - Attacker is incapacitated/unconscious
-   - Attacker's move is invalid (no equipment)
-   - Target used a defensive maneuver (only if their move includes defensive actions)
-   - Attacker was off-balance or injured, affecting accuracy
-   - Environmental factors (slippery ground, poor footing, etc.)
-
-5. VALID ATTACKS = MUST HAVE IMPACT:
-   - Successful attacks should injure/harm target
-   - Attacks should change the combat situation
-   - Even if target defends, attacks should have some effect
-
-6. DEFENSIVE MOVES:
-   - Blocking/dodging can prevent full damage (only if move includes blocking/dodging)
-   - But should still take some effect from attacks
-   - Defensive moves should be rewarded with positive tags
-
-7. PEACEFUL ACTIONS:
-   - Meditation, calming, etc. should not cause injury
-   - Only aggressive actions should risk harm
-
-8. USE ACTUAL NAMES:
-   - Always refer to players by their actual names: {player1_name} and {player2_name}
-   - Do not use "Player 1" or "Player 2"
-
-9. PROVIDE CLEAR REASONS:
-   - If an attack misses, explain WHY it missed
-   - If an attack lands, describe HOW it affected the target
-   - Be specific about defensive actions and their effectiveness
-
-10. ENVIRONMENT AWARENESS:
+6. ENVIRONMENT AWARENESS:
     - Consider the location: {room_name}
-    - Reference the environment only when relevant to the action
-    - Don't mention environments that don't match the current location
+    - Reference environment only when relevant to the move
 
 Return JSON:
 {{
@@ -1248,85 +1462,94 @@ async def generate_combat_narrative(
     player1_name: str, player1_move: str, player1_result: Dict[str, Any],
     player2_name: str, player2_move: str, player2_result: Dict[str, Any],
     player1_invalid_move: Optional[Dict[str, Any]], player2_invalid_move: Optional[Dict[str, Any]],
-    current_round: int, room_name: str, room_description: str, game_manager: GameManager
+    current_round: int, room_name: str, room_description: str, game_manager: GameManager,
+    recent_rounds: Optional[List[Dict[str, Any]]] = None
 ) -> str:
     """Create narrative description of combat round"""
     
+    # Build a compact recent history summary (up to last 10 rounds)
+    recent_rounds = recent_rounds or []
+    history_lines: List[str] = []
+    try:
+        for r in recent_rounds[-10:]:
+            rnum = r.get('round')
+            p1m = r.get('player1_move') or r.get('player_move')
+            p2m = r.get('player2_move') or r.get('monster_move')
+            p1res = (r.get('player1_result') or r.get('player_result') or {}).get('reason', '')
+            p2res = (r.get('player2_result') or r.get('monster_result') or {}).get('reason', '')
+            history_lines.append(f"R{rnum}: {player1_name} -> '{p1m}' ({p1res}); {player2_name} -> '{p2m}' ({p2res})")
+    except Exception as e:
+        logger.error(f"[generate_combat_narrative] Error summarizing recent rounds: {str(e)}")
+        history_lines = []
+    history_block = "\n".join(history_lines) if history_lines else "None"
+
     prompt = f"""
         Create an engaging, descriptive narrative for this combat round.
-
+ 
         Location: {room_name} - {room_description}
-
+ 
+        Recent Rounds (most recent first, up to 10):
+        {history_block}
+ 
         Combat Context:
-        - {player1_name} attacks {player2_name} with: {player1_move}
-        - {player2_name} attacks {player1_name} with: {player2_move}
-        
-        {player1_name} Results:
-        - Condition: {player1_result.get('condition', 'Unknown')}
-        - Outcome: {player1_result.get('reason', 'Unknown')}
-        
-        {player2_name} Results:
-        - Condition: {player2_result.get('condition', 'Unknown')}
-        - Outcome: {player2_result.get('reason', 'Unknown')}
-        
-        Invalid Move Context:
-        - {player1_name} Invalid: {player1_invalid_move if player1_invalid_move else 'None'}
-        - {player2_name} Invalid: {player2_invalid_move if player2_invalid_move else 'None'}
-
-        Instructions:
-        - Create a vivid, engaging narrative that describes what happened
-        - If there are invalid moves (missing equipment), EXPLAIN WHY they failed (e.g., "tried to shoot without a gun")
-        - If moves are valid (including basic actions like punch/kick), describe them as effective attacks
-        - Describe the actual outcomes and their impact on both players
-        - Make it feel like a real combat scene, not just a game log
-        - Keep it concise but descriptive (2-4 sentences)
-        - Use active voice and dynamic language
-        - Use actual player names: {player1_name} and {player2_name}
-        - Basic actions like punch, kick, tackle are valid and can cause damage
-        - Only equipment-based actions without the required equipment are invalid
-        - ALWAYS explain why attacks miss or fail - be specific about the reason
-        
-        CRITICAL RULES:
-        1. DO NOT directly reference tags, severity levels, or game mechanics
-           - Don't say "with a severity level of 3" or "gets a negative tag"
-           - Instead, describe the actual injury/advantage naturally
-           - Example: "leaving him bruised and shaken" not "gets bruised ribs tag"
-        
-        2. MOVE IMPACT RULES:
-           - VALID ATTACKS MUST CAUSE DAMAGE unless the target is actively defending
-           - If a valid attack lands, describe the damage and its effect
-           - If an attack misses, EXPLAIN WHY (missing equipment, target blocked, target dodged, etc.)
-           - Invalid moves (missing equipment) have NO EFFECT and should be explained as such
-        
-        3. DODGING/BLOCKING RULES:
-           - Players can ONLY dodge/block if their move explicitly includes dodging/blocking
-           - If a player's move is "punch", they cannot dodge - they are punching
-           - If a player's move is "dodge" or "block", then they can avoid attacks
-           - If a player's move is "kick", they cannot dodge - they are kicking
-           - Only describe dodging/blocking when it's part of the player's actual move
-
-        3. ENVIRONMENT AWARENESS:
-           - The combat is taking place in: {room_name}
-           - Environment description: {room_description}
-           - DO NOT start sentences with room descriptions like "In the fiery glow of..." or "Under the blood-red canopy of..."
-           - DO NOT mention the room unless it directly affects the player's move
-           - Only reference the environment when a player's move specifically uses it (climbing rocks, using terrain, etc.)
-           - Focus on the combat action, not the setting
-
-        4. CLEAR ATTACK TARGETS:
-           - Make it clear that {player1_name} is attacking {player2_name}
-           - Make it clear that {player2_name} is attacking {player1_name}
-           - Successful attacks harm the target, not the attacker
-           - Use phrases like "{player1_name} strikes at {player2_name}" or "{player2_name} defends against {player1_name}'s attack"
-
-        5. CONSISTENT OUTCOMES:
-           - The narrative must match the combat results
-           - If {player1_name} is "injured", show them getting hurt in the narrative
-           - If {player2_name} is "healthy", show them avoiding damage or successfully defending
-           - Make sure the narrative outcomes align with the combat analysis
-
-        Return only the narrative text, no JSON formatting.
-        """
+-        - {player1_name} attacks {player2_name} with: {player1_move}
+-        - {player2_name} attacks {player1_name} with: {player2_move}
++        - {player1_name} acts with: {player1_move}
++        - {player2_name} acts with: {player2_move}
+         
+         {player1_name} Results:
+         - Condition: {player1_result.get('condition', 'Unknown')}
+         - Outcome: {player1_result.get('reason', 'Unknown')}
+         
+         {player2_name} Results:
+         - Condition: {player2_result.get('condition', 'Unknown')}
+         - Outcome: {player2_result.get('reason', 'Unknown')}
+         
+         Invalid Move Context:
+         - {player1_name} Invalid: {player1_invalid_move if player1_invalid_move else 'None'}
+         - {player2_name} Invalid: {player2_invalid_move if player2_invalid_move else 'None'}
+ 
+         Instructions:
+         - Create a vivid, engaging narrative that describes what happened
+         - If there are invalid moves (missing equipment), EXPLAIN WHY they failed (e.g., "tried to shoot without a gun")
+-        - If moves are valid (including basic actions like punch/kick), describe them as effective attacks
++        - If moves are valid (including basic actions like punch/kick), describe them accordingly
+         - Describe the actual outcomes and their impact on both players
+         - Make it feel like a real combat scene, not just a game log
+         - Keep it concise but descriptive (2-4 sentences)
+         - Use active voice and dynamic language
+         - Use actual player names: {player1_name} and {player2_name}
+-        - Basic actions like punch, kick, tackle are valid and can cause damage
++        - Basic actions like punch, kick, tackle are valid and can cause damage when chosen
+         - Only equipment-based actions without the required equipment are invalid
+         - ALWAYS explain why attacks miss or fail - be specific about the reason
+          
+         CRITICAL RULES:
+         1. DO NOT directly reference tags, severity levels, or game mechanics
+            - Don't say "with a severity level of 3" or "gets a negative tag"
+            - Instead, describe the actual injury/advantage naturally
+            - Example: "leaving him bruised and shaken" not "gets bruised ribs tag"
+           
+         2. MOVE IMPACT RULES:
+-            - VALID ATTACKS MUST CAUSE DAMAGE unless the target is actively defending
+-            - If a valid attack lands, describe the damage and its effect
++            - Do NOT invent actions. ONLY describe what each side actually attempted.
++            - If a player's move is defensive (e.g., defend, block, parry, dodge, retreat), DO NOT describe them attacking. Focus on mitigation, positioning, or advantage shifts.
++            - VALID ATTACKS MUST CAUSE DAMAGE unless the target is explicitly defending in their own move
++            - If a valid attack lands, describe the damage and its effect; if it fails, explain why
+             - If an attack misses, EXPLAIN WHY (missing equipment, target blocked, target dodged, etc.)
+             - Invalid moves (missing equipment) have NO EFFECT and should be explained as such
+          
+         3. DODGING/BLOCKING RULES:
+             - Players can ONLY dodge/block if their move explicitly includes dodging/blocking
+             - If a player's move is "punch", they cannot dodge - they are punching
+             - If a player's move is "dodge" or "block", then they can avoid attacks
+             - If a player's move is "kick", they cannot dodge - they are kicking
+             - Only describe dodging/blocking when it's part of the player's actual move
+ 
+         3. ENVIRONMENT AWARENESS:
+             - The combat is taking place in: 
+         """
 
     try:
         # Call AI to generate narrative
@@ -1347,20 +1570,42 @@ async def generate_combat_narrative(
 async def generate_combat_tags_from_narrative(
     player1_name: str, player2_name: str, narrative: str,
     player1_current_tags: List[Dict[str, Any]], player2_current_tags: List[Dict[str, Any]],
-    game_manager: GameManager
+    game_manager: GameManager,
+    recent_rounds: Optional[List[Dict[str, Any]]] = None
 ) -> Dict[str, Any]:
     """Generate new tags based on combat outcomes, derived from the narrative."""
     
+    # Build a compact recent history summary (up to last 10 rounds)
+    recent_rounds = recent_rounds or []
+    history_lines: List[str] = []
+    try:
+        for r in recent_rounds[-10:]:
+            rnum = r.get('round')
+            p1m = r.get('player1_move') or r.get('player_move')
+            p2m = r.get('player2_move') or r.get('monster_move')
+            p1tags = r.get('player1_new_tags') or r.get('player_new_tags') or []
+            p2tags = r.get('player2_new_tags') or r.get('monster_new_tags') or []
+            p1sev = sum(t.get('severity', 0) for t in p1tags if t.get('type') == 'negative')
+            p2sev = sum(t.get('severity', 0) for t in p2tags if t.get('type') == 'negative')
+            history_lines.append(f"R{rnum}: {player1_name} '{p1m}' (-{p1sev}); {player2_name} '{p2m}' (-{p2sev})")
+    except Exception as e:
+        logger.error(f"[generate_combat_tags_from_narrative] Error summarizing recent rounds: {str(e)}")
+        history_lines = []
+    history_block = "\n".join(history_lines) if history_lines else "None"
+
     prompt = f"""
         Analyze the combat narrative and generate appropriate tags for both players.
-
+ 
         Narrative: {narrative}
-
+ 
+        Recent Rounds (most recent first, up to 10):
+        {history_block}
+ 
         {player1_name} Current Tags: {player1_current_tags}
         {player2_name} Current Tags: {player2_current_tags}
-
+ 
         Generate NEW tags based on THIS ROUND's narrative. Do not duplicate existing tags.
-        
+         
         CRITICAL RULES:
         1. ATTACKS HARM THE TARGET, NOT THE ATTACKER:
            - If {player1_name} attacks {player2_name}, {player2_name} gets negative tags
@@ -1368,39 +1613,46 @@ async def generate_combat_tags_from_narrative(
            - Attackers should NOT get negative tags for successful attacks
            - READ THE NARRATIVE CAREFULLY: If it says "{player1_name} punched {player2_name} and left him bruised", then {player2_name} gets the "bruised" tag, NOT {player1_name}
            - COMMON MISTAKE: Do NOT give the attacker injury tags for their own successful attacks
-        
+         
         2. SUCCESSFUL ATTACKS ALWAYS CAUSE DAMAGE:
            - If the narrative says an attack "connected", "landed", "hit", "struck", etc., the target MUST get a negative tag
            - If the narrative says someone is "injured", "hurt", "shaken", "wounded", etc., they MUST get a negative tag
            - Even minor hits should result in injury tags (1-3 severity)
            - MENTAL ATTACKS (mind control, fear, confusion, etc.) should also cause negative tags
            - ANY attack that affects the target should result in appropriate tags
-        
+         
         3. SEVERITY GUIDELINES:
            - Basic injuries (bruises, minor cuts, shaken): 1-3 severity
            - Moderate injuries (bleeding, sprains, dazed): 4-8 severity  
            - Serious injuries (broken bones, major wounds): 9-20 severity
            - Critical injuries (life-threatening, unconscious): 21-50 severity
-        
+           - Use the recent rounds to calibrate: avoid monotonously repeating 1-2 severity every round. If a clear, smart, or well-timed attack lands, vary with justified moderate severity.
+           - Do NOT inflate severity just for variation. Escalate only when the narrative clearly supports it (clean hit, counter, exposed target, environmental advantage, or equipment properly used).
+         
         4. POSITIVE TAGS ARE RARE AND SPECIFIC:
            - Only for genuine advantages: "invisible", "high ground", "focused", "energized"
            - NOT for successful attacks (those harm the opponent)
            - NOT for basic defensive moves
            - NOT for avoiding damage (that's just normal combat)
-        
+         
         5. CONCISE TAG NAMES:
            - Use specific injury types: "black eye", "bruised ribs", "concussion", "broken arm"
            - Use specific advantages: "high ground", "invisible", "focused", "energized"
            - DO NOT describe how the tag was obtained in the name
            - Keep names short and descriptive
-
+ 
         6. NARRATIVE INTERPRETATION:
            - Look for words like: "connected", "landed", "hit", "struck", "injured", "hurt", "shaken", "wounded", "damaged"
            - If these words appear, someone should get a negative tag
            - "none" is NOT a valid tag name - use actual injury descriptions
            - EXAMPLE: "Player A punched Player B, leaving Player B bruised" → Player B gets "bruised" tag
            - EXAMPLE: "Player B attacked Player A, causing Player A to be wounded" → Player A gets "wounded" tag
-
+ 
+        7. IMPACTFUL SMART PLAY:
+           - Reward smart tactics: counters, using terrain, exploiting openings, valid equipment synergy, set-ups from prior rounds.
+           - If a player clearly outplays the opponent this round, increase severity appropriately.
+           - Only give negative impact when a player does something obviously poor or is countered.
+ 
         Return a JSON object with this structure:
         {{
             "player1_new_tags": [
@@ -1443,7 +1695,9 @@ async def send_duel_results(
     player1_condition: str, player2_condition: str,
     player1_tags: List[Dict[str, Any]], player2_tags: List[Dict[str, Any]],
     player1_total_severity: int, player2_total_severity: int,
-    narrative: str, combat_ends: bool, game_manager: GameManager
+    narrative: str, combat_ends: bool, game_manager: GameManager,
+    player1_vital: int, player2_vital: int, player1_control: int, player2_control: int,
+    player1_max_vital: int = 6, player2_max_vital: int = 6
 ):
     """
     Sends the round result, combat end message, and updates player conditions/tags.
@@ -1466,10 +1720,12 @@ async def send_duel_results(
         "player2_move": player2_move,
         "player1_condition": player1_condition,
         "player2_condition": player2_condition,
-        "player1_tags": player1_tags,
-        "player2_tags": player2_tags,
-        "player1_total_severity": player1_total_severity,
-        "player2_total_severity": player2_total_severity,
+        "player1_vital": player1_vital,
+        "player2_vital": player2_vital,
+        "player1_control": player1_control,
+        "player2_control": player2_control,
+        "player1_max_vital": player1_max_vital,
+        "player2_max_vital": player2_max_vital,
         "description": narrative,
         "combat_ends": combat_ends,
         "room_id": room_id,
@@ -1480,30 +1736,25 @@ async def send_duel_results(
     await manager.send_to_player(room_id, player2_id, round_message)
     
     # Add round description to room chat
-    chat_message = {
-        "player_id": "system",
-        "room_id": room_id,
-        "message": f"⚔️ Round {current_round + 1}: {narrative}",
-        "message_type": "system",
-        "timestamp": datetime.now().isoformat()
-    }
-    await manager.broadcast_to_room(room_id, chat_message)
 
     if combat_ends:
-        # Hardcoded victory condition: severity >= 50
+        # Determine winner based on clocks/conditions
+        incapacitated = {'dead', 'unconscious', 'surrendered', 'maimed', 'incapacitated'}
+        # Assume base 6 for now (monsters may scale upstream)
+        p1_broken = player1_vital >= player1_max_vital or (player1_condition or '').lower() in incapacitated
+        p2_broken = player2_vital >= player2_max_vital or (player2_condition or '').lower() in incapacitated
         winner_id = None
         loser_id = None
-        
-        if player1_total_severity >= 50:
+        if p1_broken and not p2_broken:
             winner_id = player2_id
             loser_id = player1_id
-        elif player2_total_severity >= 50:
+        elif p2_broken and not p1_broken:
             winner_id = player1_id
             loser_id = player2_id
-        elif player1_condition.lower() in ['dead', 'unconscious', 'surrendered', 'maimed', 'incapacitated']:
+        elif (player1_condition or '').lower() in incapacitated and (player2_condition or '').lower() not in incapacitated:
             winner_id = player2_id
             loser_id = player1_id
-        elif player2_condition.lower() in ['dead', 'unconscious', 'surrendered', 'maimed', 'incapacitated']:
+        elif (player2_condition or '').lower() in incapacitated and (player1_condition or '').lower() not in incapacitated:
             winner_id = player1_id
             loser_id = player2_id
 
@@ -1521,13 +1772,11 @@ async def send_duel_results(
                 - Loser: {loser_name} (ID: {loser_id})
                 - Winner Condition: {player1_condition if winner_id == player1_id else player2_condition}
                 - Loser Condition: {player2_condition if winner_id == player1_id else player1_condition}
-                - Winner Total Severity: {player1_total_severity if winner_id == player1_id else player2_total_severity}
-                - Loser Total Severity: {player2_total_severity if winner_id == player1_id else player1_total_severity}
                 - Final Round: {current_round + 1}
 
                 Instructions:
                 - Create an engaging, dramatic victory message
-                - Consider the nature of the defeat (severity threshold, death, unconsciousness, etc.)
+                - Consider the nature of the defeat (body overwhelmed or finishing window converted)
                 - Make it feel like a real combat conclusion
                 - Keep it concise but impactful
 
@@ -1597,10 +1846,6 @@ async def send_duel_results(
             "round": current_round + 1,
             "player1_condition": player1_condition,
             "player2_condition": player2_condition,
-            "player1_tags": player1_tags,
-            "player2_tags": player2_tags,
-            "player1_total_severity": player1_total_severity,
-            "player2_total_severity": player2_total_severity,
             "room_id": room_id,
             "timestamp": datetime.now().isoformat()
         }
@@ -1772,26 +2017,6 @@ async def process_action_stream(
                 })
                 return
             
-            # Check for monster attacks first
-            monster_target_id = await detect_monster_attack(action_request.action, action_request.player_id, room_data, game_manager)
-            if monster_target_id:
-                logger.info(f"[Stream] Monster attack detected - initiating duel with {monster_target_id}")
-                
-                # Get monster name for the message
-                monster_data = await game_manager.db.get_monster(monster_target_id)
-                monster_name = monster_data.get('name', 'Unknown Monster') if monster_data else "Unknown Monster"
-                
-                # Initiate monster duel using the existing duel system
-                await initiate_monster_duel(action_request.player_id, monster_target_id, action_request.action, player.current_room, game_manager)
-                
-                # Return a simple acknowledgment - the duel system will handle the rest
-                yield json.dumps({
-                    "type": "final", 
-                    "content": f"⚔️ You challenge the {monster_name} to combat!",
-                    "updates": {}
-                })
-                return
-            
             # All actions go through AI processing for rich narrative responses
             logger.info(f"[Stream] Processing action with AI: {action_request.action}")
             
@@ -1811,7 +2036,7 @@ async def process_action_stream(
             # Use the pending type if available
             item_type_for_ai = pending_item_type
             
-            # Use AI processing for all actions (including movement) 
+            # Use AI processing for all actions (including movement)
             logger.info(f"[Stream] AI context includes {len(monsters)} monsters: {[m.get('name', 'Unknown') for m in monsters]}")
             async for chunk in game_manager.ai_handler.stream_action(
                 action=action_request.action,
@@ -1831,6 +2056,49 @@ async def process_action_stream(
                             
                             logger.info(f"[Stream] Player attempting to move {direction} from {player.current_room}")
                             
+                            # Structured movement blocking: compute retreat and check monsters
+                            room_data_current = await game_manager.db.get_room(player.current_room)
+                            connections = room_data_current.get('connections', {}) if room_data_current else {}
+                            last_room = monster_behavior_manager.player_last_room.get(action_request.player_id)
+                            target_room = connections.get(direction.lower())
+                            is_retreat = (last_room is not None and target_room == last_room)
+
+                            # Aggressive blocking (allows retreat internally)
+                            aggressive_block = None
+                            if not is_retreat:
+                                aggressive_block = await monster_behavior_manager.check_aggressive_monster_blocking(
+                                    action_request.player_id, player.current_room, direction, game_manager
+                                )
+                            if aggressive_block:
+                                monster_id, _ = aggressive_block
+                                combat_message = await monster_behavior_manager.handle_aggressive_combat_initiation(
+                                    action_request.player_id, monster_id, player.current_room, direction, game_manager
+                                )
+                                yield json.dumps({
+                                    "type": "final",
+                                    "content": combat_message,
+                                    "updates": {}
+                                })
+                                return
+
+                            # Territorial blocking (skip on retreat)
+                            if not is_retreat:
+                                territorial_block = await monster_behavior_manager.check_territorial_blocking(
+                                    action_request.player_id, player.current_room, direction, game_manager
+                                )
+                                if territorial_block:
+                                    monster_id, _ = territorial_block
+                                    combat_message = await monster_behavior_manager.handle_territorial_combat_initiation(
+                                        action_request.player_id, monster_id, player.current_room, direction, game_manager
+                                    )
+                                    yield json.dumps({
+                                        "type": "final",
+                                        "content": combat_message,
+                                        "updates": {}
+                                    })
+                                    return
+
+                            # Proceed with movement
                             # CRITICAL: Use GameManager's coordinate-based room movement logic to prevent duplicate coordinates
                             actual_room_id, new_room = await game_manager.handle_room_movement_by_direction(
                                 player, room, direction
@@ -1855,6 +2123,39 @@ async def process_action_stream(
                             await game_manager.db.remove_from_room_players(old_room_id, action_request.player_id)
                             await game_manager.db.add_to_room_players(new_room_id, action_request.player_id)
                             logger.info(f"[Stream] Updated room player lists: removed from {old_room_id}, added to {new_room_id}")
+                            
+                            # Handle monster behaviors when entering new room
+                            try:
+                                new_room_data = await game_manager.db.get_room(new_room_id)
+                                if new_room_data:
+                                    # Get the direction the player came FROM (opposite of where they're going)
+                                    # If player moves WEST, they entered from EAST
+                                    opposite_directions = {
+                                        'north': 'south',
+                                        'south': 'north',
+                                        'east': 'west',
+                                        'west': 'east',
+                                        'up': 'down',
+                                        'down': 'up'
+                                    }
+                                    # The entry direction is the opposite of the movement direction
+                                    entry_direction = opposite_directions.get(direction.lower(), direction)
+                                    
+                                    logger.info(f"[MonsterBehavior] Player moved {direction}, entered from {entry_direction}")
+                                    
+                                    behavior_messages = await monster_behavior_manager.handle_player_room_entry(
+                                        action_request.player_id, new_room_id, old_room_id, entry_direction, new_room_data, game_manager
+                                    )
+                                    
+                                    # Send behavior messages to player if any
+                                    for behavior_message in behavior_messages:
+                                        await manager.send_to_player(new_room_id, action_request.player_id, {
+                                            "type": "system_message",
+                                            "message": behavior_message,
+                                            "timestamp": datetime.now().isoformat()
+                                        })
+                            except Exception as e:
+                                logger.error(f"[Stream] Error handling monster behaviors: {str(e)}")
                             
                             # CRITICAL: Handle presence updates for room movement
                             # Notify old room that player is leaving BEFORE they disconnect
@@ -1883,10 +2184,252 @@ async def process_action_stream(
                             "rate_limit_info": chunk["updates"]["rate_limit_info"]
                         })
                     else:
-                        # NOW yield the final response with updated player data
+                        # Non-movement actions: aggressive monsters attack on any action (retreat handled in movement logic)
+                        is_movement = ("player" in chunk.get("updates", {}) and "direction" in chunk["updates"]["player"])
+                        if not is_movement:
+                            additional_content = ""
+
+                            # NEW: If AI flags combat intent, initiate monster duel
+                            combat_intent = chunk.get("updates", {}).get("combat")
+                            if combat_intent is not None:
+                                try:
+                                    # Resolve target monster
+                                    player_room_data = await game_manager.db.get_room(player.current_room)
+                                    room_monsters = player_room_data.get("monsters", []) if player_room_data else []
+                                    target_monster_id = None
+                                    if isinstance(combat_intent, dict):
+                                        target_monster_id = combat_intent.get("monster_id")
+                                    if not target_monster_id and len(room_monsters) == 1:
+                                        target_monster_id = room_monsters[0]
+                                    if target_monster_id:
+                                        combat_message = await monster_behavior_manager.handle_aggressive_combat_initiation(
+                                            action_request.player_id, target_monster_id, player.current_room, "any_action", game_manager
+                                        )
+                                        yield json.dumps({
+                                            "type": "final",
+                                            "content": combat_message,
+                                            "updates": {}
+                                        })
+                                        return
+                                except Exception as e:
+                                    logger.error(f"[Stream] Error initiating combat from AI intent: {str(e)}")
+
+                            # If the AI indicates a monster interaction (talking), handle it before generic aggressive check
+                            interaction = chunk.get("updates", {}).get("monster_interaction")
+                            if interaction:
+                                # Resolve monster target
+                                target_monster_id = interaction.get("monster_id") if isinstance(interaction, dict) else None
+                                player_room_data = await game_manager.db.get_room(player.current_room)
+                                room_monsters = player_room_data.get("monsters", []) if player_room_data else []
+                                if not target_monster_id and len(room_monsters) == 1:
+                                    target_monster_id = room_monsters[0]
+
+                                # If a target is found, check aggressiveness
+                                if target_monster_id:
+                                    monster_data = await game_manager.db.get_monster(target_monster_id)
+                                    if monster_data and monster_data.get("is_alive", True):
+                                        if monster_data.get("aggressiveness") == "aggressive":
+                                            # Aggressive: initiate combat immediately on any action
+                                            aggressive_block = await monster_behavior_manager.check_aggressive_monster_blocking(
+                                                action_request.player_id, player.current_room, "any_action", game_manager
+                                            )
+                                            if aggressive_block:
+                                                monster_id, _ = aggressive_block
+                                                combat_message = await monster_behavior_manager.handle_aggressive_combat_initiation(
+                                                    action_request.player_id, monster_id, player.current_room, "any_action", game_manager
+                                                )
+                                                yield json.dumps({
+                                                    "type": "final",
+                                                    "content": combat_message,
+                                                    "updates": {}
+                                                })
+                                                return
+                                        else:
+                                            # Non-aggressive: produce dialogue based on intelligence via AI
+                                            player_message = interaction.get("message", "") if isinstance(interaction, dict) else ""
+                                            reply = await monster_behavior_manager.generate_monster_dialogue(
+                                                target_monster_id, player_message, player.current_room, game_manager
+                                            )
+                                            if reply:
+                                                additional_content = reply
+                            # If no resolvable target, fall through to aggressive any_action check
+                            aggressive_block = await monster_behavior_manager.check_aggressive_monster_blocking(
+                                action_request.player_id, player.current_room, "any_action", game_manager
+                            )
+                            if aggressive_block:
+                                monster_id, _ = aggressive_block
+                                combat_message = await monster_behavior_manager.handle_aggressive_combat_initiation(
+                                    action_request.player_id, monster_id, player.current_room, "any_action", game_manager
+                                )
+                                yield json.dumps({
+                                    "type": "final",
+                                    "content": combat_message,
+                                    "updates": {}
+                                })
+                                return
+
+                            # Fallback: ensure monsters always respond to general player messages
+                            try:
+                                player_room_data = await game_manager.db.get_room(player.current_room)
+                                room_monsters = player_room_data.get("monsters", []) if player_room_data else []
+                                if room_monsters:
+                                    # Prefer a non-aggressive monster; otherwise use the first alive one
+                                    chosen_monster_id = None
+                                    for m_id in room_monsters:
+                                        m = await game_manager.db.get_monster(m_id)
+                                        if m and m.get("is_alive", True) and m.get("aggressiveness") != "aggressive":
+                                            chosen_monster_id = m_id
+                                            break
+                                    if not chosen_monster_id:
+                                        # Fallback to any alive monster
+                                        for m_id in room_monsters:
+                                            m = await game_manager.db.get_monster(m_id)
+                                            if m and m.get("is_alive", True):
+                                                chosen_monster_id = m_id
+                                                break
+                                    if chosen_monster_id:
+                                        reply = await monster_behavior_manager.generate_monster_dialogue(
+                                            chosen_monster_id, chunk.get("original_input", chunk.get("input", "")) or action_request.action, player.current_room, game_manager
+                                        )
+                                        if reply and not additional_content:
+                                            additional_content = reply
+                            except Exception as e:
+                                logger.error(f"[Stream] Fallback monster reply error: {str(e)}")
+
+                        # Handle item hinting/awarding from AI before yielding final response
+                        try:
+                            reward_info = chunk.get("reward_item")
+                            if reward_info is not None:
+                                deserves_item = reward_info.get("deserves_item")
+                                item_type_name = reward_info.get("item_type")
+
+                                # Ensure updates scaffolding exists
+                                if "updates" not in chunk or not isinstance(chunk["updates"], dict):
+                                    chunk["updates"] = {}
+                                if "player" not in chunk["updates"] or not isinstance(chunk["updates"].get("player"), dict):
+                                    chunk["updates"]["player"] = {}
+
+                                # If AI hinted an item type but not awarding yet → remember it for next action
+                                if not deserves_item and item_type_name:
+                                    try:
+                                        from .templates.item_types import ItemType
+                                        item_type_obj = game_manager.item_type_manager.get_item_type_by_name(item_type_name)
+                                        player.pending_item_type = item_type_obj.to_dict()
+                                        await game_manager.db.set_player(action_request.player_id, player.dict())
+                                        logger.info(f"[Item Discovery] Pending item set for player {action_request.player_id}: {item_type_name}")
+                                    except Exception as e:
+                                        logger.error(f"[Item Discovery] Failed setting pending item type '{item_type_name}': {str(e)}")
+
+                                # If AI says player deserves item → generate and award it
+                                if deserves_item:
+                                    try:
+                                        from .templates.items import GenericItemTemplate
+                                        from .templates.item_types import ItemType
+                                        import uuid as _uuid
+
+                                        # Resolve item type from reward or pending
+                                        item_type_obj = None
+                                        if item_type_name:
+                                            try:
+                                                item_type_obj = game_manager.item_type_manager.get_item_type_by_name(item_type_name)
+                                            except Exception:
+                                                item_type_obj = None
+                                        if not item_type_obj and player.pending_item_type:
+                                            try:
+                                                item_type_obj = ItemType(
+                                                    name=player.pending_item_type['name'],
+                                                    description=player.pending_item_type['description'],
+                                                    capabilities=player.pending_item_type['capabilities']
+                                                )
+                                            except Exception:
+                                                item_type_obj = None
+
+                                        # Generate item details with AI (fallback to template if needed)
+                                        template = GenericItemTemplate(game_manager.item_type_manager)
+                                        context = {
+                                            'item_type': item_type_obj.name if item_type_obj else item_type_name,
+                                            'location': room.title,
+                                            'theme': room.biome or 'fantasy'
+                                        }
+                                        try:
+                                            prompt = template.generate_prompt(context)
+                                            ai_text = await game_manager.ai_handler.generate_text(prompt)
+                                            parsed = template.parse_response(ai_text, context)
+                                        except Exception as e:
+                                            logger.error(f"[Item Award] AI generation failed: {str(e)}. Using fallback.")
+                                            parsed = template.generate_item(context)
+
+                                        rarity = int(parsed.get('rarity', 1))
+                                        special_effects = parsed.get('special_effects', 'No special effects')
+                                        item_name = parsed.get('name', item_type_name or 'Mysterious Item')
+
+                                        # Build DB item
+                                        new_item_id = f"item_{str(_uuid.uuid4())}"
+                                        db_item = {
+                                            'id': new_item_id,
+                                            'name': item_name,
+                                            'description': (item_type_obj.description if item_type_obj else (room.description or 'An item')),
+                                            'is_takeable': True,
+                                            # Top-level fields used by validators
+                                            'item_type': (item_type_obj.name if item_type_obj else (item_type_name or 'Unknown')),
+                                            'type_capabilities': (item_type_obj.capabilities if item_type_obj else []),
+                                            'special_effects': special_effects,
+                                            'rarity': rarity,
+                                            # Also include properties for client UI
+                                            'properties': {
+                                                'rarity': str(rarity),
+                                                'special_effects': special_effects,
+                                                'item_type': (item_type_obj.name if item_type_obj else (item_type_name or 'Unknown')),
+                                                'capabilities': ', '.join(item_type_obj.capabilities) if item_type_obj else ''
+                                            }
+                                        }
+
+                                        await game_manager.db.set_item(new_item_id, db_item)
+
+                                        # Update player inventory and clear pending
+                                        updated_inventory = list(player.inventory)
+                                        if new_item_id not in updated_inventory:
+                                            updated_inventory.append(new_item_id)
+                                        player.inventory = updated_inventory
+                                        player.pending_item_type = None
+                                        await game_manager.db.set_player(action_request.player_id, player.dict())
+
+                                        # Provide updates to client via SSE
+                                        chunk["updates"]["player"]["inventory"] = updated_inventory
+                                        chunk["updates"]["new_item"] = {
+                                            'id': new_item_id,
+                                            'name': db_item['name'],
+                                            'description': db_item['description'],
+                                            'is_takeable': True,
+                                            'properties': db_item['properties']
+                                        }
+
+                                        # Also notify via WebSocket with a system message
+                                        try:
+                                            stars = rarity_to_stars(rarity)
+                                            await manager.send_to_player(player.current_room, action_request.player_id, {
+                                                'type': 'item_obtained',
+                                                'player_id': action_request.player_id,
+                                                'item_name': db_item['name'],
+                                                'item_rarity': rarity,
+                                                'rarity_stars': stars,
+                                                'message': f"You obtained {db_item['name']} ({stars})",
+                                                'timestamp': datetime.now().isoformat()
+                                            })
+                                        except Exception as e:
+                                            logger.error(f"[Item Award] Failed to send WebSocket item_obtained: {str(e)}")
+
+                                        logger.info(f"[Item Award] Player {action_request.player_id} received item {db_item['name']} (rarity {rarity})")
+                                    except Exception as e:
+                                        logger.error(f"[Item Award] Error awarding item: {str(e)}")
+                        except Exception as e:
+                            logger.error(f"[Item Handling] Unexpected error: {str(e)}")
+
+                        # NOW yield the final response with updated player data (default path)
+                        final_content = chunk["response"] + (f"\n\n{additional_content}" if 'additional_content' in locals() and additional_content else "")
                         yield json.dumps({
                             "type": "final",
-                            "content": chunk["response"],
+                            "content": final_content,
                             "updates": chunk["updates"]
                         })
 
@@ -1901,7 +2444,7 @@ async def process_action_stream(
                             player_id=action_request.player_id,
                             room_id=action_request.room_id,
                             action=action_request.action,
-                            ai_response=chunk["response"],
+                            ai_response=final_content if 'final_content' in locals() else chunk["response"],
                             updates=chunk.get("updates", {}),
                             session_id=session_id,
                             metadata={
@@ -1914,155 +2457,6 @@ async def process_action_stream(
                         logger.info(f"[Storage] Stored action record for player {action_request.player_id}")
                     except Exception as e:
                         logger.error(f"[Storage] Failed to store action record: {str(e)}")
-
-                    # Continue with remaining updates
-                    if "player" in chunk["updates"]:
-                        player_updates = chunk["updates"]["player"]
-                        
-                        # Update last_action timestamp and text
-                        current_time = datetime.utcnow()
-                        player_updates["last_action"] = current_time.isoformat()
-                        player_updates["last_action_text"] = action_request.action
-
-                        player = Player(**{**player.dict(), **player_updates})
-                        await game_manager.db.set_player(player.id, player.dict())
-                        
-                        # Check if AI decided player deserves an item reward
-                        if "reward_item" in chunk:
-                            reward_item = chunk["reward_item"]
-                            logger.info(f"[Item Generation] Reward item data: {reward_item}")
-                            
-                            # Handle both boolean and string values for deserves_item
-                            deserves_item = reward_item.get("deserves_item")
-                            if isinstance(deserves_item, str):
-                                deserves_item = deserves_item.lower() == "true"
-                            
-                            # Trust the AI's decision completely - no keyword restrictions
-                            if deserves_item:
-                                try:
-                                    logger.info(f"[Item Generation] Player {player.id} is grabbing an item they previously discovered")
-                                    
-                                    # Use the AI's chosen item type if available, otherwise use pending or random
-                                    ai_chosen_item_type = reward_item.get("item_type")
-                                    
-                                    if ai_chosen_item_type:
-                                        # Use the AI's chosen item type
-                                        try:
-                                            item_type = game_manager.item_type_manager.get_item_type_by_name(ai_chosen_item_type)
-                                            logger.info(f"[Item Generation] Using AI-chosen item type: {item_type.name}")
-                                        except ValueError:
-                                            logger.warning(f"[Item Generation] AI chose invalid item type '{ai_chosen_item_type}', falling back to random")
-                                            item_type = game_manager.item_type_manager.get_random_item_type()
-                                    elif hasattr(player, 'pending_item_type') and player.pending_item_type:
-                                        # Use pending item type if AI didn't specify one
-                                        from .templates.item_types import ItemType
-                                        item_type = ItemType(
-                                            name=player.pending_item_type['name'],
-                                            description=player.pending_item_type['description'],
-                                            capabilities=player.pending_item_type['capabilities']
-                                        )
-                                        logger.info(f"[Item Generation] Using pending item type: {item_type.name}")
-                                        
-                                        # Clear the pending item type since we're using it now
-                                        player.pending_item_type = None
-                                        await game_manager.db.set_player(player.id, player.dict())
-                                    else:
-                                        # Fallback: randomly select item type
-                                        try:
-                                            item_type = game_manager.item_type_manager.get_random_item_type()
-                                            logger.info(f"[Item Generation] No AI choice or pending type, randomly selected: {item_type.name}")
-                                        except ValueError:
-                                            # No item types available, try to generate default ones
-                                            logger.warning(f"[Item Generation] No item types available, attempting to generate defaults")
-                                            try:
-                                                await game_manager.item_type_manager.generate_default_item_types()
-                                                await game_manager.db.set_item_types(game_manager.item_type_manager.to_dict_list())
-                                                item_type = game_manager.item_type_manager.get_random_item_type()
-                                                logger.info(f"[Item Generation] Generated default types, selected: {item_type.name}")
-                                            except Exception as e:
-                                                logger.error(f"[Item Generation] Failed to generate default types: {str(e)}")
-                                                # Ultimate fallback: create a basic item type
-                                                from .templates.item_types import ItemType
-                                                item_type = ItemType(
-                                                    name="Mysterious Artifact",
-                                                    description="A mysterious artifact of unknown origin",
-                                                    capabilities=["examine", "hold", "carry"]
-                                                )
-                                    
-                                    # Generate rarity
-                                    rarity = random.randint(1, 4)
-                                    
-                                    # Use GenericItemTemplate to generate a proper item name
-                                    item_template = GenericItemTemplate(game_manager.item_type_manager)
-                                    context = {
-                                        'room_title': room.title,
-                                        'room_description': room.description,
-                                        'biome': room.biome,
-                                        'item_type': item_type.name,
-                                        'item_type_description': item_type.description,
-                                        'item_type_capabilities': item_type.capabilities
-                                    }
-                                    
-                                    # Generate item name using AI
-                                    prompt = item_template.generate_prompt(context)
-                                    ai_response = await game_manager.ai_handler.generate_text(prompt)
-                                    item_data_response = item_template.parse_response(ai_response, context)
-                                    item_name = item_data_response.get('name', f"{room.title.split()[0]} {item_type.name}")
-                                    
-                                    # Create item data
-                                    item_data = {
-                                        'name': item_name,
-                                        'type': item_type.name,
-                                        'type_description': item_type.description,
-                                        'type_capabilities': item_type.capabilities,
-                                        'rarity': rarity,
-                                        'special_effects': "No special effects" if rarity < 3 else "Special effects"
-                                    }
-                                    
-                                    # Create item ID and add to player's inventory
-                                    item_id = f"item_{str(uuid.uuid4())}"
-                                    item_data["id"] = item_id
-                                    
-                                    # Add item to player's inventory
-                                    player.inventory.append(item_id)
-                                    await game_manager.db.set_player(player.id, player.dict())
-                                    
-                                    # Save item to database
-                                    await game_manager.db.set_item(item_id, item_data)
-                                    
-                                    logger.info(f"[Item Generation] Added item '{item_data['name']}' (Type: {item_data.get('type', 'Unknown')}) to player {player.id}")
-                                    
-                                    # Send server message to player about the obtained item
-                                    rarity_stars = rarity_to_stars(item_data['rarity'])
-                                    item_type_name = item_data.get('type', 'Unknown Type')
-                                    item_message = f"🎁 You obtained: {item_data['name']} [{item_type_name}] {rarity_stars}"
-                                    
-                                    await manager.send_to_player(
-                                        room_id=player.current_room,
-                                        player_id=action_request.player_id,
-                                        message={
-                                            "type": "item_obtained",
-                                            "player_id": action_request.player_id,
-                                            "item_name": item_data['name'],
-                                            "item_rarity": item_data['rarity'],
-                                            "item_type": item_data.get('type', 'Unknown'),
-                                            "rarity_stars": rarity_stars,
-                                            "message": item_message,
-                                            "timestamp": datetime.utcnow().isoformat()
-                                        }
-                                    )
-                                    
-                                    # Add item acquisition to player's memory log with type info
-                                    item_type_name = item_data.get('type', 'Unknown Type')
-                                    player.memory_log.append(f"Found {item_data['name']} [{item_type_name}] - {item_data['special_effects']}")
-                                    await game_manager.db.set_player(player.id, player.dict())
-                                    
-                                except Exception as e:
-                                    logger.error(f"[Item Generation] Failed to generate item for player {player.id}: {str(e)}")
-                            else:
-                                logger.debug(f"[Item Generation] AI decided player {player.id} does not deserve an item for this action")
-                        else:
-                            logger.info(f"[Item Generation] No reward_item field in AI response. Chunk keys: {list(chunk.keys())}")
 
                     if "room" in chunk["updates"]:
                         # Only update the current room, not the new room we just created
@@ -2212,46 +2606,79 @@ async def get_atmospheric_monster_presence(room_data: Dict[str, Any], game_manag
         biome = room_data.get('biome', 'unknown area')
         room_title = room_data.get('title', 'this location')
         
+        # Get territorial blocking information
+        territorial_info = {}
+        if game_manager and hasattr(game_manager, 'monster_behavior_manager'):
+            room_id = room_data.get('id', '')
+            # Ensure territorial blocks exist; if missing, assign one deterministically
+            for monster in monsters_info:
+                if monster.get('aggressiveness') == 'territorial':
+                    if room_id not in game_manager.monster_behavior_manager.territorial_blocks:
+                        game_manager.monster_behavior_manager.territorial_blocks[room_id] = {}
+                    current = game_manager.monster_behavior_manager.territorial_blocks[room_id].get(monster['id'])
+                    if not current:
+                        # Choose a direction to block based on available connections (fallback to first key)
+                        connections = room_data.get('connections', {}) or {}
+                        blocked_direction = None
+                        if connections:
+                            # Pick first direction key deterministically
+                            blocked_direction = list(connections.keys())[0]
+                        else:
+                            blocked_direction = 'north'
+                        game_manager.monster_behavior_manager.territorial_blocks[room_id][monster['id']] = blocked_direction
+                        current = blocked_direction
+                    territorial_info[monster['id']] = current
+        
         # Build monster context for AI
         monster_context = []
         for monster in monsters_info:
-            monster_context.append({
+            monster_context_item = {
+                'id': monster['id'],
                 'name': monster['name'],
                 'size': monster['size'],
                 'description': monster['description'],
                 'aggressiveness': monster['aggressiveness']
-            })
+            }
+            # Add territorial blocking information if available
+            if monster['id'] in territorial_info:
+                monster_context_item['blocking_direction'] = territorial_info[monster['id']]
+            monster_context.append(monster_context_item)
         
         # Generate AI description
         if game_manager and hasattr(game_manager, 'ai_handler'):
-            prompt = f"""You are describing what a player sees when entering a room with monsters. Write an atmospheric description from the player's perspective, as if observing these creatures from a distance.
-
-IMPORTANT GUIDELINES:
-- Write from the player's perspective ("You see...", "You notice...")
-- Describe what the creatures LOOK like, not their stats or abilities
-- Make it feel like distant observation - mysterious but visual
-- Keep it atmospheric and immersive
-- Don't mention creature names directly
-- Focus on visual appearance and behavior
-- 2-3 sentences maximum
-- Make it fit the {biome} environment
-
-LOCATION: {room_title}
-BIOME: {biome}
-MONSTERS: {len(monsters_info)} creature(s)
-
-CREATURE DETAILS:
-""" + "\n".join([f"- A {m['size']}-sized creature: {m['description']} (appears {m['aggressiveness']})" for m in monster_context])
-
-            prompt += f"\n\nWrite an atmospheric description of what the player observes from a distance:"
+            # Build creature details with territorial blocking info
+            creature_details = []
+            for m in monster_context:
+                detail = f"- A {m['size']}-sized creature: {m['description']} (appears {m['aggressiveness']})"
+                if 'blocking_direction' in m:
+                    detail += f" - BLOCKING {m['blocking_direction'].upper()} EXIT"
+                creature_details.append(detail)
             
-            try:
-                ai_response = await game_manager.ai_handler.generate_text(prompt)
-                return ai_response.strip()
-            except Exception as e:
-                logger.error(f"Error generating AI monster description: {str(e)}")
-                # Fallback to basic description
-                pass
+            prompt = f"""You are describing what a player sees when entering a room with monsters. Write an atmospheric description from the player's perspective, as if observing these creatures from a distance.
+ 
+ IMPORTANT GUIDELINES:
+ - Write from the player's perspective ("You see...", "You notice...")
+ - Describe what the creatures LOOK like, not their stats or abilities
+ - Make it feel like distant observation - mysterious but visual
+ - Keep it atmospheric and immersive
+ - Don't mention creature names directly
+ - Focus on visual appearance and behavior
+ - 2-3 sentences maximum
+ - CRITICAL: Show their aggressiveness through behavior:
+   * AGGRESSIVE monsters: "charging toward you", "rushing in your direction", "advancing menacingly"
+   * TERRITORIAL monsters: "guarding the [direction] path", "blocking the [direction] exit", "watching the [direction] passage"
+   * PASSIVE monsters: "minding their own business", "peacefully grazing", "ignoring your presence"
+   * NEUTRAL monsters: "observing you cautiously", "keeping their distance", "watching you warily"
+ - CRITICAL: If a monster is blocking a direction, mention it clearly: "guarding the [direction] exit", "blocking the [direction] path"
+ 
+ Room: {room_title} ({biome})
+ Creatures:\n{chr(10).join(creature_details)}
+ 
+ Return only the atmospheric description, no JSON.
+ """
+ 
+            description = await game_manager.ai_handler.generate_text(prompt)
+            return description.strip()
         
         # Fallback: Simple description if AI fails
         if len(monsters_info) == 1:

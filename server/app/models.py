@@ -28,7 +28,7 @@ class Monster(BaseModel):
     size: str           # colossal, dinosaur, horse, human, chicken, insect
     special_effects: str = ""  # AI-generated special abilities
     location: str       # room_id
-    health: int = 100
+    health: int = 20
     is_alive: bool = True
     properties: Dict[str, str] = Field(default_factory=dict)
 
@@ -70,6 +70,7 @@ class Player(BaseModel):
     last_action: Optional[str] = None  # ISO format datetime string
     last_action_text: Optional[str] = None  # Store the actual action text
     pending_item_type: Optional[Dict[str, Any]] = None  # Store pending item type for discovery
+    health: int = 20
 
 class GameState(BaseModel):
     world_seed: str

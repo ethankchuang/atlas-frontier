@@ -24,7 +24,7 @@ class AIHandler:
     @staticmethod
     async def generate_room_description(
         context: Dict[str, any],
-        style: str = "fantasy"
+        style: str = "medieval fantasy"
     ) -> Tuple[str, str, str]:
         """Generate a room title and description"""
         json_template = '''
@@ -40,7 +40,7 @@ class AIHandler:
         if monster_count > 0:
             monsters_info = f"\nMonsters: {monster_count} creatures will inhabit this area"
         
-        prompt = f"""Generate a concise room description for a fantasy MUD game.
+        prompt = f"""Generate a concise room description for a medieval fantasy MUD game.
         Context: {json.dumps(context)}
         Style: {style}
         {monsters_info}
@@ -58,7 +58,7 @@ class AIHandler:
             response = await client.chat.completions.create(
                 model="gpt-4.1-nano-2025-04-14",
                 messages=[
-                    {"role": "system", "content": "You are a concise writer for a fantasy MUD game. Always return clean JSON without comments. Keep descriptions to 1-2 sentences maximum. Focus only on essential details and remove all fluff. When monsters are present, subtly hint at danger or mysterious presences."},
+                    {"role": "system", "content": "You are a concise writer for a medieval fantasy MUD game. Always return clean JSON without comments. Keep descriptions to 1-2 sentences maximum. Focus only on essential details and remove all fluff. Avoid modern, sci-fi, or futuristic elements."},
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0.7
@@ -107,8 +107,8 @@ class AIHandler:
                 # Set environment variable for Replicate client
                 os.environ["REPLICATE_API_TOKEN"] = settings.REPLICATE_API_TOKEN
                 
-                # Enhanced prompt for better fantasy game images
-                enhanced_prompt = f"A detailed, atmospheric fantasy game scene, cinematic lighting, high quality: {prompt}"
+                # Enhanced prompt for better medieval fantasy game images
+                enhanced_prompt = f"A detailed, atmospheric medieval fantasy game scene, cinematic lighting, high quality, medieval architecture, armor, swords, bows: {prompt}"
                 
                 logger.info(f"[Replicate] Using model: {settings.REPLICATE_MODEL}")
                 logger.info(f"[Replicate] Image dimensions: {settings.REPLICATE_IMAGE_WIDTH}x{settings.REPLICATE_IMAGE_HEIGHT}")
@@ -171,7 +171,7 @@ class AIHandler:
                 try:
                     response = await client.images.generate(
                         model="dall-e-3",
-                        prompt=f"A detailed, atmospheric fantasy game scene: {prompt}",
+                        prompt=f"A detailed, atmospheric medieval fantasy game scene: {prompt}",
                         size="1024x1024",
                         quality="standard",
                         n=1
@@ -227,6 +227,14 @@ class AIHandler:
             "direction": "optional, possible values: north, south, east, west, up, down",
             "inventory": ["item1", "item2"],
             "memory_log": ["memory entry"]
+        },
+        "monster_interaction": {
+            "monster_id": "optional id of the target monster (if multiple present)",
+            "message": "the player's spoken message directed at the monster"
+        },
+        "combat": {
+            "monster_id": "optional id of the target monster (if multiple present)",
+            "action": "short natural-language summary of the intended attack"
         },
         "npcs": [
             {
@@ -288,8 +296,25 @@ class AIHandler:
             "4. For movement: Describe only the essential transition and arrival",
             "5. For actions: Focus on the immediate result and key details only",
             "6. You handle ONLY narrative responses and simple state changes",
-            "7. Determine if the player is inputting a movement command, if so add it to updates.player.direction",
-            "8. Focus on movement direction, inventory changes, quest progress, and NPC interactions",
+            "",
+            "MOVEMENT INTENT POLICY (CRITICAL):",
+            "- If the player clearly intends to move in a direction (north/south/east/west/up/down):",
+            "  - Set updates.player.direction to one of: north, south, east, west, up, down.",
+            "  - Keep narrative concise and focused on the movement/arrival; do not include extra exposition.",
+            "  - Do NOT modify room state directly; the server handles movement and room updates.",
+            "",
+            "MONSTER DIALOGUE GUIDELINES:",
+            "- If the player clearly speaks to a monster/creature (e.g., addresses it, asks it something, tries to converse):",
+            "  - Set updates.monster_interaction with the player's spoken message and the target monster_id (if multiple present).",
+            "  - Do NOT invent combat or block logic; the server will handle aggressiveness and outcomes.",
+            "  - For rooms with exactly one monster, you may omit monster_id; the server will resolve it.",
+            "  - Keep the narrative response concise; the server will produce the creature's actual reply.",
+            "",
+            "COMBAT INTENT POLICY (CRITICAL):",
+            "- If the player clearly intends to fight/attack/engage a creature:",
+            "  - Set updates.combat with the target monster_id (omit if exactly one monster present) and a short action summary.",
+            "  - Do NOT simulate the duel outcome here; the server will initiate combat and handle resolution.",
+            "  - Keep the narrative to the immediate pre-fight moment (no long analyses).",
             "",
             "ITEM REWARD POLICY (CRITICAL):",
             "- **TRUST YOUR JUDGMENT:** Analyze the player's action and determine if they should receive an item",
@@ -466,7 +491,39 @@ class AIHandler:
             temperature=0.7
         )
 
-        result = json.loads(response.choices[0].message.content)
+        # Clean the response content to handle potential control characters
+        response_content = response.choices[0].message.content
+        
+        # Remove or replace problematic control characters
+        import re
+        cleaned_content = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]', '', response_content)
+        
+        try:
+            result = json.loads(cleaned_content)
+        except json.JSONDecodeError as e:
+            logger.error(f"[process_npc_interaction] JSON parsing failed: {str(e)}")
+            logger.error(f"[process_npc_interaction] Problematic content: {repr(cleaned_content)}")
+            
+            # Try to extract JSON from the response if it's embedded in other text
+            json_match = re.search(r'\{.*\}', cleaned_content, re.DOTALL)
+            if json_match:
+                try:
+                    result = json.loads(json_match.group())
+                    logger.info("[process_npc_interaction] Successfully extracted JSON from response")
+                except json.JSONDecodeError:
+                    logger.error("[process_npc_interaction] Failed to parse extracted JSON, using fallback")
+                    # Fallback response
+                    result = {
+                        "response": "I'm having trouble understanding right now. Could you try asking again?",
+                        "memory": "Player attempted interaction but response parsing failed."
+                    }
+            else:
+                logger.error("[process_npc_interaction] No JSON found in response, using fallback")
+                result = {
+                    "response": "I'm having trouble understanding right now. Could you try asking again?",
+                    "memory": "Player attempted interaction but no valid JSON response received."
+                }
+        
         return result["response"], result["memory"]
 
     @staticmethod
@@ -484,7 +541,7 @@ class AIHandler:
 }
 '''
 
-        prompt = f"""Create a new fantasy world and main quest for a MUD game.
+        prompt = f"""Create a new classic medieval fantasy world and main quest for a MUD game.
 
         CRITICAL: Keep the main quest summary to 1-2 sentences maximum. Focus only on the essential quest details. Remove all fluff and unnecessary elaboration.
 
@@ -495,13 +552,78 @@ class AIHandler:
         response = await client.chat.completions.create(
             model="gpt-4.1-nano-2025-04-14",
             messages=[
-                {"role": "system", "content": "You are a fantasy world creator. Keep descriptions concise (1-2 sentences maximum). Focus only on essential details and remove all fluff. Always return clean JSON without any comments."},
+                {"role": "system", "content": "You are a medieval fantasy world creator. Keep descriptions concise (1-2 sentences maximum). Focus only on essential details and remove all fluff. Avoid modern or sci-fi elements. Always return clean JSON without any comments."},
                 {"role": "user", "content": prompt}
             ],
             temperature=0.7
         )
 
-        result = json.loads(response.choices[0].message.content)
+        # Clean the response content to handle potential control characters
+        response_content = response.choices[0].message.content
+        
+        # Remove or replace problematic control characters
+        import re
+        import time
+        
+        # Log the raw content for debugging
+        logger.debug(f"[generate_world_seed] Raw response: {repr(response_content)}")
+        
+        # First, try to parse the JSON as-is
+        try:
+            result = json.loads(response_content)
+            logger.debug("[generate_world_seed] Successfully parsed JSON on first attempt")
+        except json.JSONDecodeError as e:
+            logger.debug(f"[generate_world_seed] First JSON parse failed: {str(e)}")
+            
+            # Clean the content and try again
+            # Remove control characters except for newlines, tabs, and carriage returns
+            cleaned_content = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]', '', response_content)
+            
+            # Fix escaped newlines that might be causing issues
+            # Replace \\n with \n in the cleaned content
+            cleaned_content = cleaned_content.replace('\\n', '\n')
+            
+            # Then properly escape newlines within string values
+            cleaned_content = re.sub(r'(".*?)\n(.*?")', r'\1\\n\2', cleaned_content, flags=re.DOTALL)
+            
+            logger.debug(f"[generate_world_seed] Cleaned response: {repr(cleaned_content)}")
+            
+            try:
+                result = json.loads(cleaned_content)
+                logger.debug("[generate_world_seed] Successfully parsed JSON after cleaning")
+            except json.JSONDecodeError as e:
+                logger.error(f"[generate_world_seed] JSON parsing failed after cleaning: {str(e)}")
+                logger.error(f"[generate_world_seed] Problematic content: {repr(cleaned_content)}")
+                
+                # Try to extract JSON from the response if it's embedded in other text
+                json_match = re.search(r'\{.*\}', cleaned_content, re.DOTALL)
+                if json_match:
+                    try:
+                        result = json.loads(json_match.group())
+                        logger.info("[generate_world_seed] Successfully extracted JSON from response")
+                    except json.JSONDecodeError:
+                        logger.error("[generate_world_seed] Failed to parse extracted JSON, using fallback")
+                        # Fallback to a default world state
+                        result = {
+                            "world_seed": f"Fallback World {hash(str(time.time())) % 10000}",
+                            "main_quest_summary": "Explore this mysterious realm and uncover its secrets.",
+                            "starting_state": {
+                                "quest_stage": "beginning",
+                                "world_time": "dawn", 
+                                "weather": "clear"
+                            }
+                        }
+                else:
+                    logger.error("[generate_world_seed] No JSON found in response, using fallback")
+                    result = {
+                        "world_seed": f"Fallback World {hash(str(time.time())) % 10000}",
+                        "main_quest_summary": "Explore this mysterious realm and uncover its secrets.",
+                        "starting_state": {
+                            "quest_stage": "beginning",
+                            "world_time": "dawn",
+                            "weather": "clear"
+                        }
+                    }
 
         # Convert all values in starting_state to strings
         starting_state = {
@@ -564,7 +686,7 @@ class AIHandler:
 }
 '''
         prompt = f"""
-You are inventing a biome for a new region of a fantasy world. The region is a contiguous block of land (a chunk).
+You are inventing a biome for a new region of a medieval fantasy world. The region is a contiguous block of land (a chunk).
 - The new biome must be visually and thematically DISTINCT from all adjacent biomes: {adj_biome_str}.
 - The biome must have a large, obvious impact on the image and name of all rooms within it (not just subtle differences).
 - The biome name must be short, evocative, and creative (e.g., 'crimson forest', 'ashen tundra', 'misty mountain', 'sunken swamp').
@@ -572,6 +694,7 @@ You are inventing a biome for a new region of a fantasy world. The region is a c
 - The description should be 1-2 sentences, concise, and evocative.
 - The color should be a hex code that visually represents the biome's appearance and feel.
 - Choose colors that are visually distinct from typical adjacent biomes (e.g., green for forests, brown/tan for deserts, blue for water, etc.).
+- IMPORTANT: Keep all details firmly medieval fantasy (no technology, no sci-fi, no modern references).
 - Do not use elaborate or overly specific names.
 - Do not use any of these names for the biome: {adj_biome_str}.
 Return a JSON object with these exact fields:
@@ -582,7 +705,7 @@ Return a JSON object with these exact fields:
             response = await client.chat.completions.create(
                 model="gpt-4.1-nano-2025-04-14",
                 messages=[
-                    {"role": "system", "content": "You are a worldbuilder for a fantasy MUD game. Always return clean JSON without comments. Biome names must be short and generic. Descriptions must be concise and evocative. Colors must be valid hex codes that visually represent the biome. Biomes must be visually and thematically distinct from neighbors, and must have a large impact on the image and name of all rooms within them."},
+                    {"role": "system", "content": "You are a worldbuilder for a medieval fantasy MUD game. Always return clean JSON without comments. Keep all content medieval fantasy (no modern/sci-fi). Biome names must be short and generic. Descriptions must be concise and evocative. Colors must be valid hex codes that visually represent the biome. Biomes must be visually and thematically distinct from neighbors, and must have a large impact on the image and name of all rooms within them."},
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0.7

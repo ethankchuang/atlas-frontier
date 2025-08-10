@@ -3,11 +3,10 @@
 import sys
 import os
 import logging
-from pathlib import Path
 
 # Add the server directory to the Python path so we can import from app
-server_dir = Path(__file__).parent.parent
-sys.path.append(str(server_dir))
+server_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(server_dir)
 
 from app.logger import setup_logging
 from app.config import settings

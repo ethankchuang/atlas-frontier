@@ -10,6 +10,7 @@ import DuelChallengePopup from './DuelChallengePopup';
 import apiService from '@/services/api';
 import websocketService from '@/services/websocket';
 import { ChatMessage } from '@/types/game';
+import PauseMenu from '@/components/PauseMenu';
 
 interface GameLayoutProps {
     playerId: string;
@@ -28,8 +29,20 @@ const GameLayout: React.FC<GameLayoutProps> = ({ playerId }) => {
         setGameState,
         addVisitedCoordinate,
         isMinimapFullscreen,
-        setIsMinimapFullscreen
+        setIsMinimapFullscreen,
+        setIsMenuOpen,
+        upsertItems,
+        isInDuel,
+        player1Vital,
+        player2Vital,
+        player1Control,
+        player2Control,
+        duelOpponent,
+        player1MaxVital,
+        player2MaxVital
     } = useGameStore();
+    const p1Max = player1MaxVital ?? 6;
+    const p2Max = player2MaxVital ?? 6;
 
     // Initialize game state
     useEffect(() => {
@@ -51,6 +64,7 @@ const GameLayout: React.FC<GameLayoutProps> = ({ playerId }) => {
                 setCurrentRoom(roomInfo.room);
                 setNPCs(roomInfo.npcs);
                 setPlayersInRoom(roomInfo.players);
+                upsertItems(roomInfo.items || []);
 
                 // Mark initial room as visited on minimap
                 addVisitedCoordinate(roomInfo.room.x, roomInfo.room.y);
@@ -135,6 +149,7 @@ const GameLayout: React.FC<GameLayoutProps> = ({ playerId }) => {
                     setCurrentRoom(roomInfo.room);
                     setNPCs(roomInfo.npcs);
                     setPlayersInRoom(roomInfo.players);
+                    upsertItems(roomInfo.items || []);
                     
                     // Don't add room description message here - it was already added during initialization
                     // This prevents duplicate room messages
@@ -155,6 +170,19 @@ const GameLayout: React.FC<GameLayoutProps> = ({ playerId }) => {
 
         updateRoomData();
     }, [currentRoom?.id]);
+
+    // Escape key to toggle pause menu
+    useEffect(() => {
+        const onKeyDown = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                const { isMenuOpen } = useGameStore.getState();
+                setIsMenuOpen(!isMenuOpen);
+            }
+        };
+        window.addEventListener('keydown', onKeyDown);
+        return () => window.removeEventListener('keydown', onKeyDown);
+    }, [setIsMenuOpen]);
 
     if (!player || !currentRoom) {
         return (
@@ -189,6 +217,67 @@ const GameLayout: React.FC<GameLayoutProps> = ({ playerId }) => {
             {/* Duel Challenge Popup */}
             <DuelChallengePopup />
 
+            {/* Duel Status Overlay */}
+            {isInDuel && (
+                <div className="absolute top-3 left-1/2 -translate-x-1/2 z-30 bg-black/85 border border-amber-500 rounded px-3 py-2">
+                    <div className="text-amber-400 text-xs font-bold text-center">Duel vs {duelOpponent?.name || 'Opponent'}</div>
+                    <div className="mt-1 grid grid-cols-2 gap-6 text-[10px]">
+                        {/* You */}
+                        <div>
+                            <div className="text-green-400 font-bold mb-0.5">You</div>
+                            <div className="space-y-1">
+                                <div>
+                                    <div className="flex items-center gap-1 mb-0.5">
+                                        <span>❤️</span>
+                                        <span className="text-gray-200">Health</span>
+                                        <span className="ml-auto text-gray-400">{p1Max - Math.min(p1Max, Math.max(0, player1Vital))}/{p1Max}</span>
+                                    </div>
+                                    <div className="w-40 h-1.5 bg-gray-700 rounded overflow-hidden">
+                                        <div className="h-1.5 bg-red-600" style={{width: `${Math.min(100, Math.max(0, (((p1Max - Math.min(p1Max, Math.max(0, player1Vital)))/p1Max)*100)))}%`}} />
+                                    </div>
+                                </div>
+                                <div>
+                                    <div className="flex items-center gap-1 mb-0.5">
+                                        <span>🎯</span>
+                                        <span className="text-gray-200">Advantage</span>
+                                        <span className="ml-auto text-gray-400">{Math.min(5, Math.max(0, player1Control))}/5</span>
+                                    </div>
+                                    <div className="w-40 h-1.5 bg-gray-700 rounded overflow-hidden">
+                                        <div className="h-1.5 bg-blue-500" style={{width: `${Math.min(100, Math.max(0, (Math.min(5, Math.max(0, player1Control))/5)*100))}%`}} />
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        {/* Opponent */}
+                        <div>
+                            <div className="text-red-400 font-bold mb-0.5">{duelOpponent?.name || 'Opponent'}</div>
+                            <div className="space-y-1">
+                                <div>
+                                    <div className="flex items-center gap-1 mb-0.5">
+                                        <span>❤️</span>
+                                        <span className="text-gray-200">Health</span>
+                                        <span className="ml-auto text-gray-400">{p2Max - Math.min(p2Max, Math.max(0, player2Vital))}/{p2Max}</span>
+                                    </div>
+                                    <div className="w-40 h-1.5 bg-gray-700 rounded overflow-hidden">
+                                        <div className="h-1.5 bg-red-400" style={{width: `${Math.min(100, Math.max(0, (((p2Max - Math.min(p2Max, Math.max(0, player2Vital)))/p2Max)*100)))}%`}} />
+                                    </div>
+                                </div>
+                                <div>
+                                    <div className="flex items-center gap-1 mb-0.5">
+                                        <span>🎯</span>
+                                        <span className="text-gray-200">Advantage</span>
+                                        <span className="ml-auto text-gray-400">{Math.min(5, Math.max(0, player2Control))}/5</span>
+                                    </div>
+                                    <div className="w-40 h-1.5 bg-gray-700 rounded overflow-hidden">
+                                        <div className="h-1.5 bg-blue-300" style={{width: `${Math.min(100, Math.max(0, (Math.min(5, Math.max(0, player2Control))/5)*100))}%`}} />
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* Chat Display (bottom 35%) */}
             <div className="h-[50%] flex flex-col relative">
                 {/* Retro terminal border */}
@@ -200,6 +289,9 @@ const GameLayout: React.FC<GameLayoutProps> = ({ playerId }) => {
                     <ChatInput />
                 </div>
             </div>
+
+            {/* Pause Menu Overlay */}
+            <PauseMenu />
         </div>
     );
 };
