@@ -63,7 +63,7 @@ class Room(BaseModel):
 class Player(BaseModel):
     id: str
     name: str
-    current_room: str
+    current_room: Optional[str] = ""
     inventory: List[str] = Field(default_factory=list)  # List of Item IDs
     quest_progress: Dict[str, str] = Field(default_factory=dict)
     memory_log: List[str] = Field(default_factory=list)

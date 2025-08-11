@@ -55,12 +55,15 @@ const GameLayout: React.FC<GameLayoutProps> = ({ playerId }) => {
                 const gameState = await apiService.startGame();
                 setGameState(gameState);
 
-                // Get player data
-                const playerData = await apiService.createPlayer(playerId);
-                setPlayer(playerData);
+                // Join the game (creates/gets player and returns room data)
+                const joinData = await apiService.joinGame();
+                setPlayer(joinData.player);
 
-                // Get initial room data
-                const roomInfo = await apiService.getRoomInfo(playerData.current_room);
+                // Set initial room data from join response
+                setCurrentRoom(joinData.room);
+                
+                // Get full room info with NPCs, items, etc.
+                const roomInfo = await apiService.getRoomInfo(joinData.room.id);
                 setCurrentRoom(roomInfo.room);
                 setNPCs(roomInfo.npcs);
                 setPlayersInRoom(roomInfo.players);
@@ -92,10 +95,10 @@ const GameLayout: React.FC<GameLayoutProps> = ({ playerId }) => {
 
                 // Connect to WebSocket
                 console.log('[GameLayout] Establishing WebSocket connection:', {
-                    roomId: playerData.current_room,
-                    playerId: playerData.id
+                    roomId: joinData.player.current_room,
+                    playerId: joinData.player.id
                 });
-                websocketService.connect(playerData.current_room, playerData.id);
+                websocketService.connect(joinData.player.current_room, joinData.player.id);
 
                 setIsLoading(false);
             } catch (error) {

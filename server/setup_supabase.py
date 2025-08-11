@@ -83,14 +83,24 @@ def main():
     
     print("\n🎉 Setup complete!")
     print("\n📝 Next steps:")
-    print("1. Your app will now use Supabase for persistent data")
-    print("2. Redis is still used for transient data (chat, sessions, locks)")
-    print("3. Start your server: python -m uvicorn app.main:app --reload")
+    print("1. Enable Supabase Auth in your dashboard (Authentication > Settings)")
+    print("2. Run the updated SQL schema to add user_profiles table")
+    print("3. Your app now uses authentication + Supabase for persistent data")
+    print("4. Redis is still used for transient data (chat, sessions, locks)")
+    print("5. Start your server: python -m uvicorn app.main:app --reload")
+    
+    print("\n💡 Auth Endpoints:")
+    print("- POST /auth/register - Register new user")
+    print("- POST /auth/login - Login user")  
+    print("- GET /auth/profile - Get user profile")
+    print("- GET /auth/check-username/{username} - Check username availability")
+    print("- POST /join - Place player in game world")
     
     print("\n💡 Tips:")
-    print("- Use Database.reset_world() to clear all data")
-    print("- Check Supabase dashboard to see your data")
-    print("- Redis still handles chat, sessions, and locks")
+    print("- Users must register/login to play")
+    print("- Usernames are case-insensitive and must be unique")
+    print("- Check Supabase Auth dashboard to see registered users")
+    print("- Use Database.reset_world() to clear game data")
 
 if __name__ == "__main__":
     main()

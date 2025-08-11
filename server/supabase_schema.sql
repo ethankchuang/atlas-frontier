@@ -4,6 +4,16 @@
 -- Enable UUID extension
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
+-- User profiles table (links Supabase auth users to game players)
+CREATE TABLE user_profiles (
+    id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+    username TEXT UNIQUE NOT NULL,
+    email TEXT NOT NULL,
+    current_player_id TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
 -- Rooms table
 CREATE TABLE rooms (
     id TEXT PRIMARY KEY,
@@ -81,6 +91,8 @@ CREATE TABLE coordinates (
 );
 
 -- Indexes for better performance
+CREATE INDEX idx_user_profiles_username ON user_profiles(LOWER(username));
+CREATE INDEX idx_user_profiles_updated_at ON user_profiles(updated_at);
 CREATE INDEX idx_rooms_updated_at ON rooms(updated_at);
 CREATE INDEX idx_players_updated_at ON players(updated_at);
 CREATE INDEX idx_npcs_updated_at ON npcs(updated_at);
@@ -141,5 +153,10 @@ CREATE TRIGGER update_chunk_biomes_updated_at
 
 CREATE TRIGGER update_coordinates_updated_at
     BEFORE UPDATE ON coordinates
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at();
+
+CREATE TRIGGER update_user_profiles_updated_at
+    BEFORE UPDATE ON user_profiles
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at();

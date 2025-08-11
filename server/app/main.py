@@ -1,4 +1,4 @@
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Request
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Dict, List, Optional, Any
 import json
@@ -22,6 +22,16 @@ from .models import (
     ActionRecord,
     Monster
 )
+from .auth_models import (
+    RegisterRequest,
+    LoginRequest,
+    UpdateUsernameRequest,
+    AuthResponse,
+    UserProfile,
+    RegisterResponse
+)
+from .auth_service import AuthService
+from .auth_utils import get_current_user, get_optional_current_user
 from .game_manager import GameManager
 from .config import settings
 from .logger import setup_logging
@@ -1918,32 +1928,171 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, player_id: str)
         logger.error(f"[WebSocket] Error in connection: {str(e)}")
         manager.disconnect(room_id, player_id)
 
+# ===============================
+# Authentication Endpoints
+# ===============================
+
+@app.post("/auth/register", response_model=RegisterResponse)
+async def register_user(request: RegisterRequest):
+    """Register a new user with email, password, and username"""
+    result = await AuthService.register_user(
+        email=request.email,
+        password=request.password,
+        username=request.username
+    )
+    return result
+
+@app.post("/auth/login", response_model=AuthResponse)
+async def login_user(request: LoginRequest):
+    """Login user with email and password"""
+    result = await AuthService.login_user(
+        email=request.email,
+        password=request.password
+    )
+    return result
+
+@app.get("/auth/profile", response_model=UserProfile)
+async def get_user_profile(current_user: Dict[str, Any] = Depends(get_current_user)):
+    """Get current user's profile"""
+    return {
+        'id': current_user['id'],
+        'username': current_user['username'],
+        'email': current_user['email'],
+        'current_player_id': current_user['current_player_id']
+    }
+
+@app.put("/auth/username")
+async def update_username(
+    request: UpdateUsernameRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """Update user's username"""
+    result = await AuthService.update_username(
+        user_id=current_user['id'],
+        new_username=request.username
+    )
+    return result
+
+@app.get("/auth/check-username/{username}")
+async def check_username_availability(username: str):
+    """Check if a username is available"""
+    from .auth_utils import validate_username, is_username_available
+    
+    # Validate format
+    if not validate_username(username):
+        return {
+            'available': False,
+            'reason': 'Username must be 3-20 characters, start with a letter, and contain only letters and numbers'
+        }
+    
+    # Check availability
+    is_available = await is_username_available(username)
+    return {
+        'available': is_available,
+        'reason': None if is_available else 'Username is already taken'
+    }
+
+# ===============================
+# Game Endpoints
+# ===============================
+
 # Health check endpoint
 @app.get("/health")
 async def health_check():
     return {"status": "healthy"}
 
-# Game initialization endpoint
+# Game initialization endpoint (admin only - creates world)
 @app.post("/start")
 async def start_game(game_manager: GameManager = Depends(get_game_manager)):
     game_state = await game_manager.initialize_game()
     return game_state
 
-# Player creation endpoint
-@app.post("/player")
-async def create_player(
-    request: CreatePlayerRequest,
+# Join game endpoint (requires auth - places player in starting room)
+@app.post("/join")
+async def join_game(
+    current_user: Dict[str, Any] = Depends(get_current_user),
     game_manager: GameManager = Depends(get_game_manager)
 ):
-    player = await game_manager.create_player(request.name)
+    """Place the authenticated user's player in the game world"""
+    if not current_user['current_player_id']:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No player found for this user"
+        )
+    
+    player = await game_manager.get_player(current_user['current_player_id'])
+    if not player:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Player not found"
+        )
+    
+    # If player doesn't have a current room, place them in starting room
+    if not player.current_room:
+        # Get or create starting room
+        starting_room = await game_manager.ensure_starting_room()
+        
+        # Update player's location
+        player.current_room = starting_room.id
+        await game_manager.db.set_player(player.id, player.dict())
+        
+        # Add player to room's player list
+        await game_manager.db.add_to_room_players(starting_room.id, player.id)
+        
+        logger.info(f"Placed player {player.name} in starting room {starting_room.id}")
+        
+        return {
+            'message': f'Welcome to the game, {player.name}!',
+            'player': player,
+            'room': starting_room
+        }
+    else:
+        # Player already in game, return current state
+        room_data = await game_manager.db.get_room(player.current_room)
+        room = Room(**room_data) if room_data else None
+        
+        return {
+            'message': f'Welcome back, {player.name}!',
+            'player': player,
+            'room': room
+        }
+
+# Get current player endpoint (requires auth)
+@app.get("/player")
+async def get_current_player(
+    current_user: Dict[str, Any] = Depends(get_current_user),
+    game_manager: GameManager = Depends(get_game_manager)
+):
+    """Get the current authenticated user's player"""
+    if not current_user['current_player_id']:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No player found for this user"
+        )
+    
+    player = await game_manager.get_player(current_user['current_player_id'])
+    if not player:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Player not found"
+        )
+    
     return player
 
-# Action endpoint with streaming support
+# Action endpoint with streaming support (requires auth)
 @app.post("/action/stream")
 async def process_action_stream(
     action_request: ActionRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user),
     game_manager: GameManager = Depends(get_game_manager)
 ):
+    # Validate that the user owns this player
+    if action_request.player_id != current_user['current_player_id']:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only perform actions for your own player"
+        )
+    
     async def event_generator():
         try:
             # Check if player is in a duel
