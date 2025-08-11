@@ -1,23 +1,55 @@
 import { ActionRequest, ActionResponse, ChatMessage, GameState, NPCInteraction, Player, RoomInfo, Monster } from '@/types/game';
+import { AuthResponse, RegisterRequest, LoginRequest, RegisterResponse, User, UsernameAvailability } from '@/types/auth';
 import useGameStore from '@/store/gameStore';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 class APIService {
+    private getAuthToken(): string | null {
+        if (typeof window === 'undefined') return null;
+        return localStorage.getItem('auth_token');
+    }
+
+    private setAuthToken(token: string): void {
+        if (typeof window !== 'undefined') {
+            localStorage.setItem('auth_token', token);
+        }
+    }
+
+    private clearAuthToken(): void {
+        if (typeof window !== 'undefined') {
+            localStorage.removeItem('auth_token');
+        }
+    }
+
     private async request<T>(
         endpoint: string,
         options: RequestInit = {}
     ): Promise<T> {
+        const token = this.getAuthToken();
+        const headers: HeadersInit = {
+            'Content-Type': 'application/json',
+            ...options.headers,
+        };
+
+        // Add auth header if token exists
+        if (token) {
+            headers['Authorization'] = `Bearer ${token}`;
+        }
+
         const response = await fetch(`${API_URL}${endpoint}`, {
             ...options,
-            headers: {
-                'Content-Type': 'application/json',
-                ...options.headers,
-            },
+            headers,
         });
 
         if (!response.ok) {
             const error = await response.json();
+            
+            // Clear token if unauthorized
+            if (response.status === 401) {
+                this.clearAuthToken();
+            }
+            
             throw new Error(error.detail || 'An error occurred');
         }
 
@@ -31,13 +63,7 @@ class APIService {
         });
     }
 
-    // Player management
-    async createPlayer(name: string): Promise<Player> {
-        return this.request<Player>('/player', {
-            method: 'POST',
-            body: JSON.stringify({ name }),
-        });
-    }
+    // Player management is now handled through authentication
 
     // Room information
     async getRoomInfo(roomId: string): Promise<RoomInfo> {
@@ -74,12 +100,20 @@ class APIService {
             // Don't set movement loading state here - we'll determine it based on backend response
             // The loading spinner should only show when the room is actually being generated
             
+            const token = this.getAuthToken();
+            const headers: HeadersInit = {
+                'Content-Type': 'application/json',
+                'Accept': 'text/event-stream',
+            };
+
+            // Add auth header if token exists
+            if (token) {
+                headers['Authorization'] = `Bearer ${token}`;
+            }
+
             const response = await fetch(`${API_URL}/action/stream`, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Accept': 'text/event-stream',
-                },
+                headers,
                 body: JSON.stringify(action),
             });
 
@@ -297,6 +331,63 @@ class APIService {
     // Health check
     async healthCheck(): Promise<{ status: string }> {
         return this.request<{ status: string }>('/health');
+    }
+
+    // ===============================
+    // Authentication Methods
+    // ===============================
+
+    async register(data: RegisterRequest): Promise<RegisterResponse> {
+        const response = await this.request<RegisterResponse>('/auth/register', {
+            method: 'POST',
+            body: JSON.stringify(data),
+        });
+        return response;
+    }
+
+    async login(data: LoginRequest): Promise<AuthResponse> {
+        const response = await this.request<AuthResponse>('/auth/login', {
+            method: 'POST',
+            body: JSON.stringify(data),
+        });
+        
+        // Store the token
+        this.setAuthToken(response.access_token);
+        
+        return response;
+    }
+
+    async getProfile(): Promise<User> {
+        return this.request<User>('/auth/profile');
+    }
+
+    async checkUsernameAvailability(username: string): Promise<UsernameAvailability> {
+        return this.request<UsernameAvailability>(`/auth/check-username/${username}`);
+    }
+
+    async updateUsername(username: string): Promise<{ username: string; message: string }> {
+        return this.request<{ username: string; message: string }>('/auth/username', {
+            method: 'PUT',
+            body: JSON.stringify({ username }),
+        });
+    }
+
+    async joinGame(): Promise<{ message: string; player: Player; room: any }> {
+        return this.request<{ message: string; player: Player; room: any }>('/join', {
+            method: 'POST',
+        });
+    }
+
+    async getCurrentPlayer(): Promise<Player> {
+        return this.request<Player>('/player');
+    }
+
+    logout(): void {
+        this.clearAuthToken();
+    }
+
+    isAuthenticated(): boolean {
+        return this.getAuthToken() !== null;
     }
 }
 

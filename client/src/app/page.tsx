@@ -1,64 +1,143 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import GameLayout from '@/components/GameLayout';
+import AuthForm from '@/components/AuthForm';
+import useGameStore from '@/store/gameStore';
+import apiService from '@/services/api';
 
 export default function Home() {
-    const [playerName, setPlayerName] = useState('');
-    const [isPlaying, setIsPlaying] = useState(false);
+    const [isLoading, setIsLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
+    
+    const { 
+        user, 
+        player, 
+        isAuthenticated, 
+        setUser, 
+        setPlayer, 
+        setIsAuthenticated 
+    } = useGameStore();
 
-    const handleStartGame = (e: React.FormEvent) => {
-        e.preventDefault();
-        if (playerName.trim()) {
-            setIsPlaying(true);
+    // Check for existing auth token on page load
+    useEffect(() => {
+        const checkAuthStatus = async () => {
+            try {
+                if (apiService.isAuthenticated()) {
+                    const userProfile = await apiService.getProfile();
+                    setUser(userProfile);
+                    setIsAuthenticated(true);
+                    
+                    // Player will be loaded when joining the game
+                }
+            } catch (error) {
+                console.warn('Auth check failed:', error);
+                // Token might be expired, clear it
+                apiService.logout();
+                setIsAuthenticated(false);
+                setUser(null);
+            } finally {
+                setIsLoading(false);
+            }
+        };
+
+        checkAuthStatus();
+    }, [setUser, setPlayer, setIsAuthenticated]);
+
+    const handleAuthSuccess = () => {
+        // Auth form will have already set user state
+        // No additional action needed
+    };
+
+    const handleJoinGame = async () => {
+        try {
+            setIsLoading(true);
+            setError(null);
+            
+            const result = await apiService.joinGame();
+            setPlayer(result.player);
+            
+        } catch (error) {
+            if (error instanceof Error) {
+                setError(error.message);
+            } else {
+                setError('Failed to join game');
+            }
+        } finally {
+            setIsLoading(false);
         }
     };
 
-    if (isPlaying) {
-        return <GameLayout playerId={playerName} />;
+    const handleLogout = () => {
+        apiService.logout();
+        setUser(null);
+        setPlayer(null);
+        setIsAuthenticated(false);
+    };
+
+    // Show loading spinner while checking auth
+    if (isLoading) {
+        return (
+            <div className="min-h-screen flex items-center justify-center bg-gray-900">
+                <div className="text-white">Loading...</div>
+            </div>
+        );
     }
 
-    return (
-        <div className="min-h-screen flex items-center justify-center bg-gray-900">
-            <div className="max-w-md w-full p-6 bg-gray-800 rounded-lg shadow-xl">
-                <h1 className="text-3xl font-bold text-white text-center mb-8">
-                    AI-Powered MUD Game
-                </h1>
+    // If player is in game, show game layout
+    if (player && player.current_room) {
+        return <GameLayout playerId={player.id} />;
+    }
 
-                <form onSubmit={handleStartGame} className="space-y-6">
-                    <div>
-                        <label
-                            htmlFor="playerName"
-                            className="block text-sm font-medium text-gray-300 mb-2"
-                        >
-                            Enter Your Name
-                        </label>
-                        <input
-                            type="text"
-                            id="playerName"
-                            value={playerName}
-                            onChange={(e) => setPlayerName(e.target.value)}
-                            className="w-full px-4 py-2 bg-gray-700 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            placeholder="Your adventurer's name..."
-                            required
-                        />
+    // If authenticated but not in game, show join game screen
+    if (isAuthenticated && user) {
+        return (
+            <div className="min-h-screen flex items-center justify-center bg-gray-900">
+                <div className="max-w-md w-full p-6 bg-gray-800 rounded-lg shadow-xl">
+                    <div className="text-center mb-6">
+                        <h1 className="text-3xl font-bold text-white mb-4">
+                            Welcome, {user.username}!
+                        </h1>
+                        <p className="text-gray-300">
+                            Ready to begin your adventure?
+                        </p>
                     </div>
 
-                    <button
-                        type="submit"
-                        className="w-full py-3 px-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    >
-                        Begin Adventure
-                    </button>
-                </form>
+                    {error && (
+                        <div className="mb-4 p-3 bg-red-600/20 border border-red-500 rounded-lg">
+                            <p className="text-red-400 text-sm">{error}</p>
+                        </div>
+                    )}
 
-                <div className="mt-8 text-sm text-gray-400 text-center">
-                    <p>Welcome to our AI-powered MUD game!</p>
-                    <p className="mt-2">
-                        Explore a dynamic world, interact with AI NPCs, and embark on epic quests.
-                    </p>
+                    <div className="space-y-4">
+                        <button
+                            onClick={handleJoinGame}
+                            disabled={isLoading}
+                            className="w-full py-3 px-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                        >
+                            {isLoading ? 'Entering world...' : 'Begin Adventure'}
+                        </button>
+                        
+                        <button
+                            onClick={handleLogout}
+                            className="w-full py-2 px-4 bg-gray-700 text-gray-300 rounded-lg hover:bg-gray-600 transition-colors focus:outline-none focus:ring-2 focus:ring-gray-500"
+                        >
+                            Logout
+                        </button>
+                    </div>
+
+                    <div className="mt-6 text-sm text-gray-400 text-center">
+                        <p>Explore a dynamic world, interact with AI NPCs, and embark on epic quests.</p>
+                    </div>
                 </div>
             </div>
+        );
+    }
+
+    // Not authenticated, show login/register form
+    return (
+        <div className="min-h-screen flex items-center justify-center bg-gray-900">
+            <AuthForm onSuccess={handleAuthSuccess} />
         </div>
     );
 }

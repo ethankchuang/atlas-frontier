@@ -974,19 +974,16 @@ class WebSocketService {
             const playerPromises = otherPlayerIds.map(async (playerId) => {
                 try {
                     console.log(`[WebSocket] Fetching player data for: ${playerId}`);
-                    const response = await fetch(`http://localhost:8000/players/${playerId}`);
-                    console.log(`[WebSocket] Response status for ${playerId}:`, response.status);
-                    if (response.ok) {
-                        const playerData = await response.json();
-                        console.log(`[WebSocket] Successfully fetched player data for ${playerId}:`, playerData.name);
-                        return playerData;
-                    } else {
-                        console.error(`[WebSocket] Failed to fetch player ${playerId}: HTTP ${response.status}`);
-                    }
+                    const apiService = (await import('./api')).default;
+                    const playerData = await apiService.request<any>(`/players/${playerId}`, {
+                        method: 'GET'
+                    });
+                    console.log(`[WebSocket] Successfully fetched player data for ${playerId}:`, playerData.name);
+                    return playerData;
                 } catch (error) {
                     console.error(`[WebSocket] Failed to fetch player ${playerId}:`, error);
+                    return null;
                 }
-                return null;
             });
             
             const players = await Promise.all(playerPromises);

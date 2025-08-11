@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { Player, Room, NPC, GameState, ChatMessage, Item } from '@/types/game';
+import { User } from '@/types/auth';
 
 // Extend ChatMessage type to support streaming
 interface ExtendedChatMessage extends ChatMessage {
@@ -8,6 +9,12 @@ interface ExtendedChatMessage extends ChatMessage {
 }
 
 interface GameStore {
+    // Authentication state
+    user: User | null;
+    setUser: (user: User | null) => void;
+    isAuthenticated: boolean;
+    setIsAuthenticated: (authenticated: boolean) => void;
+
     // Player state
     player: Player | null;
     setPlayer: (player: Player) => void;
@@ -121,6 +128,10 @@ function pastelColorFromString(str: string) {
 }
 
 const useGameStore = create<GameStore>((set, get) => ({
+    // Authentication state
+    user: null,
+    isAuthenticated: false,
+
     // Initial states
     player: null,
     currentRoom: null,
@@ -162,7 +173,11 @@ const useGameStore = create<GameStore>((set, get) => ({
     player1MaxVital: 6,
     player2MaxVital: 6,
 
-    // Setters
+    // Auth setters
+    setUser: (user) => set({ user }),
+    setIsAuthenticated: (isAuthenticated) => set({ isAuthenticated }),
+
+    // Setters  
     setPlayer: (player) => set({ player }),
     setCurrentRoom: (room) => set((state) => {
         const coordKey = `${room.x},${room.y}`;
