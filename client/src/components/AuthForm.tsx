@@ -254,7 +254,13 @@ const AuthForm: React.FC<AuthFormProps> = ({ onSuccess }) => {
 
                 <button
                     type="submit"
-                    disabled={isLoading || (mode === 'register' && (usernameAvailable !== true || usernameCheckLoading))}
+                    disabled={
+                        isLoading ||
+                        (mode === 'register' && (
+                            usernameCheckLoading || // wait for in-flight check
+                            usernameAvailable === false // block only if explicitly taken
+                        ))
+                    }
                     className="w-full py-3 px-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                     {isLoading ? 'Please wait...' : mode === 'register' ? 'Create Account' : 'Login'}

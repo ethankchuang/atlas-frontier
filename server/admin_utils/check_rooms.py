@@ -6,6 +6,7 @@ from collections import defaultdict
 import sys
 import os
 import logging
+import asyncio
 
 # Set up basic logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -26,8 +27,8 @@ def check_rooms():
         room_keys = [k for k in room_keys if b':players' not in k and b':generation' not in k and b':generation_lock' not in k]
 
         if not room_keys:
-            logger.info("No rooms found in the database.")
-            return
+            logger.info("No rooms found in Redis. Falling back to app database (HybridDatabase/Supabase)...")
+            return asyncio.run(check_rooms_hybrid())
 
         # Store image URLs and their corresponding rooms
         image_urls = defaultdict(list)
@@ -295,6 +296,89 @@ def check_rooms():
         logger.error("Redis error: {}".format(str(e)))
     except Exception as e:
         logger.error("Unexpected error: {}".format(str(e)))
+        import traceback
+        traceback.print_exc()
+
+# HybridDatabase fallback (Supabase)
+async def check_rooms_hybrid():
+    try:
+        # Ensure app path is importable
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+        from app.hybrid_database import HybridDatabase as Database
+
+        db = Database()
+
+        # Use discovered coordinates to enumerate rooms
+        discovered = await db.get_discovered_coordinates()
+        if not discovered:
+            print("No discovered coordinates found in app database.")
+            return
+
+        rooms_by_id = {}
+        image_urls = defaultdict(list)
+        biome_distribution = defaultdict(list)
+
+        print("\n=== Room Data (HybridDatabase) ===\n")
+
+        # discovered is a dict like {"x,y": room_id}
+        for coord_key, room_id in discovered.items():
+            try:
+                room_data = await db.get_room(room_id)
+                if not room_data:
+                    continue
+                room = room_data
+                rooms_by_id[room_id] = room
+
+                # Players via Redis set (HybridDatabase proxies to Redis)
+                players = await db.get_room_players(room_id)
+
+                # Monsters via app DB (HybridDatabase proxies to Supabase)
+                monsters = []
+                for monster_id in room.get('monsters', []) or []:
+                    try:
+                        m = await db.get_monster(monster_id)
+                        if m:
+                            monsters.append(m)
+                    except Exception:
+                        monsters.append({"id": monster_id, "error": "Failed to load"})
+
+                image_url = room.get('image_url', 'No image')
+                image_urls[image_url].append(room_id)
+                biome = room.get('biome', 'No biome')
+                biome_distribution[biome].append(room_id)
+
+                print("Room: {}".format(room_id))
+                print("Title: {}".format(room.get('title', 'No title')))
+                description = room.get('description', 'No description')
+                if len(description) > 100:
+                    description = description[:100] + "..."
+                print("Description: {}".format(description))
+                print("Biome: {}".format(biome))
+                print("Connections: {}".format(room.get('connections', {})))
+                print("Players: {}".format(players))
+
+                # Display monster information
+                if monsters:
+                    print("Monsters ({} total):".format(len(monsters)))
+                    for monster in monsters:
+                        if "error" in monster:
+                            print("  - {} (ERROR: {})".format(monster.get('id', 'Unknown'), monster['error']))
+                        else:
+                            print("  - {} (ID: {})".format(monster.get('name', 'Unnamed Monster'), monster.get('id', 'No ID')))
+                else:
+                    print("Monsters: None")
+
+                print("Image URL: {}".format(image_url))
+                print("Coordinates: ({}, {})".format(room.get('x', 'N/A'), room.get('y', 'N/A')))
+                print("Visited: {}".format(room.get('visited', 'N/A')))
+                print("-" * 80)
+            except Exception as e:
+                logger.error(f"Error processing room {room_id}: {str(e)}")
+                continue
+
+        print("\nTotal rooms processed: {}".format(len(rooms_by_id)))
+    except Exception as e:
+        logger.error(f"HybridDatabase fallback error: {str(e)}")
         import traceback
         traceback.print_exc()
 

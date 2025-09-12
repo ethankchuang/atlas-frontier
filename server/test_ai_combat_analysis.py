@@ -8,7 +8,7 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from app.main import analyze_combat_outcome
+from app.combat import analyze_combat_outcome
 import logging
 
 # Set up logging

@@ -688,8 +688,6 @@ class WebSocketService {
         player2_id: string; 
         player1_move: string; 
         player2_move: string; 
-        player1_condition: string; 
-        player2_condition: string; 
         player1_vital?: number; 
         player2_vital?: number; 
         player1_control?: number; 
@@ -741,8 +739,7 @@ class WebSocketService {
             timestamp: data.timestamp
         });
 
-        // Update duel state with new conditions and clocks
-        store.updateDuelConditions(data.player1_condition, data.player2_condition);
+        // Update duel clocks only (no condition text)
         if (typeof data.player1_vital === 'number' && typeof data.player2_vital === 'number') {
             store.updateDuelClocks(
                 data.player1_vital,
@@ -771,8 +768,6 @@ class WebSocketService {
     private handleDuelNextRound(data: { 
         type: 'duel_next_round'; 
         round: number;
-        player1_condition: string;
-        player2_condition: string;
         room_id: string; 
         timestamp: string 
     }) {
@@ -787,7 +782,6 @@ class WebSocketService {
 
         // Update duel state for next round
         store.prepareNextRound(data.round);
-        store.updateDuelConditions(data.player1_condition, data.player2_condition);
 
         // Add a message to chat about the next round
         store.addMessage({
