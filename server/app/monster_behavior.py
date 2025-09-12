@@ -357,7 +357,16 @@ class MonsterBehaviorManager:
         if not room_data:
             return None
         
-        connections = room_data.get('connections', {})
+        connections_raw = room_data.get('connections', {})
+        # Normalize connection keys to lowercase strings (handle Enum keys in storage)
+        connections = {}
+        try:
+            for k, v in connections_raw.items():
+                key = getattr(k, 'value', k)
+                if isinstance(key, str):
+                    connections[key.lower()] = v
+        except Exception:
+            connections = {str(k).lower(): v for k, v in connections_raw.items()}
         target_room = connections.get(attempted_direction.lower())
         logger.info(f"[MonsterBehavior] Attempted direction {attempted_direction} leads to {target_room}")
         logger.info(f"[MonsterBehavior] Last room is {last_room}")

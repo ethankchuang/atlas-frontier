@@ -206,7 +206,8 @@ class AIHandler:
         game_state: GameState,
         npcs: List[NPC],
         potential_item_type=None,
-        monsters: List[Dict[str, any]] = None
+        monsters: List[Dict[str, any]] = None,
+        chat_history: Optional[List[Dict[str, any]]] = None
     ) -> AsyncGenerator[Union[str, Dict[str, any]], None]:
         """Process a player's action using the LLM with streaming"""
         context = {
@@ -218,6 +219,22 @@ class AIHandler:
             "action": action,
             "timestamp": datetime.utcnow().isoformat()
         }
+
+        # Include recent room chat (last 10 messages, newest first) for continuity
+        if chat_history:
+            try:
+                safe_chat = []
+                for m in chat_history[:10]:
+                    # Sanitize and keep only relevant fields
+                    safe_chat.append({
+                        "player_id": m.get("player_id"),
+                        "message_type": m.get("message_type"),
+                        "message": m.get("message"),
+                        "timestamp": m.get("timestamp")
+                    })
+                context["recent_chat"] = safe_chat
+            except Exception as e:
+                logger.warning(f"[Stream Action] Failed to include recent chat: {str(e)}")
 
         json_template = '''
 {
@@ -256,6 +273,8 @@ class AIHandler:
         prompt_parts = [
             f"Process this player action in a fantasy MUD game.",
             f"Context: {json.dumps(context)}",
+            "",
+            "Use the last 10 room chat messages in context.recent_chat (newest first) for continuity. Only reference them if relevant to the current action; do not restate them verbatim.",
             "",
         ]
         
@@ -377,7 +396,12 @@ class AIHandler:
             "**CRITICAL: Set reward_item.deserves_item to false for look/search actions!**",
             "",
             "Only include fields in updates that need to be changed. The updates object is optional.",
-            "Do not include any comments in the JSON."
+            "Do not include any comments in the JSON.",
+            "",
+            "STRICT ITEM AWARDING RULES:",
+            "- Observation-only verbs (look, search, examine, scan, survey, inspect) MUST set reward_item.deserves_item=false",
+            "- Interaction verbs (grab, take, pick up, collect, retrieve) MAY set reward_item.deserves_item=true if an item is clearly being obtained",
+            "- Do not award items for hints or visual discoveries alone"
         ])
         
         prompt = "\n".join(prompt_parts)
@@ -387,7 +411,7 @@ class AIHandler:
             stream = await client.chat.completions.create(
                 model="gpt-4.1-nano-2025-04-14",
                 messages=[
-                    {"role": "system", "content": "You are the game master of a fantasy MUD game. Keep all responses concise (1-2 sentences maximum). Focus only on essential details and remove all fluff. Make actions clear and direct. ALWAYS hint at nearby items when players explore or investigate - this is crucial for player engagement."},
+                    {"role": "system", "content": "You are the game master of a fantasy MUD game. Keep all responses concise (1-2 sentences maximum). Focus only on essential details and remove all fluff. Make actions clear and direct. When players explore, you may hint at nearby items if it fits the scene, but do not award items unless they explicitly try to take them."},
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0.7,
@@ -418,35 +442,21 @@ class AIHandler:
                         yield content
 
                     # Try to parse as JSON to see if it's complete
-                    if buffer.strip().startswith('{') and buffer.count('{') == buffer.count('}'):
-                        try:
-                            result = json.loads(buffer)
-                            
-                            # Validate that no room updates are included
-                            if "updates" in result and "room" in result["updates"]:
-                                logger.warning("[Stream Action] AI tried to include room updates - removing them")
-                                del result["updates"]["room"]
-                            
-                            yield result
+                    try:
+                        # This will raise if not complete JSON yet
+                        parsed = json.loads(buffer)
+                        if isinstance(parsed, dict) and "response" in parsed:
+                            # Replace response with the already streamed narrative
+                            parsed["response"] = narrative.strip()
+                            yield parsed
                             break
-                        except json.JSONDecodeError:
-                            continue
-                        except ValueError as e:
-                            logger.error(f"[Stream Action] Validation error: {str(e)}")
-                            yield {"error": str(e)}
-                            break
-                await asyncio.sleep(0)
+                    except Exception:
+                        # Not yet complete JSON
+                        pass
 
-            # If we never got a complete response, yield an error
-            if not narrative_complete:
-                logger.error("[Stream Action] Incomplete response from AI")
-                yield {"error": "Incomplete response from AI"}
-            elif buffer and not any(key in buffer for key in ['"response":', '"updates":']):
-                logger.error("[Stream Action] Invalid response format from AI")
-                yield {"error": "Invalid response format from AI"}
         except Exception as e:
-            logger.error(f"[Stream Action] Error processing action: {str(e)}")
-            yield {"error": f"Error processing action: {str(e)}"}
+            logger.error(f"[Stream Action] Error during streaming: {str(e)}")
+            raise
 
     @staticmethod
     async def process_npc_interaction(

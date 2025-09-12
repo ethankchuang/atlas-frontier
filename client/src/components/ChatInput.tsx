@@ -172,6 +172,18 @@ const ChatInput: React.FC = () => {
                             console.log('[ChatInput] Updated player state, new current_room:', updatedPlayer.current_room);
                         }
 
+                        // Handle duel initiation via action stream fallback (e.g., if WebSocket was closed)
+                        if (response.updates?.duel?.is_monster_duel) {
+                            const store = useGameStore.getState();
+                            const opponentId = response.updates.duel.opponent_id;
+                            const opponentName = response.updates.duel.opponent_name || 'Opponent';
+                            store.startDuel({ id: opponentId, name: opponentName });
+                            const p1Max = response.updates.duel.player1_max_vital ?? 6;
+                            const p2Max = response.updates.duel.player2_max_vital ?? 6;
+                            useGameStore.getState().setMaxVitals(p1Max, p2Max);
+                            console.log('[ChatInput] Started monster duel via stream updates:', { opponentId, opponentName, p1Max, p2Max });
+                        }
+
                         setIsStreaming(false);
                         streamMessageIdRef.current = null;
                     },
@@ -216,22 +228,7 @@ const ChatInput: React.FC = () => {
     return (
         <div className="bg-black border-t border-amber-900">
             {/* Condition Display for Duels */}
-            {isInDuel && duelOpponent && (
-                <div className="px-3 py-2 bg-amber-900/20">
-                    {/* Players on same line */}
-                    <div className="flex justify-between items-center mb-2">
-                        <div className="flex items-center gap-2">
-                            <span className="text-amber-100 text-sm font-mono">You: {player1Condition}</span>
-                        </div>
-                        <span className="text-amber-100 text-sm font-mono">
-                            {myDuelMove ? "Move submitted" : "Enter move"}
-                        </span>
-                        <div className="flex items-center gap-2">
-                            <span className="text-amber-100 text-sm font-mono">{duelOpponent.name}: {player2Condition}</span>
-                        </div>
-                    </div>
-                </div>
-            )}
+            {/* Removed duel condition overlay above input while in battle mode */}
             
             <form onSubmit={handleSubmit} className="flex items-center gap-2 p-3">
             <button
