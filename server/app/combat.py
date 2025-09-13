@@ -9,25 +9,70 @@ from .game_manager import GameManager
 duel_moves: Dict[str, Dict[str, str]] = {}
 duel_pending: Dict[str, Dict[str, Any]] = {}
 
-monster_combat_pending: Dict[str, Dict[str, Any]] = {}
-monster_combat_moves: Dict[str, Dict[str, str]] = {}
 
-async def analyze_combat_outcome(player1_name: str, player1_move: str, _player1_condition: str, player1_equipment_valid: bool,
-                                player2_name: str, player2_move: str, _player2_condition: str, player2_equipment_valid: bool,
-                                player1_invalid_move: Optional[Dict[str, Any]], player2_invalid_move: Optional[Dict[str, Any]],
-                                player1_inventory: List[str], player2_inventory: List[str], room_name: str, room_description: str, game_manager: GameManager,
-                                recent_rounds: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
-    from .main import logger  # avoid circular logger import
+async def collect_special_effects_from_inventories(player1_inventory: List[str], player2_inventory: List[str], game_manager: GameManager) -> List[str]:
+    """Collect all special effects from both players' inventories for AI context"""
+    from .main import logger
+    
+    special_effects_list = []
+    
+    # Collect from both players' inventories
+    all_inventories = [
+        ("Player 1", player1_inventory),
+        ("Player 2", player2_inventory)
+    ]
+    
+    try:
+        for player_name, inventory in all_inventories:
+            for item_id in inventory:
+                try:
+                    item_data = await game_manager.db.get_item(item_id)
+                    if not item_data:
+                        continue
+                    
+                    item_name = item_data.get('name', 'Unknown Item')
+                    special_effects = item_data.get('special_effects', '')
+                    
+                    # Add all special effects to the list (no filtering)
+                    if special_effects:
+                        effect_entry = f"{player_name} has {item_name}: {special_effects}"
+                        special_effects_list.append(effect_entry)
+                        logger.info(f"[Special Effects] {effect_entry}")
+                        
+                except Exception as e:
+                    logger.warning(f"[Special Effects] Error processing item {item_id}: {str(e)}")
+                    continue
+                    
+    except Exception as e:
+        logger.error(f"[Special Effects] Error collecting special effects: {str(e)}")
+    
+    return special_effects_list
+
+
+async def analyze_combat_and_create_narrative(
+    player1_name: str, player1_move: str, _player1_condition: str,
+    player2_name: str, player2_move: str, _player2_condition: str,
+    player1_invalid_move: Optional[Dict[str, Any]], player2_invalid_move: Optional[Dict[str, Any]],
+    player1_inventory: List[str], player2_inventory: List[str], room_name: str, room_description: str, 
+    current_round: int, duel_info: Dict[str, Any], player1_max_vital: int, player2_max_vital: int,
+    game_manager: GameManager, recent_rounds: Optional[List[Dict[str, Any]]] = None,
+    special_effects: Optional[List[str]] = None
+) -> Dict[str, Any]:
+    from .main import logger
+    
     recent_summary: List[Dict[str, Any]] = []
+    history_lines: List[str] = []
+    
     try:
         if recent_rounds:
             for r in recent_rounds[-5:]:
+                # For analysis
                 recent_summary.append({
                     'round': r.get('round'),
                     'p1_move': r.get('player1_move'),
                     'p2_move': r.get('player2_move'),
-                    'p1_vital_delta': r.get('player1_vital_delta'),
-                    'p2_vital_delta': r.get('player2_vital_delta'),
+                    'p1_damage_dealt': r.get('player1_damage_dealt', 0),
+                    'p2_damage_dealt': r.get('player2_damage_dealt', 0),
                     'p1_control_delta': r.get('player1_control_delta'),
                     'p2_control_delta': r.get('player2_control_delta'),
                     'p1_vital': r.get('player1_vital'),
@@ -35,242 +80,171 @@ async def analyze_combat_outcome(player1_name: str, player1_move: str, _player1_
                     'p1_control': r.get('player1_control'),
                     'p2_control': r.get('player2_control')
                 })
+                # For narrative context
+                rnum = r.get('round')
+                p1m = r.get('player1_move') or r.get('player_move')
+                p2m = r.get('player2_move') or r.get('monster_move')
+                narrative = r.get('narrative', '')
+                if narrative:
+                    history_lines.append(f"R{rnum}: {narrative}")
     except Exception:
         recent_summary = []
+        history_lines = []
+    
+    history_block = "\n".join(history_lines) if history_lines else "None"
+
+    # Format special effects for AI context
+    special_effects_text = "None"
+    if special_effects:
+        special_effects_text = "\n".join([f"- {effect}" for effect in special_effects])
 
     prompt = f"""
-COMBAT OUTCOME ANALYSIS:
+You are the AI Gamemaster for a combat turn. Analyze how the combat progresses based on the moves of each combatant.
+IMPORTANT:
+- make sure to validate the moves of each combatant based on the equipment they have and the special effects they have.
+- make sure players feel the impact of their moves and feel like the outcome is logical
+- keep combat fast paced and not last a long time.
+- The pimary outcome should be change in health, control is a secondary outcome
 
-Location: {room_name} - {room_description}
+LOCATION: {room_name} - {room_description}
 
-{player1_name} vs {player2_name} in combat:
+RECENT COMBAT HISTORY:
+{history_block}
 
-{player1_name} action toward {player2_name}:
-- Move: "{player1_move}"
-- Equipment Valid: {player1_equipment_valid}
-- Inventory: {player1_inventory}
-- Invalid Move Info: {player1_invalid_move if player1_invalid_move else 'None'}
+SPECIAL EFFECTS AVAILABLE:
+{special_effects_text}
 
-{player2_name} action toward {player1_name}:
-- Move: "{player2_move}"
-- Equipment Valid: {player2_equipment_valid}
-- Inventory: {player2_inventory}
-- Invalid Move Info: {player2_invalid_move if player2_invalid_move else 'None'}
+CURRENT ROUND ACTIONS:
+- {player1_name} attempts: "{player1_move}"
+  - Inventory: {player1_inventory}
+  - Invalid Move Info: {player1_invalid_move if player1_invalid_move else 'None'}
 
-Recent Rounds (most recent last, if any):
+- {player2_name} attempts: "{player2_move}"
+  - Inventory: {player2_inventory}
+  - Invalid Move Info: {player2_invalid_move if player2_invalid_move else 'None'}
+
+CURRENT COMBAT STATE:
+- {player1_name} Current Health: {player1_max_vital - duel_info.get('player1_vital', 0)}/{player1_max_vital}
+- {player1_name} Current Control: {duel_info.get('player1_control', 0)}/5
+- {player2_name} Current Health: {player2_max_vital - duel_info.get('player2_vital', 0)}/{player2_max_vital}
+- {player2_name} Current Control: {duel_info.get('player2_control', 0)}/5
+- Finishing Window Owner: {duel_info.get('finishing_window_owner', 'None')}
+
+RECENT STATS CONTEXT (for reference):
 {json.dumps(recent_summary)}
 
-CRITICAL RULES:
-1. VALIDATION RULES:
-   - If player1_equipment_valid = True, {player1_name}'s move is VALID and can have full effect
-   - If player2_equipment_valid = True, {player2_name}'s move is VALID and can have full effect
-   - Basic combat actions (punch, kick, tackle, dodge, block, etc.) are ALWAYS VALID
-   - Equipment-based actions (slash with sword, shoot with bow, etc.) require the specific equipment
-   - Invalid moves (missing equipment) have NO EFFECT and cannot harm anyone
-   - Valid moves can cause damage and affect the target
+COMBAT SYSTEM RULES:
+You are the gamemaster of this combat encounter. You have COMPLETE CONTROL over all combat outcomes, balancing, and special mechanics.
 
-2. DO NOT INVENT ACTIONS:
-   - ONLY use the exact moves provided above for each side
-   - If a player's move is defensive (defend, block, parry, dodge, retreat), treat it as DEFENSIVE. Do not describe them attacking
-   - Attacks must come from explicit attack-like moves (punch, stab, shoot, slash, strike, etc.)
+1. EQUIPMENT VALIDATION & SPECIAL EFFECTS:
+   - Check the equipment of the players.
+   - Determine if the player is physically capable of performing the move they input based on the equipment that they own.
+   - For example, the player should only be able to do slicing moves if they have something capable of slicing like a sword
+   - If the player is not physically capable of performing the move they input THE MOVE SHOULD HAVE NO EFFECT
+   - For example, if the player tries to shoot a gun but don't have one, the move should be INVALID AND HAVE NO EFFECT
+   - If the move is invalid, explain why in the output narrative
 
-3. TARGETING:
-   - {player1_name}'s attack-like moves target {player2_name}
-   - {player2_name}'s attack-like moves target {player1_name}
-   - Successful attacks harm the TARGET, not the attacker
-   - VALID ATTACKS should have impact unless countered by defensive actions
-   - Monster attacks are ALWAYS VALID and should have some effect
+2. TARGETING & ACTIONS:
+   - {player1_name}'s attacks target {player2_name}
+   - {player2_name}'s attacks target {player1_name}
+   - Only describe what each player actually attempted - don't invent actions
+   - Defensive moves (dodge, block, parry) only work if explicitly chosen
 
-4. DEFENSE:
-   - Defensive moves (block, dodge, parry) can reduce or prevent damage only when the player actually chose them
-   - Invalid moves (missing equipment) cause NO DAMAGE and have NO EFFECT
+3. DAMAGE & CONTROL MECHANICS (YOU CONTROL ALL BALANCING):
+   - Health represents hit points - when it reaches 0, you're defeated
+   - Control represents combat advantage - at 5 Control, you enter "finishing window"
+   - Damage Dealt: 0 to 3 (0 = no damage; 1 = light; 2 = moderate; 3 = heavy damage)
+   - Control Delta: -2 to 2 (momentum shifts; positive = gaining advantage)
+   - YOU decide all values based on what makes sense and feels balanced
+   - Be aggressive, players should feel the impact of the moves and combat should feel relatively fast paced and not last a long time.
+   - Make sure there is proper reasoning for the damage and control changes, players should understand why they are what they are.
+   - IMPORTANT: Always assign meaningful damage and control values. Don't leave them at 0 unless the move truly has no impact.
 
-5. EXPLAIN MISSED/FAILED ATTACKS:
-   - If an attack fails or misses, explain WHY (invalid equipment, target blocked, target dodged, poor footing, etc.)
+4. SPECIAL MECHANICS (YOU CONTROL THESE):
+   - Finishing Window: When someone reaches 5 Control, they can attempt finishing moves
+   - If someone in finishing window deals ANY damage, it's an instant kill (set target health to 0)
+   - Monster Max Health: {player2_max_vital} (varies by monster size)
+   - Combat ends when someone's health reaches 0
+   - Provide a cool and badass finishing move for the player who wins the duel.
 
-6. VARIETY WITHIN REASON:
-   - Make outcomes varied and exciting yet reasonable and consistent with the stated moves.
-   - Avoid monotonous 1-point trades. If the last rounds were minor or symmetric, consider a justified shift (clean hit, counter, positioning) to vary Vital/Control deltas.
-   - Escalate to higher Vital deltas (2-3) ONLY when a clear, clean hit or advantage is present; use 0 when fully negated by defense.
-   - Control deltas should reflect momentum: gains for clean hits/positioning, losses for overcommitting/being countered.
-   - Maintain logical consistency: outcomes must make sense given each player's chosen move this round.
+5. BALANCING PHILOSOPHY:
+   - Make outcomes feel fair and reasonable, players should feel the impact of their moves
+   - Do not make the players feel like they were cheated out of their move.
+   - Create varied, dramatic encounters
+   - Consider move interactions, timing, and combat flow
+   - Balance realism with exciting gameplay
+   - Players should feel their choices matter
+   - Combat should be relatively swift, don't let it drag on.
 
-7. CLOCK DELTAS (YOU MUST DECIDE EACH ROUND):
-   - Output explicit deltas for both Vital (damage/strain) and Control (advantage) for each side, even if small.
-   - Vital delta range: -1..3 (negative only for clear healing/recovery; 0 if no effect; higher = harsher harm to the target).
-   - Control delta range: -2..2 (advantage shifts up/down; gains for clean hits/positioning, losses for overcommitting/being countered).
-   - If a move is INVALID due to equipment, it should cause NO harmful effect (0 Vital to the opponent) and typically reduce the actor's Control by 0..1.
-   - When both sides hit, both targets can take Vital increases; adjust Control based on who came out ahead.
-   - Bars should generally move every round; use small deltas (e.g., ±1) when outcomes are marginal. Use variety across rounds when justified.
-
-8. MOVE VALIDATION:
-   - Determine if you think the player should be able to do the move they are attempting.
-   - Determine using their inventory and the world context.
-   - If the move requires an items the player doesn't have, it should be INVALID.
-   - If a move is invalid, it should have no effect.
-   - In the output, describe why the move is invalid.
-
-8. HEALING INTENT (NO KEYWORD MATCHING):
-   - Determine if a player is intending to heal or recover based on the described action intent, not keywords.
-   - Only set a negative Vital delta for that player when you judge they are attempting a healing/recovery action.
-   - Provide boolean flags player1_intends_heal and player2_intends_heal accordingly.
-
-Return JSON:
+OUTPUT FORMAT:
+Return JSON with:
 {{
+    "narrative": "An engaging 2-4 sentence description of what happened this round",
     "player1_result": {{
-        "reason": "description of what happened to {player1_name}"
+        "reason": "What happened to {player1_name} specifically"
     }},
     "player2_result": {{
-        "reason": "description of what happened to {player2_name}"
+        "reason": "What happened to {player2_name} specifically"
     }},
-    "player1_vital_delta": -1,
-    "player2_vital_delta": -1,
-    "player1_control_delta": -2,
-    "player2_control_delta": -2,
+    "player1_damage_dealt": 0,
+    "player2_damage_dealt": 0,
+    "player1_control_delta": 0,
+    "player2_control_delta": 0,
     "player1_intends_heal": false,
-    "player2_intends_heal": false
+    "player2_intends_heal": false,
+    "finishing_window_owner": null,
+    "instant_kill_occurred": false,
+    "combat_ends": false
 }}
+
+SPECIAL MECHANICS TO HANDLE:
+- Set "finishing_window_owner" to "player1" or "player2" if they reach 5 Control (or null if neither)
+- Set "instant_kill_occurred" to true if someone in finishing window deals damage
+- Set "combat_ends" to true if someone's health reaches 0
+- Handle all balancing decisions yourself - no external game engine will modify your results
+
+Make it dramatic, make it make sense, and make it fun!
 """
 
     try:
         response = await game_manager.ai_handler.generate_text(prompt)
         result = json.loads(response)
-        return {
+        
+        # Debug logging for AI response
+        logger.info(f"[analyze_combat_and_create_narrative] AI raw response: {response}")
+        
+        # Ensure we have all required fields with proper defaults
+        combat_result = {
+            'narrative': result.get('narrative', f"Round {current_round}: {player1_name} and {player2_name} engaged in combat."),
             'player1_result': result.get('player1_result', {
                 'reason': f'{player1_name} continues fighting'
             }),
             'player2_result': result.get('player2_result', {
                 'reason': f'{player2_name} continues fighting'
             }),
-            'player1_vital_delta': int(result.get('player1_vital_delta', 0) or 0),
-            'player2_vital_delta': int(result.get('player2_vital_delta', 0) or 0),
+            'player1_damage_dealt': int(result.get('player1_damage_dealt', 0) or 0),
+            'player2_damage_dealt': int(result.get('player2_damage_dealt', 0) or 0),
             'player1_control_delta': int(result.get('player1_control_delta', 0) or 0),
             'player2_control_delta': int(result.get('player2_control_delta', 0) or 0),
             'player1_intends_heal': bool(result.get('player1_intends_heal', False)),
             'player2_intends_heal': bool(result.get('player2_intends_heal', False)),
+            'finishing_window_owner': result.get('finishing_window_owner'),
+            'instant_kill_occurred': bool(result.get('instant_kill_occurred', False)),
+            'combat_ends': bool(result.get('combat_ends', False)),
         }
-    except Exception as e:
-        logger.error(f"[analyze_combat_outcome] Error analyzing combat outcome with AI: {str(e)}")
-        p1_vital_delta_fb = 0
-        p2_vital_delta_fb = 0
-        p1_control_delta_fb = 0
-        p2_control_delta_fb = 0
-        if player1_equipment_valid:
-            p2_vital_delta_fb = 1
-            p1_control_delta_fb += 1
-        else:
-            p1_control_delta_fb -= 1
-        if player2_equipment_valid:
-            p1_vital_delta_fb = 1
-            p2_control_delta_fb += 1
-        else:
-            p2_control_delta_fb -= 1
-        return {
-            'player1_result': {
-                'reason': f"{player1_name} {'attempted invalid move' if not player1_equipment_valid else 'acted effectively'}"
-            },
-            'player2_result': {
-                'reason': f"{player2_name} {'attempted invalid move' if not player2_equipment_valid else 'acted effectively'}"
-            },
-            'player1_vital_delta': p1_vital_delta_fb,
-            'player2_vital_delta': p2_vital_delta_fb,
-            'player1_control_delta': p1_control_delta_fb,
-            'player2_control_delta': p2_control_delta_fb,
-        }
-
-
-async def generate_combat_narrative(
-    player1_name: str, player1_move: str, player1_result: Dict[str, Any],
-    player2_name: str, player2_move: str, player2_result: Dict[str, Any],
-    player1_invalid_move: Optional[Dict[str, Any]], player2_invalid_move: Optional[Dict[str, Any]],
-    current_round: int, room_name: str, room_description: str, game_manager: GameManager,
-    recent_rounds: Optional[List[Dict[str, Any]]] = None
-) -> str:
-    from .main import logger
-    recent_rounds = recent_rounds or []
-    history_lines: List[str] = []
-    try:
-        for r in recent_rounds[-10:]:
-            rnum = r.get('round')
-            p1m = r.get('player1_move') or r.get('player_move')
-            p2m = r.get('player2_move') or r.get('monster_move')
-            p1res = (r.get('player1_result') or r.get('player_result') or {}).get('reason', '')
-            p2res = (r.get('player2_result') or r.get('monster_result') or {}).get('reason', '')
-            history_lines.append(f"R{rnum}: {player1_name} -> '{p1m}' ({p1res}); {player2_name} -> '{p2m}' ({p2res})")
-    except Exception:
-        history_lines = []
-    history_block = "\n".join(history_lines) if history_lines else "None"
-
-    prompt = f"""
-        Create an engaging, descriptive narrative for this combat round.
- 
-        Location: {room_name} - {room_description}
- 
-        Recent Rounds (most recent first, up to 10):
-        {history_block}
- 
-        Combat Context:
-        - {player1_name} acts with: {player1_move}
-        - {player2_name} acts with: {player2_move}
-         
-         {player1_name} Results:
-         - Outcome: {player1_result.get('reason', 'Unknown')}
-         
-         {player2_name} Results:
-         - Outcome: {player2_result.get('reason', 'Unknown')}
-         
-         Invalid Move Context:
-         - {player1_name} Invalid: {player1_invalid_move if player1_invalid_move else 'None'}
-         - {player2_name} Invalid: {player2_invalid_move if player2_invalid_move else 'None'}
- 
-         Instructions:
-         - Create a vivid, engaging narrative that describes what happened
-         - If there are invalid moves (missing equipment), EXPLAIN WHY they failed (e.g., "tried to shoot without a gun")
-         - If moves are valid (including basic actions like punch/kick), describe them accordingly
-         - Describe the actual outcomes and their impact on both players
-         - Make it feel like a real combat scene, not just a game log
-         - Keep it concise but descriptive (2-4 sentences)
-         - Use active voice and dynamic language
-         - Use actual player names: {player1_name} and {player2_name}
-         - Basic actions like punch, kick, tackle are valid and can cause damage when chosen
-         - Only equipment-based actions without the required equipment are invalid
-         - ALWAYS explain why attacks miss or fail - be specific about the reason
-          
-         CRITICAL RULES:
-         1. DO NOT directly reference tags, severity levels, or game mechanics
-            - Don't say "with a severity level of 3" or "gets a negative tag"
-            - Instead, describe the actual injury/advantage naturally
-            - Example: "leaving him bruised and shaken" not "gets bruised ribs tag"
-           
-         2. MOVE IMPACT RULES:
-            - Do NOT invent actions. ONLY describe what each side actually attempted.
-            - If a player's move is defensive (e.g., defend, block, parry, dodge, retreat), DO NOT describe them attacking. Focus on mitigation, positioning, or advantage shifts.
-            - VALID ATTACKS MUST CAUSE DAMAGE unless the target is explicitly defending in their own move
-            - If a valid attack lands, describe the damage and its effect; if it fails, explain why
-            - If an attack misses, EXPLAIN WHY (missing equipment, target blocked, target dodged, etc.)
-            - Invalid moves (missing equipment) have NO EFFECT and should be explained as such
-         
-         3. DODGING/BLOCKING RULES:
-             - Players can ONLY dodge/block if their move explicitly includes dodging/blocking
-             - If a player's move is "punch", they cannot dodge - they are punching
-             - If a player's move is "dodge" or "block", then they can avoid attacks
-             - If a player's move is "kick", they cannot dodge - they are kicking
-             - Only describe dodging/blocking when it's part of the player's actual move
- 
-         3. ENVIRONMENT AWARENESS:
-             - The combat is taking place in: 
-         """
-
-    try:
-        narrative = await game_manager.ai_handler.generate_text(prompt)
-        narrative = narrative.strip()
+        
+        # Clean up narrative formatting
+        narrative = combat_result['narrative'].strip()
         if narrative.startswith('"') and narrative.endswith('"'):
             narrative = narrative[1:-1]
-        logger.info(f"[generate_combat_narrative] AI generated narrative: {narrative}")
-        return narrative
+        combat_result['narrative'] = narrative
+        
+        logger.info(f"[analyze_combat_and_create_narrative] Generated narrative: {narrative}")
+        return combat_result
+        
     except Exception as e:
-        logger.error(f"[generate_combat_narrative] Error generating combat narrative with AI: {str(e)}")
-        return f"Round {current_round}: {player1_name} and {player2_name} engaged in combat in {room_name}."
+        logger.error(f"[analyze_combat_and_create_narrative] Error with AI analysis: {str(e)}")
+        raise
 
 
 async def get_monster_max_vital(monster_data: dict) -> int:
@@ -292,35 +266,41 @@ async def get_monster_max_vital(monster_data: dict) -> int:
 # get_monster_max_vital) and share duel state via this module's dictionaries.
 
 
-async def generate_monster_combat_move(monster_data: Dict[str, Any], player_data: Dict[str, Any], room_data: Dict[str, Any], round_number: int, game_manager: GameManager, recent_rounds: Optional[List[Dict[str, Any]]] = None) -> str:
-    from .main import logger
+async def generate_and_submit_monster_move(duel_id: str, monster_id: str, player_data: dict, monster_data: dict, room_id: str, round_number: int, game_manager: GameManager):
+    from .main import manager, logger
     try:
-        recent_rounds = recent_rounds or []
-        monster_history_lines: List[str] = []
+        # Get room data and recent combat history
+        room_data = await game_manager.db.get_room(room_id)
         try:
-            for r in recent_rounds[-5:]:
-                m = r.get('player2_move') or r.get('monster_move') or ''
-                if m:
-                    monster_history_lines.append(f"R{r.get('round')}: {m}")
+            recent_rounds = (duel_pending.get(duel_id, {}) or {}).get('history', [])[-5:]
         except Exception:
-            monster_history_lines = []
-        history_block = "\n".join(monster_history_lines) if monster_history_lines else "None"
-        recent_moves = [
-            (r.get('player2_move') or r.get('monster_move') or '').strip().lower()
-            for r in recent_rounds[-5:]
-            if (r.get('player2_move') or r.get('monster_move'))
-        ]
-        monster_name = monster_data.get('name', 'Unknown Monster')
-        monster_size = monster_data.get('size', 'human')
-        monster_aggressiveness = monster_data.get('aggressiveness', 'neutral')
-        monster_intelligence = monster_data.get('intelligence', 'animal')
-        monster_description = monster_data.get('description', '')
-        monster_special_effects = monster_data.get('special_effects', '')
-        monster_health = monster_data.get('health', 100)
-        player_name = player_data.get('name', 'Unknown Player')
-        room_title = room_data.get('title', 'Unknown Room')
-        room_biome = room_data.get('biome', 'unknown')
-        prompt = f"""You are controlling a monster in combat. Generate FIVE distinct candidate combat moves for this creature.
+            recent_rounds = []
+        
+        # Generate monster move inline
+        monster_move = None
+        try:
+            monster_history_lines: List[str] = []
+            try:
+                for r in recent_rounds[-5:]:
+                    m = r.get('player2_move') or r.get('monster_move') or ''
+                    if m:
+                        monster_history_lines.append(f"R{r.get('round')}: {m}")
+            except Exception:
+                monster_history_lines = []
+            history_block = "\n".join(monster_history_lines) if monster_history_lines else "None"
+            
+            monster_name = monster_data.get('name', 'Unknown Monster')
+            monster_size = monster_data.get('size', 'human')
+            monster_aggressiveness = monster_data.get('aggressiveness', 'neutral')
+            monster_intelligence = monster_data.get('intelligence', 'animal')
+            monster_description = monster_data.get('description', '')
+            monster_special_effects = monster_data.get('special_effects', '')
+            monster_health = monster_data.get('health', 100)
+            player_name = player_data.get('name', 'Unknown Player')
+            room_title = room_data.get('title', 'Unknown Room')
+            room_biome = room_data.get('biome', 'unknown')
+            
+            prompt = f"""You are controlling a monster in combat. Generate ONE specific combat move for this creature.
  
  RECENT MONSTER MOVES (avoid repeating, vary tactics):
  {history_block}
@@ -340,74 +320,61 @@ async def generate_monster_combat_move(monster_data: Dict[str, Any], player_data
  - Location: {room_title} ({room_biome})
  
  MOVE GENERATION RULES:
- 1. Generate FIVE specific combat actions (2-5 words each)
+ 1. Generate ONE specific combat action (2-5 words)
  2. Match the monster's aggressiveness level
  3. Match the monster's intelligence
  4. Use size appropriately
  5. Incorporate special effects when relevant
  6. Use basic combat actions (no equipment needed)
- 7. Avoid repeating recent moves; vary verbs and approach.
+ 7. CRITICAL: Avoid repeating recent moves shown above. Use completely different verbs and tactics.
+ 8. Be creative and procedural - create something unique for this round
  
- Return STRICT JSON array of 5 strings, no prose, e.g.: ["option 1", "option 2", "option 3", "option 4", "option 5"]"""
-        ai_response = await game_manager.ai_handler.generate_text(prompt)
-        text = ai_response.strip()
-        options: List[str] = []
-        try:
-            parsed = json.loads(text)
-            if isinstance(parsed, list):
-                options = [str(x).strip() for x in parsed if isinstance(x, (str, int, float))]
-        except Exception:
-            try:
-                start = text.find('[')
-                end = text.rfind(']')
-                if start != -1 and end != -1 and end > start:
-                    parsed = json.loads(text[start:end+1])
-                    if isinstance(parsed, list):
-                        options = [str(x).strip() for x in parsed if isinstance(x, (str, int, float))]
-            except Exception:
-                options = []
-        if not options:
-            options = [line.strip('- ').strip() for line in text.splitlines() if line.strip()][:5]
-        try:
-            from difflib import SequenceMatcher
-            def max_similarity(candidate: str) -> float:
-                cand = (candidate or '').strip().lower()
-                if not recent_moves:
-                    return 0.0
-                return max(SequenceMatcher(None, cand, prev).ratio() for prev in recent_moves)
-            ranked = sorted(options, key=lambda o: (round(max_similarity(o), 4), len(o)))
-            chosen = ranked[0] if ranked else (options[0] if options else "attacks")
-        except Exception:
-            chosen = options[0] if options else "attacks"
-        if len(chosen) > 100:
-            chosen = chosen[:100]
-        logger.info(f"[generate_monster_combat_move] Generated move for {monster_name} (chosen): '{chosen}' from options: {options}")
-        return chosen
-    except Exception as e:
-        logger.error(f"Error generating monster combat move: {str(e)}")
-        aggressiveness = monster_data.get('aggressiveness', 'neutral')
-        fallback_moves = {
-            'aggressive': 'lunges forward aggressively',
-            'territorial': 'strikes defensively',
-            'passive': 'moves cautiously away',
-            'neutral': 'attacks with claws'
-        }
-        return fallback_moves.get(aggressiveness, 'attacks')
-
-
-async def auto_submit_monster_move(duel_id: str, monster_id: str, player_data: dict, monster_data: dict, room_id: str, round_number: int, game_manager: GameManager):
-    from .main import manager, logger
-    try:
-        room_data = await game_manager.db.get_room(room_id)
-        try:
-            recent_rounds = (duel_pending.get(duel_id, {}) or {}).get('history', [])[-5:]
-        except Exception:
-            recent_rounds = []
-        monster_move = await generate_monster_combat_move(monster_data, player_data, room_data, round_number, game_manager, recent_rounds=recent_rounds)
+ Return ONLY the combat move as a simple string, no JSON formatting, no quotes, no extra text."""
+            
+            ai_response = await game_manager.ai_handler.generate_text(prompt)
+            monster_move = ai_response.strip()
+            
+            # Clean up the response - remove quotes if present
+            if monster_move.startswith('"') and monster_move.endswith('"'):
+                monster_move = monster_move[1:-1]
+            if monster_move.startswith("'") and monster_move.endswith("'"):
+                monster_move = monster_move[1:-1]
+                
+            # Ensure reasonable length
+            if len(monster_move) > 100:
+                monster_move = monster_move[:100]
+                
+            # Basic validation - if empty or too generic, add some variation
+            if not monster_move or monster_move.lower() in ['attack', 'attacks', 'move', 'action']:
+                aggressiveness = monster_data.get('aggressiveness', 'neutral')
+                fallback_moves = {
+                    'aggressive': 'lunges forward aggressively',
+                    'territorial': 'strikes defensively', 
+                    'passive': 'moves cautiously away',
+                    'neutral': 'attacks with claws'
+                }
+                monster_move = fallback_moves.get(aggressiveness, 'attacks with claws')
+            
+            logger.info(f"[generate_and_submit_monster_move] Generated move for {monster_name}: '{monster_move}'")
+            
+        except Exception as e:
+            logger.error(f"Error generating monster combat move: {str(e)}")
+            aggressiveness = monster_data.get('aggressiveness', 'neutral')
+            fallback_moves = {
+                'aggressive': 'lunges forward aggressively',
+                'territorial': 'strikes defensively',
+                'passive': 'moves cautiously away',
+                'neutral': 'attacks with claws'
+            }
+            monster_move = fallback_moves.get(aggressiveness, 'attacks')
+        
+        # Submit the generated move
         if duel_id not in duel_moves:
             duel_moves[duel_id] = {}
         duel_moves[duel_id][monster_id] = monster_move
-        logger.info(f"[auto_submit_monster_move] Monster {monster_data.get('name')} submitted move: '{monster_move}'")
+        logger.info(f"[generate_and_submit_monster_move] Monster {monster_data.get('name')} submitted move: '{monster_move}'")
+        
+        # Broadcast move message to room
         duel_move_message = {
             "type": "duel_move",
             "player_id": monster_id,
@@ -418,14 +385,17 @@ async def auto_submit_monster_move(duel_id: str, monster_id: str, player_data: d
             "monster_name": monster_data.get('name', 'Unknown Monster')
         }
         await manager.broadcast_to_room(room_id, duel_move_message)
+        
+        # Check if both moves are ready and trigger combat resolution
         if duel_id in duel_pending:
             pending_duel = duel_pending[duel_id]
             player_ids = {pending_duel["player1_id"], pending_duel["player2_id"]}
             if player_ids.issubset(set(duel_moves[duel_id].keys())):
-                logger.info(f"[auto_submit_monster_move] Both moves ready, processing duel round for {duel_id}")
+                logger.info(f"[generate_and_submit_monster_move] Both moves ready, processing duel round for {duel_id}")
                 await analyze_duel_moves(duel_id, game_manager)
+                
     except Exception as e:
-        logger.error(f"Error auto-submitting monster move: {str(e)}")
+        logger.error(f"Error generating and submitting monster move: {str(e)}")
 
 
 async def prepare_next_monster_duel_round(duel_id: str, game_manager: GameManager):
@@ -451,115 +421,8 @@ async def prepare_next_monster_duel_round(duel_id: str, game_manager: GameManage
         logger.error(f"Error preparing next monster duel round: {str(e)}")
 
 
-async def send_monster_combat_results(room_id: str, player_id: str, monster_id: str, round_number: int,
-                                    player_move: str, monster_move: str,
-                                    narrative: str, combat_ends: bool, game_manager: GameManager,
-                                    player_condition: str = '', monster_condition: str = '',
-                                    _player_total_severity: int = 0, _monster_total_severity: int = 0):
-    from .main import manager, logger
-    try:
-        monster_data = await game_manager.db.get_monster(monster_id)
-        monster_name = monster_data.get('name', 'Unknown Monster') if monster_data else "Unknown Monster"
-        combat_message = {
-            "type": "monster_combat_outcome",
-            "round": round_number,
-            "monster_name": monster_name,
-            "player_move": player_move,
-            "monster_move": monster_move,
-            "narrative": narrative,
-            "combat_ends": combat_ends,
-            "monster_defeated": False,
-            "player_vital": 0,
-            "monster_vital": 0,
-            "player_control": 0,
-            "monster_control": 0,
-        }
-        await manager.broadcast_to_room(room_id, combat_message)
-        logger.info(f"[send_monster_combat_results] Sent combat results to room {room_id}")
-    except Exception as e:
-        logger.error(f"Error sending monster combat results: {str(e)}")
 
 
-async def analyze_monster_combat(combat_id: str, game_manager: GameManager):
-    from .main import logger
-    try:
-        logger.info(f"[analyze_monster_combat] Starting analysis for combat {combat_id}")
-        combat_info = monster_combat_pending[combat_id]
-        combat_history = combat_info.setdefault('history', [])
-        player_id = combat_info['player_id']
-        monster_id = combat_info['monster_id']
-        room_id = combat_info['room_id']
-        current_round = combat_info['round']
-        moves = monster_combat_moves[combat_id]
-        player_move = moves.get(player_id, 'do nothing')
-        monster_move = moves.get(monster_id, 'do nothing')
-        logger.info(f"[analyze_monster_combat] Round {current_round}: {player_id} vs {monster_id}")
-        logger.info(f"[analyze_monster_combat] Moves: '{player_move}' vs '{monster_move}'")
-        player_data = await game_manager.db.get_player(player_id)
-        monster_data = await game_manager.db.get_monster(monster_id)
-        player_name = player_data.get('name', 'Unknown') if player_data else "Unknown"
-        monster_name = monster_data.get('name', 'Unknown Monster') if monster_data else "Unknown Monster"
-        player_inventory = player_data.get('inventory', []) if player_data else []
-        room_data = await game_manager.db.get_room(room_id)
-        room_name = room_data.get('title', 'Unknown Room') if room_data else "Unknown Room"
-        room_description = room_data.get('description', 'An unknown location') if room_data else "An unknown location"
-        player_condition = 'healthy'
-        monster_condition = 'healthy'
-        equipment_result = {
-            'player1_valid': True,
-            'player2_valid': True,
-            'player1_reason': 'Validation disabled; decided in prompt',
-            'player2_reason': 'Validation disabled; decided in prompt'
-        }
-        player_invalid = None if equipment_result['player1_valid'] else {
-            'move': player_move,
-            'reason': equipment_result['player1_reason']
-        }
-        monster_invalid = None
-        logger.info(f"[analyze_monster_combat] Equipment validation complete:")
-        logger.info(f"[analyze_monster_combat] {player_name}: {'VALID' if equipment_result['player1_valid'] else 'INVALID'} - {equipment_result['player1_reason']}")
-        logger.info(f"[analyze_monster_combat] {monster_name}: VALID (monster attacks)")
-        logger.info(f"[analyze_monster_combat] Analyzing combat outcome...")
-        combat_outcome = await analyze_combat_outcome(
-            player_name, player_move, player_condition, equipment_result['player1_valid'],
-            monster_name, monster_move, monster_condition, True,
-            player_invalid, monster_invalid, player_inventory, [],
-            room_name, room_description, game_manager
-        )
-        logger.info(f"[analyze_monster_combat] Combat outcome received (vital/control only)")
-        logger.info(f"[analyze_monster_combat] Generating combat narrative...")
-        narrative = await generate_combat_narrative(
-            player_name, player_move, combat_outcome['player1_result'],
-            monster_name, monster_move, combat_outcome['player2_result'],
-            player_invalid, monster_invalid, current_round,
-            room_name, room_description, game_manager,
-            recent_rounds=combat_history[-10:]
-        )
-        logger.info(f"[analyze_monster_combat] Narrative generated: {narrative[:100]}...")
-        try:
-            combat_history.append({
-                'round': current_round,
-                'player_move': player_move,
-                'monster_move': monster_move,
-                'narrative': narrative,
-                'player_result': combat_outcome.get('player1_result', {}),
-                'monster_result': combat_outcome.get('player2_result', {})
-            })
-            if len(combat_history) > 10:
-                del combat_history[:-10]
-        except Exception as e:
-            logger.error(f"[analyze_monster_combat] Error updating combat history: {str(e)}")
-        combat_ends = False
-        await send_monster_combat_results(
-            room_id, player_id, monster_id, current_round,
-            player_move, monster_move,
-            narrative=narrative, combat_ends=combat_ends, game_manager=game_manager,
-            player_condition='', monster_condition='', _player_total_severity=0, _monster_total_severity=0
-        )
-        if not combat_ends:
-            combat_info['round'] = current_round + 1
-    except Exception as e:
-        logger.error(f"Error analyzing monster combat: {str(e)}")
 
 
 async def send_duel_results(
@@ -644,6 +507,45 @@ async def send_duel_results(
             }
             await manager.send_to_player(room_id, player1_id, outcome_message)
             await manager.send_to_player(room_id, player2_id, outcome_message)
+            
+            # FUTURE: Replace immediate removal with corpse/loot persistence and respawn timers.
+            # Temporary behavior: if a monster loses a duel, remove it from the room for now
+            try:
+                if loser_id and isinstance(loser_id, str) and loser_id.startswith("monster_"):
+                    room_data = await game_manager.db.get_room(room_id)
+                    if room_data:
+                        monsters_list = list(room_data.get('monsters', []) or [])
+                        if loser_id in monsters_list:
+                            monsters_list = [m for m in monsters_list if m != loser_id]
+                            room_data['monsters'] = monsters_list
+                            # Persist updated room
+                            await game_manager.db.set_room(room_id, room_data)
+
+                            # Let players know this is a temporary behavior
+                            await manager.broadcast_to_room(room_id, {
+                                "type": "system_message",
+                                "message": f"{loser_name} collapses and disappears for now. Temporary behavior: defeated monsters are removed. A future update will add corpses/loot and proper cleanup.",
+                                "timestamp": datetime.now().isoformat()
+                            })
+
+                            # Broadcast updated room state so clients refresh monster list
+                            try:
+                                from .models import Room
+                                room = Room(**room_data)
+                                room.players = await game_manager.db.get_room_players(room_id)
+                                room_dict = room.dict()
+                                for key, value in room_dict.items():
+                                    if isinstance(value, bytes):
+                                        room_dict[key] = value.decode('utf-8')
+                                await manager.broadcast_to_room(room_id, {
+                                    "type": "room_update",
+                                    "room": room_dict
+                                })
+                            except Exception as e:
+                                logger.error(f"[Duel] Failed to broadcast updated room after monster defeat: {str(e)}")
+            except Exception as e:
+                logger.error(f"[Duel] Error during temporary monster removal: {str(e)}")
+
             # Clean up duel state so players can act normally again
             try:
                 if duel_id in duel_moves:
@@ -717,110 +619,68 @@ async def analyze_duel_moves(duel_id: str, game_manager: GameManager):
         room_description = room_data.get('description', 'An unknown location') if room_data else "An unknown location"
         player1_condition_prev = 'healthy'
         player2_condition_prev = 'healthy'
-        equipment_result = {
-            'player1_valid': True,
-            'player2_valid': True,
-            'player1_reason': 'Validation disabled; decided in prompt',
-            'player2_reason': 'Validation disabled; decided in prompt'
-        }
-        player1_invalid = None if equipment_result['player1_valid'] else {
-            'move': player1_move,
-            'reason': equipment_result['player1_reason']
-        }
-        player2_invalid = None if equipment_result['player2_valid'] else {
-            'move': player2_move,
-            'reason': equipment_result['player2_reason']
-        }
-        logger.info(f"[analyze_duel_moves] Analyzing combat outcome...")
-        combat_outcome = await analyze_combat_outcome(
-            player1_name, player1_move, player1_condition_prev, equipment_result['player1_valid'],
-            player2_name, player2_move, player2_condition_prev, equipment_result['player2_valid'],
-            player1_invalid, player2_invalid, player1_inventory, player2_inventory,
-            room_name, room_description, game_manager,
-            recent_rounds=duel_history[-5:]
-        )
-        narrative = await generate_combat_narrative(
-            player1_name, player1_move, combat_outcome['player1_result'],
-            player2_name, player2_move, combat_outcome['player2_result'],
-            player1_invalid, player2_invalid, current_round,
-            room_name, room_description, game_manager,
-            recent_rounds=duel_history[-10:]
-        )
-        p1_vital_delta = int(combat_outcome.get('player1_vital_delta', 0) or 0)
-        p2_vital_delta = int(combat_outcome.get('player2_vital_delta', 0) or 0)
-        p1_control_delta = int(combat_outcome.get('player1_control_delta', 0) or 0)
-        p2_control_delta = int(combat_outcome.get('player2_control_delta', 0) or 0)
-        p1_intends_heal = bool(combat_outcome.get('player1_intends_heal', False))
-        p2_intends_heal = bool(combat_outcome.get('player2_intends_heal', False))
-        p1_vital_delta = max(-1 if p1_intends_heal else 0, min(3, p1_vital_delta))
-        p2_vital_delta = max(-1 if p2_intends_heal else 0, min(3, p2_vital_delta))
-        p1_control_delta = max(-2, min(2, p1_control_delta))
-        p2_control_delta = max(-2, min(2, p2_control_delta))
-        try:
-            if p1_vital_delta < p2_vital_delta:
-                if p1_control_delta <= 0 and p2_control_delta > 0:
-                    p1_control_delta, p2_control_delta = 1, 0
-                elif p2_control_delta > p1_control_delta:
-                    p2_control_delta = min(0, p2_control_delta)
-                    p1_control_delta = max(1, p1_control_delta)
-            elif p2_vital_delta < p1_vital_delta:
-                if p2_control_delta <= 0 and p1_control_delta > 0:
-                    p2_control_delta, p1_control_delta = 1, 0
-                elif p1_control_delta > p2_control_delta:
-                    p1_control_delta = min(0, p1_control_delta)
-                    p2_control_delta = max(1, p2_control_delta)
-            else:
-                if p1_control_delta > 0 and p2_control_delta > 0:
-                    if p1_control_delta >= p2_control_delta:
-                        p2_control_delta = 0
-                    else:
-                        p1_control_delta = 0
-        except Exception:
-            pass
-        p1_control_delta = max(-2, min(2, p1_control_delta))
-        p2_control_delta = max(-2, min(2, p2_control_delta))
-        p1_vital = max(0, duel_info.get('player1_vital', 0) + p1_vital_delta)
-        p2_vital = max(0, duel_info.get('player2_vital', 0) + p2_vital_delta)
-        p1_control = max(0, min(5, duel_info.get('player1_control', 0) + p1_control_delta))
-        p2_control = max(0, min(5, duel_info.get('player2_control', 0) + p2_control_delta))
-        duel_info['player1_vital'] = p1_vital
-        duel_info['player2_vital'] = p2_vital
-        duel_info['player1_control'] = p1_control
-        duel_info['player2_control'] = p2_control
+        player1_invalid = None  # Equipment validation handled by AI
+        player2_invalid = None  # Equipment validation handled by AI
         player1_max_vital = 6
         player2_max_vital = 6
         if is_monster_duel:
             player2_max_vital = await get_monster_max_vital(monster_data)
-        finishing_owner = duel_info.get('finishing_window_owner')
-        if p1_control >= 5 and not finishing_owner:
-            duel_info['finishing_window_owner'] = 'player1'
-        elif p2_control >= 5 and not finishing_owner:
-            duel_info['finishing_window_owner'] = 'player2'
-        instant_kill_owner = None
-        if prev_finishing_owner == 'player1' and p2_vital_delta > 0:
-            instant_kill_owner = 'player1'
-        elif prev_finishing_owner == 'player2' and p1_vital_delta > 0:
-            instant_kill_owner = 'player2'
-        if instant_kill_owner == 'player1':
-            p2_vital = player2_max_vital
-            duel_info['player2_vital'] = p2_vital
-            try:
-                combat_outcome['player2_result']['reason'] = (combat_outcome['player2_result'].get('reason') or 'Finished decisively while outmatched')
-            except Exception:
-                pass
+        
+        # Collect special effects from both players' inventories
+        logger.info(f"[analyze_duel_moves] Collecting special effects for combat...")
+        special_effects_list = await collect_special_effects_from_inventories(player1_inventory, player2_inventory, game_manager)
+        logger.info(f"[analyze_duel_moves] Found {len(special_effects_list)} special effects")
+        
+        logger.info(f"[analyze_duel_moves] Analyzing combat outcome and generating narrative...")
+        combat_outcome = await analyze_combat_and_create_narrative(
+            player1_name, player1_move, player1_condition_prev,
+            player2_name, player2_move, player2_condition_prev,
+            player1_invalid, player2_invalid, player1_inventory, player2_inventory,
+            room_name, room_description, current_round, duel_info, player1_max_vital, player2_max_vital,
+            game_manager, recent_rounds=duel_history[-5:], special_effects=special_effects_list
+        )
+        # Extract AI decisions - no game engine modifications
+        narrative = combat_outcome['narrative']
+        p1_damage_dealt = int(combat_outcome.get('player1_damage_dealt', 0) or 0)  # Damage P1 dealt to P2
+        p2_damage_dealt = int(combat_outcome.get('player2_damage_dealt', 0) or 0)  # Damage P2 dealt to P1
+        p1_control_delta = int(combat_outcome.get('player1_control_delta', 0) or 0)
+        p2_control_delta = int(combat_outcome.get('player2_control_delta', 0) or 0)
+        
+        # Debug logging for damage and control
+        logger.info(f"[analyze_duel_moves] AI returned - P1 dealt {p1_damage_dealt} damage, P2 dealt {p2_damage_dealt} damage, P1 control: {p1_control_delta}, P2 control: {p2_control_delta}")
+        
+        # Apply damage: damage dealt to opponent increases their vital (represents damage taken)
+        # Note: vital still tracks damage taken internally, but we display it as health to users
+        p1_vital = max(0, duel_info.get('player1_vital', 0) + p2_damage_dealt)  # P1 takes damage from P2
+        p2_vital = max(0, duel_info.get('player2_vital', 0) + p1_damage_dealt)  # P2 takes damage from P1
+        p1_control = max(0, min(5, duel_info.get('player1_control', 0) + p1_control_delta))
+        p2_control = max(0, min(5, duel_info.get('player2_control', 0) + p2_control_delta))
+        
+        # Update persistent state
+        duel_info['player1_vital'] = p1_vital
+        duel_info['player2_vital'] = p2_vital
+        duel_info['player1_control'] = p1_control
+        duel_info['player2_control'] = p2_control
+        
+        # Apply AI-determined special mechanics
+        if combat_outcome.get('finishing_window_owner'):
+            duel_info['finishing_window_owner'] = combat_outcome['finishing_window_owner']
+        elif combat_outcome.get('finishing_window_owner') is None:
             duel_info['finishing_window_owner'] = None
-        elif instant_kill_owner == 'player2':
-            p1_vital = player1_max_vital
-            duel_info['player1_vital'] = p1_vital
-            try:
-                combat_outcome['player1_result']['reason'] = (combat_outcome['player1_result'].get('reason') or 'Finished decisively while outmatched')
-            except Exception:
-                pass
+            
+        # Handle instant kills if AI determined one occurred
+        if combat_outcome.get('instant_kill_occurred'):
+            if combat_outcome.get('finishing_window_owner') == 'player1':
+                p2_vital = player2_max_vital  # Set to max vital (0 health)
+                duel_info['player2_vital'] = p2_vital
+            elif combat_outcome.get('finishing_window_owner') == 'player2':
+                p1_vital = player1_max_vital  # Set to max vital (0 health)
+                duel_info['player1_vital'] = p1_vital
             duel_info['finishing_window_owner'] = None
-        p1_broken = p1_vital >= player1_max_vital
-        p2_broken = p2_vital >= player2_max_vital
-        combat_ends = p1_broken or p2_broken
-        logger.info(f"[analyze_duel_moves] Combat ends: {combat_ends} (reason: {'player1_vital_full' if p1_broken else ''} {'player2_vital_full' if p2_broken else ''})")
+        
+        # Use AI's combat end determination
+        combat_ends = combat_outcome.get('combat_ends', False)
+        logger.info(f"[analyze_duel_moves] Combat ends: {combat_ends} (AI determined)")
         try:
             duel_history.append({
                 'round': current_round,
@@ -829,8 +689,8 @@ async def analyze_duel_moves(duel_id: str, game_manager: GameManager):
                 'narrative': narrative,
                 'player1_result': combat_outcome.get('player1_result', {}),
                 'player2_result': combat_outcome.get('player2_result', {}),
-                'player1_vital_delta': p1_vital_delta,
-                'player2_vital_delta': p2_vital_delta,
+                'player1_damage_dealt': p1_damage_dealt,
+                'player2_damage_dealt': p2_damage_dealt,
                 'player1_control_delta': p1_control_delta,
                 'player2_control_delta': p2_control_delta,
                 'player1_vital': p1_vital,
@@ -888,7 +748,7 @@ async def handle_duel_move(message: dict, room_id: str, player_id: str, game_man
             monster_data = pending_duel.get('monster_data', {})
             room_id = pending_duel["room_id"]
             current_round = pending_duel["round"]
-            await auto_submit_monster_move(duel_id, monster_id, player_data, monster_data, room_id, current_round, game_manager)
+            await generate_and_submit_monster_move(duel_id, monster_id, player_data, monster_data, room_id, current_round, game_manager)
         elif player_ids.issubset(set(duel_moves[duel_id].keys())):
             await analyze_duel_moves(duel_id, game_manager)
 
