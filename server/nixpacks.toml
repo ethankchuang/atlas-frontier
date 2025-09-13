@@ -1,0 +1,19 @@
+[phases.setup]
+nixPkgs = ["python39", "gcc", "pkg-config"]
+
+[phases.install]
+cmds = [
+    "pip install --upgrade pip",
+    "pip install -r requirements.txt"
+]
+
+[phases.build]
+cmds = [
+    "echo 'Build phase completed'"
+]
+
+[start]
+cmd = "uvicorn app.main:app --host 0.0.0.0 --port $PORT"
+
+[variables]
+PYTHONPATH = "/app"
