@@ -2,10 +2,7 @@
 nixPkgs = ["python39", "gcc", "pkg-config"]
 
 [phases.install]
-cmds = [
-    "pip install --upgrade pip",
-    "pip install -r requirements.txt"
-]
+pythonInstall = "requirements.txt"
 
 [phases.build]
 cmds = [
