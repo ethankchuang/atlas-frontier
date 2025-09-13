@@ -16,3 +16,5 @@ sse-starlette>=1.8.0
 typing-inspection>=0.4.1
 pytest-asyncio>=0.23.7
 aiohttp>=3.9.5
+noise==1.2.2
+replicate==1.0.7
