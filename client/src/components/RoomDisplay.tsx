@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import Image from 'next/image';
 import useGameStore from '@/store/gameStore';
 
 const MAX_RETRIES = 3;
@@ -61,10 +62,11 @@ const RoomDisplay: React.FC = () => {
                     </div>
                 )}
                 {currentRoom.image_url && !imageError && (
-                    <img
+                    <Image
                         src={currentRoom.image_url}
                         alt={formattedTitle}
-                        className="w-full h-full object-cover"
+                        fill
+                        className="object-cover"
                         onLoad={handleImageLoad}
                         onError={handleImageError}
                         style={{ display: isImageLoading ? 'none' : 'block' }}

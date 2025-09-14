@@ -184,7 +184,7 @@ const useGameStore = create<GameStore>((set, get) => ({
         const newVisitedCoordinates = new Set(state.visitedCoordinates);
         newVisitedCoordinates.add(coordKey);
         const newVisitedBiomes = { ...state.visitedBiomes };
-        let newBiomeColors = { ...state.biomeColors };
+        const newBiomeColors = { ...state.biomeColors };
         if (room.biome) {
             newVisitedBiomes[coordKey] = room.biome;
             // Use AI-generated color if available, otherwise fallback to pastel
@@ -217,7 +217,7 @@ const useGameStore = create<GameStore>((set, get) => ({
         const newVisitedCoordinates = new Set(state.visitedCoordinates);
         newVisitedCoordinates.add(coordKey);
         const newVisitedBiomes = { ...state.visitedBiomes };
-        let newBiomeColors = { ...state.biomeColors };
+        const newBiomeColors = { ...state.biomeColors };
         if (biome) {
             newVisitedBiomes[coordKey] = biome;
             // Use pastel fallback for coordinates added without room data
@@ -271,7 +271,7 @@ const useGameStore = create<GameStore>((set, get) => ({
         console.log('[GameStore] Duel state updated');
     },
     submitDuelMove: (move) => set((state) => {
-        const newState: any = { 
+        const newState: Partial<GameStore> = { 
             myDuelMove: move,
             bothMovesSubmitted: false
         };
@@ -284,7 +284,7 @@ const useGameStore = create<GameStore>((set, get) => ({
         return newState;
     }),
     setOpponentMove: (move) => set((state) => {
-        const newState: any = { opponentDuelMove: move };
+        const newState: Partial<GameStore> = { opponentDuelMove: move };
         
         // If current player has already submitted their move, both moves are ready
         if (state.myDuelMove) {

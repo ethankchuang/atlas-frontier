@@ -1,5 +1,5 @@
 import useGameStore from '@/store/gameStore';
-import { ChatMessage, Player, Room } from '@/types/game';
+import { ChatMessage, Player, Room, NPC, Monster } from '@/types/game';
 import apiService from './api';
 
 class WebSocketService {
@@ -197,7 +197,7 @@ class WebSocketService {
         useGameStore.getState().addMessage(message);
     }
 
-    private handlePresenceUpdate(data: { player_id: string; status: 'joined' | 'disconnected' | 'left'; player_data?: any }) {
+    private handlePresenceUpdate(data: { player_id: string; status: 'joined' | 'disconnected' | 'left'; player_data?: Player }) {
         console.log('[WebSocket] Handling presence update:', data);
         const store = useGameStore.getState();
         
@@ -218,7 +218,17 @@ class WebSocketService {
         }
     }
 
-    private handleActionUpdate(data: { player_id: string; action: string; message: string; updates?: any }) {
+    private handleActionUpdate(data: { 
+        player_id: string; 
+        action: string; 
+        message: string; 
+        updates?: {
+            player?: Partial<Player>;
+            room?: Room;
+            new_room?: { room_id: string; image_url: string };
+            npcs?: unknown;
+        }
+    }) {
         console.log('[WebSocket] Handling action update - FULL DATA:', data);
         
         // CRITICAL: Only process action updates for OTHER players, not the current player
@@ -244,20 +254,20 @@ class WebSocketService {
             const store = useGameStore.getState();
 
             // Only update player state if it's for a different player
-            if (data.updates.player && data.updates.player.id !== this.playerId) {
+            if (data.updates?.player && (data.updates.player as Player).id !== this.playerId) {
                 console.log('[WebSocket] Updating other player state:', data.updates.player);
                 // Update other players in the room, not the current player
                 const players = store.playersInRoom.map(p =>
-                    p.id === data.updates.player.id ? data.updates.player : p
+                    p.id === (data.updates?.player as Player).id ? (data.updates?.player as Player) : p
                 );
                 store.setPlayersInRoom(players);
 
                 // Handle room change for other players (not the current player)
-                if (data.updates.player.current_room && data.updates.player.current_room !== this.roomId) {
+                if ((data.updates.player as Player).current_room && (data.updates.player as Player).current_room !== this.roomId) {
                     console.log('[WebSocket] Other player moved to new room:', {
                         playerId: data.player_id,
                         oldRoom: this.roomId,
-                        newRoom: data.updates.player.current_room,
+                        newRoom: (data.updates.player as Player).current_room,
                         hasRoom: !!data.updates.room
                     });
 
@@ -272,7 +282,7 @@ class WebSocketService {
                         console.log('[WebSocket] Updating room state for other player movement');
                         
                         // Mark room as visited on minimap (if we're in that room)
-                        if (data.updates.room.id === this.roomId) {
+                        if (data.updates.room && data.updates.room.id === this.roomId) {
                             store.addVisitedCoordinate(data.updates.room.x, data.updates.room.y);
                         }
                     }
@@ -312,7 +322,7 @@ class WebSocketService {
 
             if (data.updates.npcs) {
                 console.log('[WebSocket] Updating NPCs state:', data.updates.npcs);
-                store.setNPCs(data.updates.npcs);
+                store.setNPCs(data.updates.npcs as NPC[]);
             }
         }
     }
@@ -367,7 +377,7 @@ class WebSocketService {
         }
 
         // Handle monster duels
-        if ((data as any).is_monster_duel && data.monster_name) {
+        if ((data as { is_monster_duel?: boolean }).is_monster_duel && data.monster_name) {
             if (data.response === 'accept') {
                 console.log('[WebSocket] Monster duel accepted! Starting duel with:', data.monster_name);
                 
@@ -377,8 +387,8 @@ class WebSocketService {
                     console.log('[WebSocket] Starting monster duel as challenger');
                     store.startDuel({ id: data.responder_id, name: data.monster_name });
                     // Apply max vitals immediately if provided
-                    const p1Max = (data as any).player1_max_vital ?? 6;
-                    const p2Max = (data as any).player2_max_vital ?? 6;
+                    const p1Max = (data as { player1_max_vital?: number }).player1_max_vital ?? 6;
+                    const p2Max = (data as { player2_max_vital?: number }).player2_max_vital ?? 6;
                     useGameStore.getState().setMaxVitals(p1Max, p2Max);
                     
                     const message = `The ${data.monster_name} accepts your challenge! The duel begins!`;
@@ -622,7 +632,18 @@ class WebSocketService {
         }
     }
 
-    private handleMonsterCombatOutcome(data: any) {
+    private handleMonsterCombatOutcome(data: {
+        round: number;
+        monster_name: string;
+        player_move: string;
+        monster_move: string;
+        player_condition: string;
+        monster_condition: string;
+        narrative: string;
+        combat_ends: boolean;
+        monster_defeated: boolean;
+        player_severity?: number;
+    }) {
         console.log('[WebSocket] Handling monster combat outcome:', data);
         const store = useGameStore.getState();
         const player = store.player;
@@ -663,7 +684,7 @@ class WebSocketService {
         if (data.combat_ends) {
             if (data.monster_defeated) {
                 resultMessage = `🏆 Victory! You have defeated the ${data.monster_name}!`;
-            } else if (data.player_severity >= 50) {
+            } else if ((data.player_severity ?? 0) >= 50) {
                 resultMessage = `💀 Defeat! The ${data.monster_name} has overwhelmed you...`;
             } else {
                 resultMessage = `⚔️ Combat ends. Both combatants withdraw...`;
@@ -750,9 +771,9 @@ class WebSocketService {
         }
 
         // Persist dynamic max vitals for rendering if present
-        if (typeof (data as any).player1_max_vital === 'number' || typeof (data as any).player2_max_vital === 'number') {
-            const p1Max = (data as any).player1_max_vital ?? ((useGameStore.getState() as any).player1MaxVital ?? 6);
-            const p2Max = (data as any).player2_max_vital ?? ((useGameStore.getState() as any).player2MaxVital ?? 6);
+        if (typeof (data as { player1_max_vital?: number }).player1_max_vital === 'number' || typeof (data as { player2_max_vital?: number }).player2_max_vital === 'number') {
+            const p1Max = (data as { player1_max_vital?: number }).player1_max_vital ?? (useGameStore.getState().player1MaxVital ?? 6);
+            const p2Max = (data as { player2_max_vital?: number }).player2_max_vital ?? (useGameStore.getState().player2MaxVital ?? 6);
             useGameStore.getState().setMaxVitals(p1Max, p2Max);
         }
 
@@ -884,7 +905,7 @@ class WebSocketService {
                 
                 // Get atmospheric presence from room info API
                 apiService.getRoomInfo(room.id)
-                    .then((roomInfo: any) => {
+                    .then((roomInfo: { atmospheric_presence?: string; players?: Player[]; monsters?: unknown[] }) => {
                         const atmosphericPresence = roomInfo.atmospheric_presence || '';
                         console.log('[WebSocket] Got atmospheric presence for room message:', atmosphericPresence);
                         
@@ -898,7 +919,7 @@ class WebSocketService {
                             description: room.description,
                             biome: room.biome,
                             players: roomInfo.players || [],
-                            monsters: roomInfo.monsters || [],
+                            monsters: (roomInfo.monsters as Monster[]) || [],
                             atmospheric_presence: atmosphericPresence,
                             x: room.x,
                             y: room.y
@@ -908,7 +929,7 @@ class WebSocketService {
                         // Clear nextRoomId after successfully adding the message
                         this.nextRoomId = null;
                     })
-                    .catch((error: any) => {
+                    .catch((error: Error) => {
                         console.error('[WebSocket] Failed to get room info for atmospheric presence:', error);
                         // Fallback: add room message without atmospheric presence
                         const roomMessage: ChatMessage = {
@@ -969,7 +990,7 @@ class WebSocketService {
                 try {
                     console.log(`[WebSocket] Fetching player data for: ${playerId}`);
                     const apiService = (await import('./api')).default;
-                    const playerData = await apiService.request<any>(`/players/${playerId}`, {
+                    const playerData = await (apiService as any).request(`/players/${playerId}`, {
                         method: 'GET'
                     });
                     console.log(`[WebSocket] Successfully fetched player data for ${playerId}:`, playerData.name);

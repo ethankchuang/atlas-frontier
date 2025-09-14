@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import useGameStore from '@/store/gameStore';
 import apiService from '@/services/api';
 import websocketService from '@/services/websocket';
-import { ChatMessage } from '@/types/game';
+import { ChatMessage, Player } from '@/types/game';
 import { PaperAirplaneIcon, FaceSmileIcon } from '@heroicons/react/24/solid';
 
 const ChatInput: React.FC = () => {
@@ -18,8 +18,6 @@ const ChatInput: React.FC = () => {
         duelOpponent,
         myDuelMove,
         bothMovesSubmitted,
-        player1Condition,
-        player2Condition,
         addMessage,
         updateMessage,
         submitDuelMove
@@ -166,20 +164,22 @@ const ChatInput: React.FC = () => {
                             const store = useGameStore.getState();
                             
                             // Update player state with any changes
-                            const updatedPlayer = { ...store.player, ...response.updates.player };
-                            store.setPlayer(updatedPlayer);
-                            
-                            console.log('[ChatInput] Updated player state, new current_room:', updatedPlayer.current_room);
+                            if (store.player) {
+                                const updatedPlayer = { ...store.player, ...(response.updates.player as Partial<Player>) };
+                                store.setPlayer(updatedPlayer);
+                                console.log('[ChatInput] Updated player state, new current_room:', updatedPlayer.current_room);
+                            }
                         }
 
                         // Handle duel initiation via action stream fallback (e.g., if WebSocket was closed)
-                        if (response.updates?.duel?.is_monster_duel) {
+                        const duelUpdates = response.updates?.duel as { is_monster_duel?: boolean; opponent_id?: string; opponent_name?: string; player1_max_vital?: number; player2_max_vital?: number } | undefined;
+                        if (duelUpdates?.is_monster_duel) {
                             const store = useGameStore.getState();
-                            const opponentId = response.updates.duel.opponent_id;
-                            const opponentName = response.updates.duel.opponent_name || 'Opponent';
+                            const opponentId = duelUpdates.opponent_id || '';
+                            const opponentName = duelUpdates.opponent_name || 'Opponent';
                             store.startDuel({ id: opponentId, name: opponentName });
-                            const p1Max = response.updates.duel.player1_max_vital ?? 6;
-                            const p2Max = response.updates.duel.player2_max_vital ?? 6;
+                            const p1Max = duelUpdates.player1_max_vital ?? 6;
+                            const p2Max = duelUpdates.player2_max_vital ?? 6;
                             useGameStore.getState().setMaxVitals(p1Max, p2Max);
                             console.log('[ChatInput] Started monster duel via stream updates:', { opponentId, opponentName, p1Max, p2Max });
                         }

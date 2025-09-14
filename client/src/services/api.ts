@@ -1,4 +1,4 @@
-import { ActionRequest, ActionResponse, ChatMessage, GameState, NPCInteraction, Player, RoomInfo, Monster } from '@/types/game';
+import { ActionRequest, ActionResponse, ChatMessage, GameState, NPCInteraction, Player, RoomInfo } from '@/types/game';
 import { AuthResponse, RegisterRequest, LoginRequest, RegisterResponse, User, UsernameAvailability } from '@/types/auth';
 import useGameStore from '@/store/gameStore';
 
@@ -34,7 +34,7 @@ class APIService {
 
         // Add auth header if token exists
         if (token) {
-            headers['Authorization'] = `Bearer ${token}`;
+            (headers as Record<string, string>)['Authorization'] = `Bearer ${token}`;
         }
 
         const response = await fetch(`${API_URL}${endpoint}`, {
@@ -108,7 +108,7 @@ class APIService {
 
             // Add auth header if token exists
             if (token) {
-                headers['Authorization'] = `Bearer ${token}`;
+                (headers as Record<string, string>)['Authorization'] = `Bearer ${token}`;
             }
 
             const response = await fetch(`${API_URL}/action/stream`, {
@@ -181,8 +181,8 @@ class APIService {
                         let data;
                         try {
                             data = JSON.parse(dataStr);
-                        } catch (e) {
-                            console.error('[API] Failed to parse stream data:', dataStr);
+                        } catch (error) {
+                            console.error('[API] Failed to parse stream data:', dataStr, error);
                             continue;
                         }
 
@@ -372,8 +372,8 @@ class APIService {
         });
     }
 
-    async joinGame(): Promise<{ message: string; player: Player; room: any }> {
-        return this.request<{ message: string; player: Player; room: any }>('/join', {
+    async joinGame(): Promise<{ message: string; player: Player; room: Record<string, unknown> }> {
+        return this.request<{ message: string; player: Player; room: Record<string, unknown> }>('/join', {
             method: 'POST',
         });
     }
