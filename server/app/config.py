@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     
     # CORS Settings
     ALLOWED_ORIGINS: str = "http://localhost:3000,http://localhost:3001,http://127.0.0.1:3000,http://127.0.0.1:3001"
+    
+    # API Key Authentication
+    API_KEY: str = ""  # Set this in production for additional security
 
     # Database Settings
     CHROMA_PERSIST_DIRECTORY: str = "./data/chroma"

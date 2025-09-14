@@ -111,7 +111,8 @@ class APIService {
                 (headers as Record<string, string>)['Authorization'] = `Bearer ${token}`;
             }
 
-            const response = await fetch(`${API_URL}/action/stream`, {
+            // For streaming, we need to make a direct call but through our proxy
+            const response = await fetch('/api/game/action/stream', {
                 method: 'POST',
                 headers,
                 body: JSON.stringify(action),
@@ -338,23 +339,44 @@ class APIService {
     // ===============================
 
     async register(data: RegisterRequest): Promise<RegisterResponse> {
-        const response = await this.request<RegisterResponse>('/auth/register', {
+        // Use Next.js API route proxy for auth endpoints
+        const response = await fetch('/api/auth/register', {
             method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
             body: JSON.stringify(data),
         });
-        return response;
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Registration failed');
+        }
+
+        return response.json();
     }
 
     async login(data: LoginRequest): Promise<AuthResponse> {
-        const response = await this.request<AuthResponse>('/auth/login', {
+        // Use Next.js API route proxy for auth endpoints
+        const response = await fetch('/api/auth/login', {
             method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
             body: JSON.stringify(data),
         });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Login failed');
+        }
+
+        const authResponse = await response.json();
         
         // Store the token
-        this.setAuthToken(response.access_token);
+        this.setAuthToken(authResponse.access_token);
         
-        return response;
+        return authResponse;
     }
 
     async getProfile(): Promise<User> {

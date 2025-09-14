@@ -35,6 +35,7 @@ from .auth_utils import get_current_user, get_optional_current_user
 from .game_manager import GameManager
 from .config import settings
 from .logger import setup_logging
+from .api_key_auth import api_key_auth
 import os
 from .templates.items import GenericItemTemplate
 from .monster_behavior import monster_behavior_manager
@@ -68,6 +69,14 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["*"]
 )
+
+# Add API key authentication middleware
+@app.middleware("http")
+async def api_key_middleware(request: Request, call_next):
+    # Check API key before processing request
+    await api_key_auth(request)
+    response = await call_next(request)
+    return response
 
 # WebSocket connection manager
 class ConnectionManager:
