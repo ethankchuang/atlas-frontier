@@ -13,17 +13,24 @@ const RoomDisplay: React.FC = () => {
 
     // Reset error state when room changes
     useEffect(() => {
+        console.log('[RoomDisplay] Room changed, resetting image state:', {
+            roomId: currentRoom?.id,
+            imageUrl: currentRoom?.image_url,
+            imageStatus: currentRoom?.image_status
+        });
         setImageError(false);
         setRetryCount(0);
         setIsImageLoading(true);
     }, [currentRoom?.id]);
 
     const handleImageLoad = () => {
+        console.log('[RoomDisplay] Image loaded successfully:', currentRoom?.image_url);
         setIsImageLoading(false);
         setImageError(false);
     };
 
-    const handleImageError = () => {
+    const handleImageError = (error: any) => {
+        console.error('[RoomDisplay] Image failed to load:', currentRoom?.image_url, error);
         setIsImageLoading(false);
         setImageError(true);
         setRetryCount(prev => prev + 1);
@@ -48,8 +55,11 @@ const RoomDisplay: React.FC = () => {
             <div className="relative w-full h-full overflow-hidden bg-black">
                 {(isImageLoading || isRoomGenerating) && (
                     <div className="absolute inset-0 flex items-center justify-center bg-black">
-                        <div className="flex justify-center">
+                        <div className="flex flex-col items-center justify-center">
                             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-400"></div>
+                            <div className="text-gray-400 text-sm mt-2">
+                                {isRoomGenerating ? 'Generating room...' : 'Loading image...'}
+                            </div>
                         </div>
                     </div>
                 )}
@@ -70,6 +80,8 @@ const RoomDisplay: React.FC = () => {
                         onLoad={handleImageLoad}
                         onError={handleImageError}
                         style={{ display: isImageLoading ? 'none' : 'block' }}
+                        priority={true}
+                        unoptimized={true}
                     />
                 )}
             </div>
