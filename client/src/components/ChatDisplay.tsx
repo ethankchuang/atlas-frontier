@@ -4,7 +4,7 @@ import { ChatMessage } from '@/types/game';
 import { UserCircleIcon } from '@heroicons/react/24/solid';
 
 const ChatDisplay: React.FC = () => {
-    const { messages, playersInRoom, npcs } = useGameStore();
+    const { messages, playersInRoom } = useGameStore();
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const scrollContainerRef = useRef<HTMLDivElement>(null);
 

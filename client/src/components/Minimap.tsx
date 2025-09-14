@@ -18,13 +18,8 @@ function pastelColorFromString(str: string) {
 const Minimap: React.FC<MinimapProps> = ({ className = '' }) => {
     const { currentRoom, player, isCoordinateVisited, visitedCoordinates, visitedBiomes, biomeColors, setIsMinimapFullscreen } = useGameStore();
 
-    if (!currentRoom || !player) {
-        return null;
-    }
-
-    const playerX = currentRoom.x;
-    const playerY = currentRoom.y;
-
+    const playerX = currentRoom?.x || 0;
+    const playerY = currentRoom?.y || 0;
     const gridSize = 5;
     const centerOffset = Math.floor(gridSize / 2);
 
@@ -55,8 +50,12 @@ const Minimap: React.FC<MinimapProps> = ({ className = '' }) => {
         return grid;
     };
 
-    const grid = useMemo(generateGrid, [playerX, playerY, visitedCoordinates, visitedBiomes, biomeColors]);
+    const grid = useMemo(generateGrid, [playerX, playerY, visitedCoordinates, visitedBiomes, biomeColors, centerOffset, isCoordinateVisited]);
     const visitedCount = visitedCoordinates.size;
+
+    if (!currentRoom || !player) {
+        return null;
+    }
 
     const handleMinimapClick = (event: React.MouseEvent) => {
         event.stopPropagation();
@@ -74,8 +73,8 @@ const Minimap: React.FC<MinimapProps> = ({ className = '' }) => {
                 <span className="text-green-400 text-xs">[CLICK]</span>
             </div>
             <div className="grid grid-cols-5 gap-1">
-                {grid.map((row, rowIndex) =>
-                    row.map((tile, colIndex) => {
+                {grid.map((row) =>
+                    row.map((tile) => {
                         let bgColor = 'bg-black';
                         let borderColor = 'border-green-900';
                         if (tile.isPlayerPosition) {

@@ -16,7 +16,7 @@ export interface NPC {
     dialogue_history: Array<Record<string, string>>;
     memory_log: string[];
     last_interaction?: string;
-    properties: Record<string, any>;
+    properties: Record<string, unknown>;
 }
 
 export interface Room {
@@ -36,7 +36,7 @@ export interface Room {
     monsters: string[];
     players: string[];
     visited: boolean;
-    properties: Record<string, any>;
+    properties: Record<string, unknown>;
 }
 
 export interface Player {
@@ -55,7 +55,7 @@ export interface GameState {
     main_quest_summary: string;
     active_quests: Record<string, Record<string, string>>;
     global_state: Record<string, string>;
-    properties: Record<string, any>;
+    properties: Record<string, unknown>;
 }
 
 export interface ActionRequest {
@@ -68,11 +68,11 @@ export interface ActionRequest {
 export interface ActionResponse {
     success: boolean;
     message: string;
-    updates: Record<string, any>;
+    updates: Record<string, unknown>;
     image_url?: string;
 }
 
-export type ChatMessageType = 'chat' | 'emote' | 'system' | 'room_description' | 'action_result' | 'narration' | 'item_found' | 'duel_outcome' | 'monster_combat_outcome';
+export type ChatMessageType = 'chat' | 'emote' | 'system' | 'room_description' | 'action_result' | 'narration' | 'item_found' | 'item_obtained' | 'duel_outcome' | 'monster_combat_outcome';
 
 export interface Monster {
     id: string;

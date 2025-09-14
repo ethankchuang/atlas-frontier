@@ -9,7 +9,7 @@ import PlayersInRoom from './PlayersInRoom';
 import DuelChallengePopup from './DuelChallengePopup';
 import apiService from '@/services/api';
 import websocketService from '@/services/websocket';
-import { ChatMessage } from '@/types/game';
+import { ChatMessage, Room } from '@/types/game';
 import PauseMenu from '@/components/PauseMenu';
 
 interface GameLayoutProps {
@@ -60,10 +60,10 @@ const GameLayout: React.FC<GameLayoutProps> = ({ playerId }) => {
                 setPlayer(joinData.player);
 
                 // Set initial room data from join response
-                setCurrentRoom(joinData.room);
+                setCurrentRoom(joinData.room as unknown as Room);
                 
                 // Get full room info with NPCs, items, etc.
-                const roomInfo = await apiService.getRoomInfo(joinData.room.id);
+                const roomInfo = await apiService.getRoomInfo((joinData.room as unknown as Room).id);
                 setCurrentRoom(roomInfo.room);
                 setNPCs(roomInfo.npcs);
                 setPlayersInRoom(roomInfo.players);
@@ -73,7 +73,7 @@ const GameLayout: React.FC<GameLayoutProps> = ({ playerId }) => {
                 addVisitedCoordinate(roomInfo.room.x, roomInfo.room.y);
 
                 // Add initial room description to chat
-                const atmosphericPresence = (roomInfo as any).atmospheric_presence || '';
+                const atmosphericPresence = (roomInfo as { atmospheric_presence?: string }).atmospheric_presence || '';
                 console.log('[GameLayout] Initial room atmospheric presence:', atmosphericPresence);
                 
                 const roomMessage: ChatMessage = {
@@ -117,7 +117,7 @@ const GameLayout: React.FC<GameLayoutProps> = ({ playerId }) => {
             console.log('[GameLayout] Cleaning up WebSocket connection');
             websocketService.disconnect();
         };
-    }, [playerId]);
+    }, [playerId, addVisitedCoordinate, setCurrentRoom, setError, setGameState, setIsLoading, setNPCs, setPlayer, setPlayersInRoom, upsertItems]);
 
     // Update room data when current room changes
     useEffect(() => {
@@ -142,7 +142,7 @@ const GameLayout: React.FC<GameLayoutProps> = ({ playerId }) => {
                 console.log('[GameLayout] Got room info:', {
                     roomId: roomInfo.room.id,
                     monstersCount: roomInfo.monsters?.length || 0,
-                    atmosphericPresence: (roomInfo as any).atmospheric_presence || 'none'
+                    atmosphericPresence: (roomInfo as { atmospheric_presence?: string }).atmospheric_presence || 'none'
                 });
                 console.log('[GameLayout] Full room info:', roomInfo);
 
@@ -172,7 +172,7 @@ const GameLayout: React.FC<GameLayoutProps> = ({ playerId }) => {
         };
 
         updateRoomData();
-    }, [currentRoom?.id]);
+    }, [currentRoom?.id, addVisitedCoordinate, currentRoom, player, setCurrentRoom, setError, setIsLoading, setNPCs, setPlayersInRoom, upsertItems]);
 
     // Escape key to toggle pause menu
     useEffect(() => {
