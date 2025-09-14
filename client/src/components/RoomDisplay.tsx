@@ -21,7 +21,7 @@ const RoomDisplay: React.FC = () => {
         setImageError(false);
         setRetryCount(0);
         setIsImageLoading(true);
-    }, [currentRoom?.id]);
+    }, [currentRoom?.id, currentRoom?.image_url, currentRoom?.image_status]);
 
     const handleImageLoad = () => {
         console.log('[RoomDisplay] Image loaded successfully:', currentRoom?.image_url);
@@ -29,7 +29,7 @@ const RoomDisplay: React.FC = () => {
         setImageError(false);
     };
 
-    const handleImageError = (error: any) => {
+    const handleImageError = (error: React.SyntheticEvent<HTMLImageElement, Event>) => {
         console.error('[RoomDisplay] Image failed to load:', currentRoom?.image_url, error);
         setIsImageLoading(false);
         setImageError(true);
