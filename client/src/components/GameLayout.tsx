@@ -226,10 +226,10 @@ const GameLayout: React.FC<GameLayoutProps> = ({ playerId }) => {
                                     <div className="flex items-center gap-1 mb-0.5">
                                         <span>❤️</span>
                                         <span className="text-gray-200">Health</span>
-                                        <span className="ml-auto text-gray-400">{p1Max - Math.min(p1Max, Math.max(0, player1Vital))}/{p1Max}</span>
+                                        <span className="ml-auto text-gray-400">{Math.min(p1Max, Math.max(0, player1Vital))}/{p1Max}</span>
                                     </div>
                                     <div className="w-40 h-1.5 bg-gray-700 rounded overflow-hidden">
-                                        <div className="h-1.5 bg-red-600" style={{width: `${Math.min(100, Math.max(0, (((p1Max - Math.min(p1Max, Math.max(0, player1Vital)))/p1Max)*100)))}%`}} />
+                                        <div className="h-1.5 bg-red-600" style={{width: `${Math.min(100, Math.max(0, ((Math.min(p1Max, Math.max(0, player1Vital))/p1Max)*100)))}%`}} />
                                     </div>
                                 </div>
                                 <div>
@@ -252,10 +252,10 @@ const GameLayout: React.FC<GameLayoutProps> = ({ playerId }) => {
                                     <div className="flex items-center gap-1 mb-0.5">
                                         <span>❤️</span>
                                         <span className="text-gray-200">Health</span>
-                                        <span className="ml-auto text-gray-400">{p2Max - Math.min(p2Max, Math.max(0, player2Vital))}/{p2Max}</span>
+                                        <span className="ml-auto text-gray-400">{Math.min(p2Max, Math.max(0, player2Vital))}/{p2Max}</span>
                                     </div>
                                     <div className="w-40 h-1.5 bg-gray-700 rounded overflow-hidden">
-                                        <div className="h-1.5 bg-red-400" style={{width: `${Math.min(100, Math.max(0, (((p2Max - Math.min(p2Max, Math.max(0, player2Vital)))/p2Max)*100)))}%`}} />
+                                        <div className="h-1.5 bg-red-400" style={{width: `${Math.min(100, Math.max(0, ((Math.min(p2Max, Math.max(0, player2Vital))/p2Max)*100)))}%`}} />
                                     </div>
                                 </div>
                                 <div>

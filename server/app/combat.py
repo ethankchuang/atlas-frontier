@@ -75,8 +75,8 @@ async def analyze_combat_and_create_narrative(
                     'p2_damage_dealt': r.get('player2_damage_dealt', 0),
                     'p1_control_delta': r.get('player1_control_delta'),
                     'p2_control_delta': r.get('player2_control_delta'),
-                    'p1_vital': r.get('player1_vital'),
-                    'p2_vital': r.get('player2_vital'),
+                    'p1_health': r.get('player1_health'),
+                    'p2_health': r.get('player2_health'),
                     'p1_control': r.get('player1_control'),
                     'p2_control': r.get('player2_control')
                 })
@@ -125,9 +125,9 @@ CURRENT ROUND ACTIONS:
   - Invalid Move Info: {player2_invalid_move if player2_invalid_move else 'None'}
 
 CURRENT COMBAT STATE:
-- {player1_name} Current Health: {player1_max_vital - duel_info.get('player1_vital', 0)}/{player1_max_vital}
+- {player1_name} Current Health: {duel_info.get('player1_health', player1_max_vital)}/{player1_max_vital}
 - {player1_name} Current Control: {duel_info.get('player1_control', 0)}/5
-- {player2_name} Current Health: {player2_max_vital - duel_info.get('player2_vital', 0)}/{player2_max_vital}
+- {player2_name} Current Health: {duel_info.get('player2_health', player2_max_vital)}/{player2_max_vital}
 - {player2_name} Current Control: {duel_info.get('player2_control', 0)}/5
 - Finishing Window Owner: {duel_info.get('finishing_window_owner', 'None')}
 
@@ -435,8 +435,8 @@ async def send_duel_results(
     _player1_tags: List[Dict[str, Any]], _player2_tags: List[Dict[str, Any]],
     _player1_total_severity: int, _player2_total_severity: int,
     narrative: str, combat_ends: bool, game_manager: GameManager,
-    player1_vital: int, player2_vital: int, player1_control: int, player2_control: int,
-    player1_max_vital: int = 6, player2_max_vital: int = 6
+    player1_health: int, player2_health: int, player1_control: int, player2_control: int,
+    player1_max_health: int = 6, player2_max_health: int = 6
 ):
     from .main import manager, logger
     player1_data = await game_manager.db.get_player(player1_id)
@@ -450,12 +450,12 @@ async def send_duel_results(
         "player2_id": player2_id,
         "player1_move": player1_move,
         "player2_move": player2_move,
-        "player1_vital": player1_vital,
-        "player2_vital": player2_vital,
+        "player1_health": player1_health,
+        "player2_health": player2_health,
         "player1_control": player1_control,
         "player2_control": player2_control,
-        "player1_max_vital": player1_max_vital,
-        "player2_max_vital": player2_max_vital,
+        "player1_max_health": player1_max_health,
+        "player2_max_health": player2_max_health,
         "description": narrative,
         "combat_ends": combat_ends,
         "room_id": room_id,
@@ -466,8 +466,8 @@ async def send_duel_results(
     if combat_ends:
         winner_id = None
         loser_id = None
-        p1_broken = player1_vital >= player1_max_vital
-        p2_broken = player2_vital >= player2_max_vital
+        p1_broken = player1_health <= 0
+        p2_broken = player2_health <= 0
         if p1_broken and not p2_broken:
             winner_id = player2_id
             loser_id = player1_id
@@ -652,16 +652,16 @@ async def analyze_duel_moves(duel_id: str, game_manager: GameManager):
         # Debug logging for damage and control
         logger.info(f"[analyze_duel_moves] AI returned - P1 dealt {p1_damage_dealt} damage, P2 dealt {p2_damage_dealt} damage, P1 control: {p1_control_delta}, P2 control: {p2_control_delta}")
         
-        # Apply damage: damage dealt to opponent increases their vital (represents damage taken)
-        # Note: vital still tracks damage taken internally, but we display it as health to users
-        p1_vital = max(0, duel_info.get('player1_vital', 0) + p2_damage_dealt)  # P1 takes damage from P2
-        p2_vital = max(0, duel_info.get('player2_vital', 0) + p1_damage_dealt)  # P2 takes damage from P1
+        # Apply damage and control changes
+        # Health starts at max, decreases with damage. Control starts at 0, increases with advantage.
+        p1_health = max(0, duel_info.get('player1_health', player1_max_vital) - p2_damage_dealt)  # P1 takes damage from P2
+        p2_health = max(0, duel_info.get('player2_health', player2_max_vital) - p1_damage_dealt)  # P2 takes damage from P1
         p1_control = max(0, min(5, duel_info.get('player1_control', 0) + p1_control_delta))
         p2_control = max(0, min(5, duel_info.get('player2_control', 0) + p2_control_delta))
         
         # Update persistent state
-        duel_info['player1_vital'] = p1_vital
-        duel_info['player2_vital'] = p2_vital
+        duel_info['player1_health'] = p1_health
+        duel_info['player2_health'] = p2_health
         duel_info['player1_control'] = p1_control
         duel_info['player2_control'] = p2_control
         
@@ -674,16 +674,20 @@ async def analyze_duel_moves(duel_id: str, game_manager: GameManager):
         # Handle instant kills if AI determined one occurred
         if combat_outcome.get('instant_kill_occurred'):
             if combat_outcome.get('finishing_window_owner') == 'player1':
-                p2_vital = player2_max_vital  # Set to max vital (0 health)
-                duel_info['player2_vital'] = p2_vital
+                p2_health = 0  # Set to 0 health (instant kill)
+                duel_info['player2_health'] = p2_health
             elif combat_outcome.get('finishing_window_owner') == 'player2':
-                p1_vital = player1_max_vital  # Set to max vital (0 health)
-                duel_info['player1_vital'] = p1_vital
+                p1_health = 0  # Set to 0 health (instant kill)
+                duel_info['player1_health'] = p1_health
             duel_info['finishing_window_owner'] = None
         
-        # Use AI's combat end determination
+        # Use AI's combat end determination, but override if health reaches 0
         combat_ends = combat_outcome.get('combat_ends', False)
-        logger.info(f"[analyze_duel_moves] Combat ends: {combat_ends} (AI determined)")
+        if p1_health <= 0 or p2_health <= 0:
+            combat_ends = True
+            logger.info(f"[analyze_duel_moves] Combat ends due to health: P1={p1_health}, P2={p2_health}")
+        else:
+            logger.info(f"[analyze_duel_moves] Combat continues: P1={p1_health}, P2={p2_health} (AI determined: {combat_ends})")
         try:
             duel_history.append({
                 'round': current_round,
@@ -696,8 +700,8 @@ async def analyze_duel_moves(duel_id: str, game_manager: GameManager):
                 'player2_damage_dealt': p2_damage_dealt,
                 'player1_control_delta': p1_control_delta,
                 'player2_control_delta': p2_control_delta,
-                'player1_vital': p1_vital,
-                'player2_vital': p2_vital,
+                'player1_health': p1_health,
+                'player2_health': p2_health,
                 'player1_control': p1_control,
                 'player2_control': p2_control
             })
@@ -712,8 +716,8 @@ async def analyze_duel_moves(duel_id: str, game_manager: GameManager):
             [], [],
             0, 0,
             narrative, combat_ends, game_manager,
-            p1_vital, p2_vital, p1_control, p2_control,
-            player1_max_vital, player2_max_vital
+            p1_health, p2_health, p1_control, p2_control,
+            player1_max_vital, player2_max_vital  # Use actual max health values
         )
     except Exception as e:
         logger.error(f"[analyze_duel_moves] Error: {str(e)}")

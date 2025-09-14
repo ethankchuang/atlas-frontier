@@ -98,13 +98,13 @@ interface GameStore {
     currentRound: number;
     player1Condition: string;
     player2Condition: string;
-    // New Health/Advantage clocks (Vital/Control backend)
-    player1Vital: number;
-    player2Vital: number;
+    // Health/Control clocks
+    player1Vital: number;  // Keep as vital for compatibility, but represents health
+    player2Vital: number;  // Keep as vital for compatibility, but represents health
     player1Control: number;
     player2Control: number;
-    player1MaxVital?: number;
-    player2MaxVital?: number;
+    player1MaxVital?: number;  // Keep as MaxVital for compatibility, but represents max health
+    player2MaxVital?: number;  // Keep as MaxVital for compatibility, but represents max health
     setMaxVitals: (p1Max: number, p2Max: number) => void;
     
     // Duel actions
@@ -165,9 +165,9 @@ const useGameStore = create<GameStore>((set, get) => ({
     currentRound: 1,
     player1Condition: "Healthy",
     player2Condition: "Healthy",
-    // New Vital/Control
-    player1Vital: 0,
-    player2Vital: 0,
+    // Health/Control - Health starts at 6, Control starts at 0
+    player1Vital: 6,  // represents health
+    player2Vital: 6,  // represents health
     player1Control: 0,
     player2Control: 0,
     player1MaxVital: 6,
@@ -258,6 +258,7 @@ const useGameStore = create<GameStore>((set, get) => ({
     // Duel actions
     startDuel: (opponent) => {
         console.log('[GameStore] Starting duel with opponent:', opponent);
+        const state = get();
         set({ 
             isInDuel: true, 
             duelOpponent: opponent, 
@@ -267,6 +268,11 @@ const useGameStore = create<GameStore>((set, get) => ({
             currentRound: 1,
             player1Condition: "Healthy",
             player2Condition: "Healthy",
+            // Reset health to maximum values when starting duel
+            player1Vital: state.player1MaxVital ?? 6,
+            player2Vital: state.player2MaxVital ?? 6,
+            player1Control: 0,
+            player2Control: 0,
         });
         console.log('[GameStore] Duel state updated');
     },
