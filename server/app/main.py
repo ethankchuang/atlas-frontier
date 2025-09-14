@@ -20,7 +20,9 @@ from .models import (
     PresenceRequest,
     Direction,
     ActionRecord,
-    Monster
+    Monster,
+    NPC,
+    Item
 )
 from .auth_models import (
     RegisterRequest,
@@ -557,14 +559,47 @@ async def login_user(request: LoginRequest):
     )
     return result
 
+@app.get("/players")
+async def get_user_players(
+    current_user: Dict[str, Any] = Depends(get_current_user),
+    game_manager: GameManager = Depends(get_game_manager)
+):
+    """Get all players for the current user"""
+    try:
+        # Use the hybrid database to get players for this user
+        players_data = await game_manager.db.get_players_for_user(current_user['id'])
+        return {'players': players_data}
+    except Exception as e:
+        logger.error(f"Error getting players for user {current_user['id']}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to get players"
+        )
+
+@app.post("/players")
+async def create_new_player(
+    request: CreatePlayerRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+    game_manager: GameManager = Depends(get_game_manager)
+):
+    """Create a new player for the current user"""
+    try:
+        player = await game_manager.create_player(request.name, current_user['id'])
+        return {'player': player}
+    except Exception as e:
+        logger.error(f"Error creating player for user {current_user['id']}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to create player"
+        )
+
 @app.get("/auth/profile", response_model=UserProfile)
 async def get_user_profile(current_user: Dict[str, Any] = Depends(get_current_user)):
     """Get current user's profile"""
     return {
         'id': current_user['id'],
         'username': current_user['username'],
-        'email': current_user['email'],
-        'current_player_id': current_user['current_player_id']
+        'email': current_user['email']
     }
 
 @app.put("/auth/username")
@@ -613,24 +648,27 @@ async def start_game(game_manager: GameManager = Depends(get_game_manager)):
     game_state = await game_manager.initialize_game()
     return game_state
 
-# Join game endpoint (requires auth - places player in starting room)
-@app.post("/join")
+# Join game endpoint (requires auth - places specified player in starting room)
+@app.post("/join/{player_id}")
 async def join_game(
+    player_id: str,
     current_user: Dict[str, Any] = Depends(get_current_user),
     game_manager: GameManager = Depends(get_game_manager)
 ):
-    """Place the authenticated user's player in the game world"""
-    if not current_user['current_player_id']:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No player found for this user"
-        )
-    
-    player = await game_manager.get_player(current_user['current_player_id'])
+    """Place the authenticated user's specified player in the game world"""
+    # Get the player and verify ownership
+    player = await game_manager.get_player(player_id)
     if not player:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Player not found"
+        )
+    
+    # Verify the player belongs to the current user
+    if player.user_id != current_user['id']:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only join the game with your own players"
         )
     
     # If player doesn't have a current room, place them in starting room
@@ -663,24 +701,26 @@ async def join_game(
             'room': room
         }
 
-# Get current player endpoint (requires auth)
-@app.get("/player")
-async def get_current_player(
+# Get specific player endpoint (requires auth)
+@app.get("/player/{player_id}")
+async def get_player_by_id(
+    player_id: str,
     current_user: Dict[str, Any] = Depends(get_current_user),
     game_manager: GameManager = Depends(get_game_manager)
 ):
-    """Get the current authenticated user's player"""
-    if not current_user['current_player_id']:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="No player found for this user"
-        )
-    
-    player = await game_manager.get_player(current_user['current_player_id'])
+    """Get a specific player (must belong to current user)"""
+    player = await game_manager.get_player(player_id)
     if not player:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Player not found"
+        )
+    
+    # Verify the player belongs to the current user
+    if player.user_id != current_user['id']:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only access your own players"
         )
     
     return player
@@ -693,7 +733,8 @@ async def process_action_stream(
     game_manager: GameManager = Depends(get_game_manager)
 ):
     # Validate that the user owns this player
-    if action_request.player_id != current_user['current_player_id']:
+    player = await game_manager.get_player(action_request.player_id)
+    if not player or player.user_id != current_user['id']:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You can only perform actions for your own player"

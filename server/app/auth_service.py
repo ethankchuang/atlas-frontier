@@ -51,8 +51,7 @@ class AuthService:
             profile_data = {
                 'id': user_id,
                 'username': username.lower(),  # Store as lowercase for consistency
-                'email': email,
-                'current_player_id': None
+                'email': email
             }
             
             profile_result = client.table('user_profiles').insert(profile_data).execute()
@@ -68,13 +67,13 @@ class AuthService:
             player_id = f"player_{uuid.uuid4()}"
             player_data = {
                 'id': player_id,
+                'user_id': user_id,  # Link to auth user
                 'name': username,  # Display name (can preserve original case)
                 'current_room': '',  # Empty string instead of None for Pydantic validation
                 'inventory': [],
                 'quest_progress': {},
                 'memory_log': [f"Player {username} joined the game!"],
-                'health': 20,  # Match the model default
-                'user_id': user_id  # Link to auth user
+                'health': 20  # Match the model default
             }
             
             success = await Database.set_player(player_id, player_data)
@@ -85,10 +84,7 @@ class AuthService:
                     detail="Failed to create game character"
                 )
             
-            # Update user profile with player ID
-            client.table('user_profiles').update({
-                'current_player_id': player_id
-            }).eq('id', user_id).execute()
+            # Note: No need to update user profile with player ID since users can have multiple players
             
             logger.info(f"Successfully registered user {username} with player {player_id}")
             
@@ -96,7 +92,7 @@ class AuthService:
                 'user_id': user_id,
                 'username': username,
                 'email': email,
-                'player_id': player_id,
+                'initial_player_id': player_id,
                 'message': 'User registered successfully! Please check your email to verify your account.'
             }
             
@@ -149,8 +145,7 @@ class AuthService:
                 'user': {
                     'id': user_id,
                     'username': profile['username'],
-                    'email': profile['email'],
-                    'current_player_id': profile['current_player_id']
+                    'email': profile['email']
                 }
             }
             
@@ -236,13 +231,9 @@ class AuthService:
                     detail="User profile not found"
                 )
             
-            # Update player name as well
+            # Note: With multiple players per user, we don't automatically update player names
+            # Users can update individual player names separately if needed
             profile = result.data[0]
-            if profile['current_player_id']:
-                player_data = await Database.get_player(profile['current_player_id'])
-                if player_data:
-                    player_data['name'] = new_username
-                    await Database.set_player(profile['current_player_id'], player_data)
             
             logger.info(f"Username updated for user {user_id} to {new_username}")
             

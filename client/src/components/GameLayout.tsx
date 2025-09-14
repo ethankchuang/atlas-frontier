@@ -55,8 +55,8 @@ const GameLayout: React.FC<GameLayoutProps> = ({ playerId }) => {
                 const gameState = await apiService.startGame();
                 setGameState(gameState);
 
-                // Join the game (creates/gets player and returns room data)
-                const joinData = await apiService.joinGame();
+                // Join the game with the specified player
+                const joinData = await apiService.joinGame(playerId);
                 setPlayer(joinData.player);
 
                 // Set initial room data from join response

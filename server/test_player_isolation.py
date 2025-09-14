@@ -25,6 +25,7 @@ async def test_player_isolation():
     # Create test players
     test_player1 = Player(
         id="isolation_test_player1",
+        user_id="test_user1",
         name="IsolationTestPlayer1",
         current_room="room_start",
         inventory=[],
@@ -36,6 +37,7 @@ async def test_player_isolation():
     
     test_player2 = Player(
         id="isolation_test_player2", 
+        user_id="test_user2",
         name="IsolationTestPlayer2",
         current_room="room_start",
         inventory=[],

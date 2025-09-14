@@ -61,7 +61,8 @@ class Room(BaseModel):
     properties: Dict[str, Any] = Field(default_factory=dict)
 
 class Player(BaseModel):
-    id: str
+    id: str  # Keep the existing player ID system
+    user_id: str  # Link to the user profile that owns this player
     name: str
     current_room: Optional[str] = ""
     inventory: List[str] = Field(default_factory=list)  # List of Item IDs

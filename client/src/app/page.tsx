@@ -54,7 +54,23 @@ export default function Home() {
             setIsLoading(true);
             setError(null);
             
-            const result = await apiService.joinGame();
+            // Get user's players
+            const playersData = await apiService.getPlayers();
+            
+            let playerId: string;
+            if (playersData.players.length === 0) {
+                // No players exist, create one
+                const newPlayerData = await apiService.createPlayer(user?.username || 'Player');
+                playerId = newPlayerData.player.id;
+                setPlayer(newPlayerData.player);
+            } else {
+                // Use the first player (for now - later we can add player selection)
+                playerId = playersData.players[0].id;
+                setPlayer(playersData.players[0]);
+            }
+            
+            // Join game with the player
+            const result = await apiService.joinGame(playerId);
             setPlayer(result.player);
             
         } catch (error) {

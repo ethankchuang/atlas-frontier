@@ -41,6 +41,7 @@ export interface Room {
 
 export interface Player {
     id: string;
+    user_id: string;
     name: string;
     current_room: string;
     inventory: string[];

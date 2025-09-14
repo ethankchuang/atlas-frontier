@@ -22,9 +22,10 @@ CREATE TABLE rooms (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Players table
+-- Players table (now includes user_id to link to user profiles)
 CREATE TABLE players (
     id TEXT PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES user_profiles(id) ON DELETE CASCADE,
     data JSONB NOT NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
@@ -95,6 +96,7 @@ CREATE INDEX idx_user_profiles_username ON user_profiles(LOWER(username));
 CREATE INDEX idx_user_profiles_updated_at ON user_profiles(updated_at);
 CREATE INDEX idx_rooms_updated_at ON rooms(updated_at);
 CREATE INDEX idx_players_updated_at ON players(updated_at);
+CREATE INDEX idx_players_user_id ON players(user_id);
 CREATE INDEX idx_npcs_updated_at ON npcs(updated_at);
 CREATE INDEX idx_items_updated_at ON items(updated_at);
 CREATE INDEX idx_monsters_updated_at ON monsters(updated_at);

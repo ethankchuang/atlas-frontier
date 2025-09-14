@@ -217,16 +217,17 @@ class GameManager:
         logger.info(f"[Performance] Game initialization completed in {elapsed:.2f}s")
         return game_state
 
-    async def create_player(self, name: str) -> Player:
-        """Create a new player"""
+    async def create_player(self, name: str, user_id: str) -> Player:
+        """Create a new player for a specific user"""
         start_time = time.time()
-        logger.info(f"[Performance] Creating player: {name}")
+        logger.info(f"[Performance] Creating player: {name} for user: {user_id}")
         
         player_id = f"player_{str(uuid.uuid4())}"
         starting_room = await self.ensure_starting_room()
         
         player = Player(
             id=player_id,
+            user_id=user_id,
             name=name,
             current_room=starting_room.id,
             inventory=[],
@@ -431,6 +432,7 @@ class GameManager:
         # Create a dummy player for context since we don't have the actual player yet
         dummy_player = Player(
             id="dummy",
+            user_id="system",  # Dummy user_id for system player
             name="System",
             current_room=room_id,
             inventory=[],

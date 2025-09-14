@@ -51,11 +51,10 @@ class UserProfile(BaseModel):
     id: str
     username: str
     email: str
-    current_player_id: Optional[str]
 
 class RegisterResponse(BaseModel):
     user_id: str
     username: str
     email: str
-    player_id: str
+    initial_player_id: str
     message: str
