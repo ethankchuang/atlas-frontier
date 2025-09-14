@@ -33,6 +33,9 @@ class Settings(BaseSettings):
     # Security
     SECRET_KEY: str = "your-secret-key-here"  # Change this in production
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
+    
+    # CORS Settings
+    ALLOWED_ORIGINS: str = "http://localhost:3000,http://localhost:3001,http://127.0.0.1:3000,http://127.0.0.1:3001"
 
     # Database Settings
     CHROMA_PERSIST_DIRECTORY: str = "./data/chroma"
