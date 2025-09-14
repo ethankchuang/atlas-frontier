@@ -44,7 +44,7 @@ export interface Player {
     name: string;
     current_room: string;
     inventory: string[];
-    quest_progress: Record<string, any>;
+    quest_progress: Record<string, unknown>;
     memory_log: string[];
     last_action?: string;
     last_action_text?: string;

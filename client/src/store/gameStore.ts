@@ -17,7 +17,7 @@ interface GameStore {
 
     // Player state
     player: Player | null;
-    setPlayer: (player: Player) => void;
+    setPlayer: (player: Player | null) => void;
 
     // Room state
     currentRoom: Room | null;
