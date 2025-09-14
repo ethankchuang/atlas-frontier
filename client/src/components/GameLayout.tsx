@@ -119,7 +119,7 @@ const GameLayout: React.FC<GameLayoutProps> = ({ playerId }) => {
         };
     }, [playerId, addVisitedCoordinate, setCurrentRoom, setError, setGameState, setIsLoading, setNPCs, setPlayer, setPlayersInRoom, upsertItems]);
 
-    // Update room data when current room changes
+    // Update room data when current room ID changes (but not on every room object change)
     useEffect(() => {
         const updateRoomData = async () => {
             if (!currentRoom || !player) return;
@@ -146,19 +146,12 @@ const GameLayout: React.FC<GameLayoutProps> = ({ playerId }) => {
                 });
                 console.log('[GameLayout] Full room info:', roomInfo);
 
-                // Only update room state, but don't add duplicate room messages on initial load
-                if (currentRoom.id === roomInfo.room.id && currentRoom.image_url === roomInfo.room.image_url) {
-                    console.log('[GameLayout] Updating room state with fresh data (no duplicate message)');
-                    setCurrentRoom(roomInfo.room);
-                    setNPCs(roomInfo.npcs);
-                    setPlayersInRoom(roomInfo.players);
-                    upsertItems(roomInfo.items || []);
-                    
-                    // Don't add room description message here - it was already added during initialization
-                    // This prevents duplicate room messages
-                } else {
-                    console.log('[GameLayout] Skipping room update - already have newer data');
-                }
+                // Update room state with fresh data
+                console.log('[GameLayout] Updating room state with fresh data');
+                setCurrentRoom(roomInfo.room);
+                setNPCs(roomInfo.npcs);
+                setPlayersInRoom(roomInfo.players);
+                upsertItems(roomInfo.items || []);
 
                 // Mark the room as visited on minimap
                 addVisitedCoordinate(roomInfo.room.x, roomInfo.room.y);
@@ -172,7 +165,7 @@ const GameLayout: React.FC<GameLayoutProps> = ({ playerId }) => {
         };
 
         updateRoomData();
-    }, [currentRoom?.id, addVisitedCoordinate, currentRoom, player, setCurrentRoom, setError, setIsLoading, setNPCs, setPlayersInRoom, upsertItems]);
+    }, [currentRoom?.id, player?.id, addVisitedCoordinate, setCurrentRoom, setError, setIsLoading, setNPCs, setPlayersInRoom, upsertItems]);
 
     // Escape key to toggle pause menu
     useEffect(() => {
