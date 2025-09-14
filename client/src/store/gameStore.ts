@@ -317,7 +317,7 @@ const useGameStore = create<GameStore>((set, get) => ({
         player2Control: 0,
         player1MaxVital: 6,
         player2MaxVital: 6,
-    })
+    }),
 }));
 
 export default useGameStore;

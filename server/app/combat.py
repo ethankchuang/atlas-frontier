@@ -105,6 +105,7 @@ IMPORTANT:
 - make sure players feel the impact of their moves and feel like the outcome is logical
 - keep combat fast paced and not last a long time.
 - The pimary outcome should be change in health, control is a secondary outcome
+- It is okay to have both players end with a positive outcome, it doesn't have to be one or the other.
 
 LOCATION: {room_name} - {room_description}
 
@@ -138,11 +139,13 @@ You are the gamemaster of this combat encounter. You have COMPLETE CONTROL over 
 
 1. EQUIPMENT VALIDATION & SPECIAL EFFECTS:
    - Check the equipment of the players.
+   - The player is a naked human plus whatever equipment they have. Their valid moves should reflect this.
    - Determine if the player is physically capable of performing the move they input based on the equipment that they own.
    - For example, the player should only be able to do slicing moves if they have something capable of slicing like a sword
    - If the player is not physically capable of performing the move they input THE MOVE SHOULD HAVE NO EFFECT
    - For example, if the player tries to shoot a gun but don't have one, the move should be INVALID AND HAVE NO EFFECT
    - If the move is invalid, explain why in the output narrative
+   - Don't force yourself to mark one move invalid, it's okay to have both moves valid.
 
 2. TARGETING & ACTIONS:
    - {player1_name}'s attacks target {player2_name}
@@ -750,6 +753,11 @@ async def handle_duel_move(message: dict, room_id: str, player_id: str, game_man
             current_round = pending_duel["round"]
             await generate_and_submit_monster_move(duel_id, monster_id, player_data, monster_data, room_id, current_round, game_manager)
         elif player_ids.issubset(set(duel_moves[duel_id].keys())):
+            # Both players have submitted moves, analyze them
+            logger.info(f"[handle_duel_move] Both players submitted moves for duel {duel_id}, analyzing...")
             await analyze_duel_moves(duel_id, game_manager)
+            # Clear the moves after processing to prevent duplicate processing
+            duel_moves[duel_id].clear()
+            logger.info(f"[handle_duel_move] Cleared moves for duel {duel_id} after processing")
 
 
