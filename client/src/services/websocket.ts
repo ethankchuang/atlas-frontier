@@ -990,6 +990,7 @@ class WebSocketService {
                 try {
                     console.log(`[WebSocket] Fetching player data for: ${playerId}`);
                     const apiService = (await import('./api')).default;
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
                     const playerData = await (apiService as any).request(`/players/${playerId}`, {
                         method: 'GET'
                     });
