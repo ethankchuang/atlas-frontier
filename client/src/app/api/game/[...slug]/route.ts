@@ -6,23 +6,26 @@ const API_KEY = process.env.API_KEY; // Server-side only, not visible to client
 // Handle all game-related API calls
 export async function GET(
   request: NextRequest,
-  { params }: { params: { slug: string[] } }
+  { params }: { params: Promise<{ slug: string[] }> }
 ) {
-  return handleRequest(request, params.slug, 'GET');
+  const resolvedParams = await params;
+  return handleRequest(request, resolvedParams.slug, 'GET');
 }
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: { slug: string[] } }
+  { params }: { params: Promise<{ slug: string[] }> }
 ) {
-  return handleRequest(request, params.slug, 'POST');
+  const resolvedParams = await params;
+  return handleRequest(request, resolvedParams.slug, 'POST');
 }
 
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { slug: string[] } }
+  { params }: { params: Promise<{ slug: string[] }> }
 ) {
-  return handleRequest(request, params.slug, 'PUT');
+  const resolvedParams = await params;
+  return handleRequest(request, resolvedParams.slug, 'PUT');
 }
 
 async function handleRequest(
