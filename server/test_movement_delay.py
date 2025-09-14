@@ -27,6 +27,7 @@ async def test_movement_delay():
     # Create a test player
     test_player = Player(
         id="movement_test_player",
+        user_id="test_user",
         name="MovementTestPlayer",
         current_room="room_movement_start",
         inventory=[],

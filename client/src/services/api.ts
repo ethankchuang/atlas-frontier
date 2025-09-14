@@ -394,14 +394,26 @@ class APIService {
         });
     }
 
-    async joinGame(): Promise<{ message: string; player: Player; room: Record<string, unknown> }> {
-        return this.request<{ message: string; player: Player; room: Record<string, unknown> }>('/join', {
+    // Player Management Methods
+    async getPlayers(): Promise<{ players: Player[] }> {
+        return this.request<{ players: Player[] }>('/players');
+    }
+
+    async createPlayer(name: string): Promise<{ player: Player }> {
+        return this.request<{ player: Player }>('/players', {
+            method: 'POST',
+            body: JSON.stringify({ name }),
+        });
+    }
+
+    async joinGame(playerId: string): Promise<{ message: string; player: Player; room: Record<string, unknown> }> {
+        return this.request<{ message: string; player: Player; room: Record<string, unknown> }>(`/join/${playerId}`, {
             method: 'POST',
         });
     }
 
-    async getCurrentPlayer(): Promise<Player> {
-        return this.request<Player>('/player');
+    async getPlayer(playerId: string): Promise<Player> {
+        return this.request<Player>(`/player/${playerId}`);
     }
 
     logout(): void {

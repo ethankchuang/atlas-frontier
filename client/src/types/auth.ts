@@ -2,7 +2,6 @@ export interface User {
     id: string;
     username: string;
     email: string;
-    current_player_id: string | null;
 }
 
 export interface AuthResponse {
@@ -26,7 +25,7 @@ export interface RegisterResponse {
     user_id: string;
     username: string;
     email: string;
-    player_id: string;
+    initial_player_id: string;
     message: string;
 }
 

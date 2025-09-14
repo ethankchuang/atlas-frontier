@@ -38,6 +38,11 @@ class HybridDatabase:
         return await SupabaseDatabase.set_player(player_id, player_data)
 
     @staticmethod
+    async def get_players_for_user(user_id: str) -> List[Dict[str, Any]]:
+        """Get all players for a specific user from Supabase"""
+        return await SupabaseDatabase.get_players_for_user(user_id)
+
+    @staticmethod
     async def get_npc(npc_id: str) -> Optional[Dict[str, Any]]:
         """Get NPC data from Supabase"""
         return await SupabaseDatabase.get_npc(npc_id)

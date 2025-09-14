@@ -80,8 +80,20 @@ class SupabaseDatabase:
             client = get_supabase_client()
             serializable_data = SupabaseDatabase._serialize_data(player_data)
             
+            # Extract user_id from player_data for the foreign key
+            user_id = player_data.get('user_id')
+            if not user_id:
+                logger.error(f"Player data missing user_id: {player_data}")
+                return False
+            
+            # Skip saving system/dummy players to avoid foreign key constraint issues
+            if user_id == "system" or player_id == "dummy":
+                logger.debug(f"Skipping save for system/dummy player: {player_id}")
+                return True  # Return success without actually saving
+            
             result = client.table('players').upsert({
                 'id': player_id,
+                'user_id': user_id,
                 'data': serializable_data
             }).execute()
             
@@ -89,6 +101,23 @@ class SupabaseDatabase:
         except Exception as e:
             logger.error(f"Error setting player {player_id}: {str(e)}")
             raise
+
+    @staticmethod
+    async def get_players_for_user(user_id: str) -> List[Dict[str, Any]]:
+        """Get all players for a specific user"""
+        try:
+            client = get_supabase_client()
+            result = client.table('players').select('*').eq('user_id', user_id).execute()
+            
+            players = []
+            for row in result.data:
+                player_data = row['data']
+                players.append(player_data)
+            
+            return players
+        except Exception as e:
+            logger.error(f"Error getting players for user {user_id}: {str(e)}")
+            return []
 
     @staticmethod
     async def get_npc(npc_id: str) -> Optional[Dict[str, Any]]:
@@ -512,12 +541,23 @@ class SupabaseDatabase:
 
     @staticmethod
     async def reset_world() -> None:
-        """Reset the entire game world by clearing all Supabase data"""
+        """Reset the entire game world by clearing all Supabase data (preserves user_profiles)"""
         try:
             client = get_supabase_client()
             
-            # Clear all tables
-            tables = ['rooms', 'players', 'npcs', 'items', 'monsters', 'global_data', 'biomes', 'chunk_biomes', 'coordinates']
+            # Clear all game-related tables (but preserve user_profiles)
+            # Order matters due to foreign key constraints - clear dependent tables first
+            tables = [
+                'coordinates',  # References rooms
+                'chunk_biomes',
+                'biomes', 
+                'global_data',
+                'monsters',
+                'items',
+                'npcs',
+                'players',  # References user_profiles (will be cleared but users preserved)
+                'rooms'
+            ]
             
             for table in tables:
                 try:
@@ -528,7 +568,7 @@ class SupabaseDatabase:
                 except Exception as e:
                     logger.error(f"Error clearing table {table}: {str(e)}")
             
-            logger.info("Supabase data cleared")
+            logger.info("Supabase game data cleared (user_profiles preserved)")
         except Exception as e:
             logger.error(f"Error resetting world: {str(e)}")
             raise

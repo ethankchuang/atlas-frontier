@@ -114,7 +114,6 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
             'id': user_id,
             'username': user_profile['username'],
             'email': user_profile['email'],
-            'current_player_id': user_profile.get('current_player_id'),
             'jwt_payload': payload
         }
         
