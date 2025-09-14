@@ -387,9 +387,18 @@ class WebSocketService {
                     console.log('[WebSocket] Starting monster duel as challenger');
                     store.startDuel({ id: data.responder_id, name: data.monster_name });
                     // Apply max vitals immediately if provided
-                    const p1Max = (data as { player1_max_vital?: number }).player1_max_vital ?? 6;
-                    const p2Max = (data as { player2_max_vital?: number }).player2_max_vital ?? 6;
-                    useGameStore.getState().setMaxVitals(p1Max, p2Max);
+                    try {
+                        const p1Max = (data as { player1_max_vital?: number }).player1_max_vital ?? 6;
+                        const p2Max = (data as { player2_max_vital?: number }).player2_max_vital ?? 6;
+                        
+                        if (typeof p1Max === 'number' && typeof p2Max === 'number') {
+                            useGameStore.getState().setMaxVitals(p1Max, p2Max);
+                        } else {
+                            console.error('[WebSocket] Invalid max vital values for monster duel:', { p1Max, p2Max });
+                        }
+                    } catch (error) {
+                        console.error('[WebSocket] Error setting max vitals for monster duel:', error);
+                    }
                     
                     const message = `The ${data.monster_name} accepts your challenge! The duel begins!`;
                     store.addMessage({
@@ -729,23 +738,36 @@ class WebSocketService {
             return;
         }
 
+        // Determine if current player is player1 or player2
+        const isPlayer1 = player.id === data.player1_id;
+        const isPlayer2 = player.id === data.player2_id;
+
+        if (!isPlayer1 && !isPlayer2) {
+            console.error('[WebSocket] Current player not found in duel result data.');
+            return;
+        }
+
+        // Get moves and opponent info based on player perspective
+        const myMove = isPlayer1 ? data.player1_move : data.player2_move;
+        const opponentMove = isPlayer1 ? data.player2_move : data.player1_move;
+        const opponent = store.duelOpponent;
+        const opponentName = opponent?.name || 'Unknown';
+
         // Show what each side prepared
-        if (data.player1_move) {
+        if (myMove) {
             store.addMessage({
                 player_id: 'system',
                 room_id: data.room_id,
-                message: `⚔️ You prepared: "${data.player1_move}"`,
+                message: `⚔️ You prepared: "${myMove}"`,
                 message_type: 'system',
                 timestamp: data.timestamp
             });
         }
-        if (data.player2_move) {
-            const opponent = store.duelOpponent;
-            const opponentName = opponent?.name || 'Unknown';
+        if (opponentMove) {
             store.addMessage({
                 player_id: 'system',
                 room_id: data.room_id,
-                message: `⚔️ ${opponentName} prepared: "${data.player2_move}"`,
+                message: `⚔️ ${opponentName} prepared: "${opponentMove}"`,
                 message_type: 'system',
                 timestamp: data.timestamp
             });
@@ -760,21 +782,46 @@ class WebSocketService {
             timestamp: data.timestamp
         });
 
-        // Update duel clocks only (no condition text)
+        // Update duel clocks based on player perspective
         if (typeof data.player1_vital === 'number' && typeof data.player2_vital === 'number') {
+            const myVital = isPlayer1 ? data.player1_vital : data.player2_vital;
+            const opponentVital = isPlayer1 ? data.player2_vital : data.player1_vital;
+            const myControl = isPlayer1 ? (data.player1_control ?? store.player1Control) : (data.player2_control ?? store.player1Control);
+            const opponentControl = isPlayer1 ? (data.player2_control ?? store.player2Control) : (data.player1_control ?? store.player2Control);
+            
             store.updateDuelClocks(
-                data.player1_vital,
-                data.player2_vital,
-                data.player1_control ?? store.player1Control,
-                data.player2_control ?? store.player2Control
+                myVital,
+                opponentVital,
+                myControl,
+                opponentControl
             );
         }
 
         // Persist dynamic max vitals for rendering if present
         if (typeof (data as { player1_max_vital?: number }).player1_max_vital === 'number' || typeof (data as { player2_max_vital?: number }).player2_max_vital === 'number') {
-            const p1Max = (data as { player1_max_vital?: number }).player1_max_vital ?? (useGameStore.getState().player1MaxVital ?? 6);
-            const p2Max = (data as { player2_max_vital?: number }).player2_max_vital ?? (useGameStore.getState().player2MaxVital ?? 6);
-            useGameStore.getState().setMaxVitals(p1Max, p2Max);
+            try {
+                const p1Max = (data as { player1_max_vital?: number }).player1_max_vital ?? (useGameStore.getState().player1MaxVital ?? 6);
+                const p2Max = (data as { player2_max_vital?: number }).player2_max_vital ?? (useGameStore.getState().player2MaxVital ?? 6);
+                
+                // Ensure we have valid numbers
+                if (typeof p1Max !== 'number' || typeof p2Max !== 'number') {
+                    console.error('[WebSocket] Invalid max vital values:', { p1Max, p2Max });
+                    return;
+                }
+                
+                // Set max vitals based on player perspective
+                const myMaxVital = isPlayer1 ? p1Max : p2Max;
+                const opponentMaxVital = isPlayer1 ? p2Max : p1Max;
+                
+                // Ensure the computed values are valid numbers
+                if (typeof myMaxVital === 'number' && typeof opponentMaxVital === 'number') {
+                    useGameStore.getState().setMaxVitals(myMaxVital, opponentMaxVital);
+                } else {
+                    console.error('[WebSocket] Invalid computed max vital values:', { myMaxVital, opponentMaxVital, isPlayer1 });
+                }
+            } catch (error) {
+                console.error('[WebSocket] Error setting max vitals:', error);
+            }
         }
 
         if (data.combat_ends) {

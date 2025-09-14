@@ -28,6 +28,20 @@ const ChatInput: React.FC = () => {
         inputRef.current?.focus();
     }, []);
 
+    // Clear input when duel move is submitted or when duel ends
+    useEffect(() => {
+        if (myDuelMove || !isInDuel) {
+            setInput('');
+        }
+    }, [myDuelMove, isInDuel]);
+
+    // Prevent form submission when already submitted a move
+    const handleKeyDown = (e: React.KeyboardEvent) => {
+        if (e.key === 'Enter' && isInDuel && myDuelMove) {
+            e.preventDefault();
+        }
+    };
+
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!input.trim() || !player || !currentRoom) return;
@@ -250,6 +264,7 @@ const ChatInput: React.FC = () => {
                     type="text"
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
+                    onKeyDown={handleKeyDown}
                         placeholder={
                             isInDuel 
                                 ? (myDuelMove ? "Waiting for opponent..." : "Enter your combat move...")
@@ -257,6 +272,7 @@ const ChatInput: React.FC = () => {
                         }
                     className="w-full pl-10 py-2.5 bg-black text-green-400 font-mono text-xl border border-amber-900 focus:border-amber-500 focus:outline-none rounded"
                         disabled={isStreaming || (isInDuel && !!myDuelMove && !bothMovesSubmitted)}
+                    readOnly={isInDuel && !!myDuelMove}
                 />
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                         <span className="text-amber-400 text-xl font-mono">{'>'}</span>
