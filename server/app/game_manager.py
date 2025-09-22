@@ -137,9 +137,6 @@ class GameManager:
             'interval_minutes': 30  # Time window in minutes
         }
         
-        # Item type manager
-        from .templates.item_types import ItemTypeManager
-        self.item_type_manager = ItemTypeManager()
 
     def set_connection_manager(self, manager):
         """Set the connection manager instance"""
@@ -156,23 +153,6 @@ class GameManager:
             self.logger.error(f"[GameManager] Error getting player {player_id}: {str(e)}")
             return None
     
-    async def load_item_types(self):
-        """Load item types from database for existing worlds"""
-        try:
-            item_types_data = await self.db.get_item_types()
-            if item_types_data:
-                self.item_type_manager.from_dict_list(item_types_data)
-                logger.info(f"[Item Types] Loaded {len(self.item_type_manager.item_types)} item types from database")
-                
-                # Log the loaded types
-                logger.info(f"[Item Types] Loaded {len(self.item_type_manager.item_types)} item types:")
-                for item_type in self.item_type_manager.item_types:
-                    logger.info(f"[Item Types]   - {item_type.name}: {', '.join(item_type.capabilities)}")
-            else:
-                logger.info(f"[Item Types] No item types found in database, will be generated on next world initialization")
-        except Exception as e:
-            logger.error(f"[Item Types] Error loading item types: {str(e)}")
-            # Continue without item types - they'll be generated on next world initialization
 
 
 
@@ -184,34 +164,9 @@ class GameManager:
         game_state = await self.ai_handler.generate_world_seed()
         await self.db.set_game_state(game_state.dict())
         
-        # Generate item types for this world
-        logger.info(f"[Item Types] Generating item types for world: {game_state.world_seed}")
-        logger.info(f"[Item Types] World seed hash: {hash(game_state.world_seed) % (2**32)}")
+        # Items are now generated on-demand by AI with full context
+        logger.info(f"[Item System] Using AI-driven item generation for world: {game_state.world_seed}")
         
-        # Create world context for theme analysis
-        world_context = {
-            'main_quest_summary': game_state.main_quest_summary,
-            'world_seed': game_state.world_seed
-        }
-        
-        item_types = await self.item_type_manager.generate_world_item_types(game_state.world_seed, world_context, self.ai_handler)
-        await self.db.set_item_types(self.item_type_manager.to_dict_list())
-        
-        # Log detailed information about generated types
-        logger.info(f"[Item Types] Generated {len(item_types)} item types:")
-        
-        # Log all item types
-        logger.info(f"[Item Types] All {len(item_types)} types:")
-        for item_type in item_types:
-            logger.info(f"[Item Types]   - {item_type.name}: {', '.join(item_type.capabilities)}")
-        
-        # Log full details
-        logger.info(f"[Item Types] Full item type details:")
-        for item_type in item_types:
-            logger.info(f"[Item Types] - {item_type.name}: {item_type.description}")
-            logger.info(f"[Item Types]   Capabilities: {', '.join(item_type.capabilities)}")
-        
-
         
         elapsed = time.time() - start_time
         logger.info(f"[Performance] Game initialization completed in {elapsed:.2f}s")
@@ -772,6 +727,125 @@ class GameManager:
             Direction.DOWN: Direction.UP
         }
         return opposites[direction]
+    
+    async def _assign_room_item_distribution(self, biome: str, x: int, y: int) -> Dict[str, Any]:
+        """Assign item distribution settings for a room"""
+        import random
+        
+        logger.info(f"[Item Distribution] Checking item distribution for room at ({x}, {y}) in biome '{biome}'")
+        
+        # Assign 2-star item count (0-4 items per room)
+        two_star_count = random.randint(0, 4)
+        
+        # Check if this room should have a 3-star item
+        has_three_star = False
+        
+        if biome and biome != 'unknown':
+            # Check if this biome has a preallocated 3-star room
+            # Try different case variations due to case mismatch in storage
+            biome_three_star_room = await self.db.get_biome_three_star_room(biome)
+            logger.info(f"[Item Distribution] First attempt with '{biome}': {biome_three_star_room}")
+            if not biome_three_star_room:
+                # Try title case version (this is how they're stored)
+                biome_three_star_room = await self.db.get_biome_three_star_room(biome.title())
+                logger.info(f"[Item Distribution] Second attempt with '{biome.title()}': {biome_three_star_room}")
+            if not biome_three_star_room:
+                # Try uppercase version as fallback
+                biome_three_star_room = await self.db.get_biome_three_star_room(biome.upper())
+                logger.info(f"[Item Distribution] Third attempt with '{biome.upper()}': {biome_three_star_room}")
+            logger.info(f"[Item Distribution] Final result for biome '{biome}': {biome_three_star_room}")
+            
+            if biome_three_star_room:
+                # Check if this is the designated 3-star room for this biome
+                current_room_id = f"room_{x}_{y}"
+                # Special case: starting room at (0, 0) uses "room_start" instead of "room_0_0"
+                if x == 0 and y == 0:
+                    current_room_id = "room_start"
+                
+                logger.info(f"[Item Distribution] Current room ID: {current_room_id}, 3-star room ID: {biome_three_star_room}")
+                if biome_three_star_room == current_room_id:
+                    has_three_star = True
+                    logger.info(f"[Item Distribution] Room at ({x}, {y}) is the preallocated 3-star room for biome '{biome}'")
+            else:
+                # Fallback: if no preallocated room exists, use the old hash-based system
+                # This handles edge cases where biomes were created before preallocation
+                import hashlib
+                coord_hash = hashlib.md5(f"{biome}_{x}_{y}".encode()).hexdigest()
+                hash_value = int(coord_hash[:8], 16)
+                
+                if hash_value % 100 == 42:  # Fixed value, not random chance
+                    has_three_star = True
+                    # Store this room as the 3-star room for this biome
+                    await self.db.set_biome_three_star_room(biome, f"room_{x}_{y}")
+                    logger.info(f"[Item Distribution] Fallback: Room at ({x}, {y}) designated as 3-star room for biome '{biome}'")
+        else:
+            logger.info(f"[Item Distribution] Biome is unknown or empty, no 3-star item possible")
+        
+        result = {
+            'two_star_count': two_star_count,
+            'has_three_star': has_three_star
+        }
+        logger.info(f"[Item Distribution] Final distribution for room at ({x}, {y}): {result}")
+        return result
+
+    async def _generate_room_items(self, room_id: str, item_distribution: Dict[str, Any], biome: str, room_title: str, room_description: str) -> List[str]:
+        """Generate actual items for a room based on its distribution settings"""
+        import uuid
+        from .templates.items import AIItemGenerator
+        
+        logger.info(f"[Item Generation] Generating items for room {room_id}: {item_distribution}")
+        
+        item_ids = []
+        item_generator = AIItemGenerator()
+        
+        # Generate 3-star item if this room has one
+        if item_distribution['has_three_star']:
+            try:
+                item_context = {
+                    'world_seed': 'room_generation',  # We'll get the actual world seed later
+                    'world_theme': 'fantasy',
+                    'room_description': room_description,
+                    'room_biome': biome,
+                    'room_title': room_title,
+                    'situation_context': 'room_generation_3star',
+                    'desired_rarity': 3
+                }
+                
+                item_data = await item_generator.generate_item(self.ai_handler, item_context)
+                item_id = f"item_{str(uuid.uuid4())}"
+                item_data['id'] = item_id  # Add the ID to the item data
+                await self.db.set_item(item_id, item_data)
+                item_ids.append(item_id)
+                
+                logger.info(f"[Item Generation] Generated 3-star item '{item_data['name']}' for room {room_id}")
+            except Exception as e:
+                logger.error(f"[Item Generation] Failed to generate 3-star item for room {room_id}: {str(e)}")
+        
+        # Generate 2-star items
+        for i in range(item_distribution['two_star_count']):
+            try:
+                item_context = {
+                    'world_seed': 'room_generation',
+                    'world_theme': 'fantasy',
+                    'room_description': room_description,
+                    'room_biome': biome,
+                    'room_title': room_title,
+                    'situation_context': 'room_generation_2star',
+                    'desired_rarity': 2
+                }
+                
+                item_data = await item_generator.generate_item(self.ai_handler, item_context)
+                item_id = f"item_{str(uuid.uuid4())}"
+                item_data['id'] = item_id  # Add the ID to the item data
+                await self.db.set_item(item_id, item_data)
+                item_ids.append(item_id)
+                
+                logger.info(f"[Item Generation] Generated 2-star item '{item_data['name']}' for room {room_id}")
+            except Exception as e:
+                logger.error(f"[Item Generation] Failed to generate 2-star item {i+1} for room {room_id}: {str(e)}")
+        
+        logger.info(f"[Item Generation] Generated {len(item_ids)} items for room {room_id}")
+        return item_ids
 
     async def create_room_with_coordinates(
         self,
@@ -807,6 +881,14 @@ class GameManager:
         }
         monsters = await self.generate_room_monsters(monster_context)
         
+        # Assign item distribution for this room
+        item_distribution = await self._assign_room_item_distribution(kwargs.get('biome', 'unknown'), x, y)
+        logger.info(f"[Room Creation] Item distribution for room {room_id}: {item_distribution}")
+        
+        # Generate actual items for this room based on distribution
+        room_items = await self._generate_room_items(room_id, item_distribution, kwargs.get('biome', 'unknown'), title, description)
+        logger.info(f"[Room Creation] Generated {len(room_items)} items for room {room_id}: {room_items}")
+        
         # Create the room object
         room = Room(
             id=room_id,
@@ -817,7 +899,7 @@ class GameManager:
             image_url=image_url,
             connections={},
             npcs=[],
-            items=[],
+            items=room_items,  # Use the generated items
             monsters=monsters,
             players=players,
             visited=True,

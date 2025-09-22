@@ -108,10 +108,9 @@ def check_users():
                                 rarity_stars = "★" * item_details.get('rarity', 1)
                                 item_type = item_details.get('type', 'Unknown Type')
                                 print(f"    {i}. {item_details['name']} [{item_type}] (Rarity: {rarity_stars})")
-                                print(f"       Type: {item_details.get('type_description', 'No description')}")
                                 print(f"       Effects: {item_details.get('special_effects', 'None')}")
-                                if item_details.get('type_capabilities'):
-                                    print(f"       Capabilities: {', '.join(item_details.get('type_capabilities', []))}")
+                                if item_details.get('capabilities'):
+                                    print(f"       Capabilities: {', '.join(item_details.get('capabilities', []))}")
                             else:
                                 print(f"    {i}. {item_id} (Item data not found)")
                     else:
@@ -187,10 +186,9 @@ def check_users():
             rarity_stars = "★" * item.get('rarity', 1)
             item_type = item.get('type', 'Unknown Type')
             print(f"  {i}. {item['name']} [{item_type}] (Rarity: {rarity_stars})")
-            print(f"     Type: {item.get('type_description', 'No description')}")
             print(f"     Effects: {item.get('special_effects', 'None')}")
-            if item.get('type_capabilities'):
-                print(f"     Capabilities: {', '.join(item.get('type_capabilities', []))}")
+            if item.get('capabilities'):
+                print(f"     Capabilities: {', '.join(item.get('capabilities', []))}")
 
         print("\n=== Activity Summary ===\n")
 

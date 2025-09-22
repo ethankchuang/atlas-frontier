@@ -34,12 +34,18 @@ class MonsterBehaviorManager:
         Handle player entering a room - trigger monster behaviors
         Returns list of messages to send to player
         """
+        print(f"\n🚨 [MonsterBehavior] handle_player_room_entry called!")
+        print(f"   player_id: {player_id}")
+        print(f"   new_room_id: {new_room_id}")
+        print(f"   old_room_id: {old_room_id}")
+        print(f"   entry_direction: {entry_direction}")
         messages = []
         
         # Update player's last room
         self.player_last_room[player_id] = old_room_id
         logger.info(f"[MonsterBehavior] Updated player_last_room: {player_id} -> {old_room_id}")
         logger.info(f"[MonsterBehavior] All player_last_room entries: {self.player_last_room}")
+        logger.info(f"[MonsterBehavior] Player {player_id} entered {new_room_id} from {old_room_id} via {entry_direction}")
         
         # Get monsters in the room
         monster_ids = room_data.get('monsters', [])
@@ -326,6 +332,10 @@ class MonsterBehaviorManager:
         Check if an aggressive monster should block the player's action
         Returns (monster_id, monster_name) if blocked, None if allowed
         """
+        print(f"\n🚨 [MonsterBehavior] check_aggressive_monster_blocking called!")
+        print(f"   player_id: {player_id}")
+        print(f"   room_id: {room_id}")
+        print(f"   attempted_direction: {attempted_direction}")
         logger.info(f"[MonsterBehavior] Checking aggressive blocking: player={player_id}, room={room_id}, direction={attempted_direction}")
         
         if room_id not in self.aggressive_monsters:
@@ -372,10 +382,16 @@ class MonsterBehaviorManager:
         logger.info(f"[MonsterBehavior] Last room is {last_room}")
         
         if target_room == last_room:
+            print(f"\n🚨 [MonsterBehavior] RETREAT DETECTED - ALLOWING!")
+            print(f"   target_room: {target_room}")
+            print(f"   last_room: {last_room}")
             logger.info(f"[MonsterBehavior] Player {player_id} attempting to retreat to {last_room} - ALLOWED")
             return None  # Allow retreat
         
         # Player is trying to move to a new room - aggressive monster attacks
+        print(f"\n🚨 [MonsterBehavior] NOT A RETREAT - BLOCKING!")
+        print(f"   target_room: {target_room}")
+        print(f"   last_room: {last_room}")
         logger.info(f"[MonsterBehavior] Player {player_id} attempting to move to new room {target_room} - BLOCKED")
         
         # Return the first aggressive monster (they all behave the same)

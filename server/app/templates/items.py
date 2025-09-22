@@ -1,106 +1,189 @@
 """
-Item templates for AI generation
+AI-driven item generation
 """
 from typing import Dict, Any
 import json
 import re
+import random
 from .base import ItemTemplate
 
 
-class GenericItemTemplate(ItemTemplate):
-    """Template for generating generic items"""
+class AIItemGenerator(ItemTemplate):
+    """Fully AI-driven item generator"""
     
-    def __init__(self, item_type_manager=None):
-        super().__init__("generic_item")
-        self.item_type_manager = item_type_manager
+    def __init__(self):
+        super().__init__("ai_item")
         
-        self.system_prompt = """You are an expert at creating fantasy items for a text-based adventure game. 
-Generate a unique item with the following specifications:
+        # Different naming approaches for variety
+        self.naming_styles = [
+            "descriptive",      # Crimson Sand Amulet, Thornwood Staff
+            "material_based",   # Obsidian Blade, Silkweave Cloak
+            "elemental",        # Emberstone, Frostbite Dagger
+            "location_based",   # Wasteland Relic, Deepwood Charm
+            "mysterious",       # The Whisperer's Token, Shadow's Edge
+            "crafted",          # Artisan's Hammer, Masterwork Bow
+            "ancient",          # Relic of the Old Ones, Forgotten Artifact
+            "biome_specific"    # Desert Wind Stone, Forest Spirit Branch
+        ]
+        
+        self.system_prompt = """You are an expert at creating items for a text-based adventure game. 
+Generate a unique item that fits perfectly with the world and situation provided.
 
-1. NAME: Create a creative, thematic name for the item (1-4 words) that clearly indicates what type of item it is
-2. SPECIAL_EFFECTS: Generate special effects that allow the player to perform actions in combat.
+CRITICAL REQUIREMENTS:
+1. NAME: Creative, thematic name (1-4 words) that clearly indicates what the item is
+    Vary the type of the item, favor items that are tools / able to actively be used
+2. RARITY: Choose 1-4 based on situation importance and world context
+3. DESCRIPTION: Brief, focused description of what it is and looks like  
+4. CAPABILITIES: List of things the player can do with this item (be creative but logical)
 
-IMPORTANT: Special effects are ONLY allowed for rarity 3 and 4 items. For rarity 1 and 2 items, you MUST NOT generate any special effects.
+IMPORTANT: Players can grab ANY object and turn it into an item. Use your creativity and judgment:
+- Mundane objects can stay mundane (e.g., "Smooth Rock" with basic capabilities like "throw")
+- Consider the world context, location, and narrative situation to decide
 
-CRITICAL: Keep all descriptions concise and focused. Remove all fluff and unnecessary elaboration.
-CRITICAL: The item name MUST contain the actual item type word. A sword MUST be named like "Iron Sword" or "Steel Sword", not "metallic fragment" or "crystal shard".
+RARITY GUIDELINES:
+- Rarity 1: Random junk items with no restrictions - give these out whenever you feel like it (rocks, sticks, fish, basic mundane objects)
+    - Examples: "Smooth Rock", "Broken Stick", "Dead Fish", "Rusty Coin", "Pebble"
+    - These are common items players can find anywhere by grabbing random objects
+- Rarity 2: Normal items with moderate utility - distributed based on room data (0-4 items per room)
+    - Examples: crafted tools, useful materials, basic magical items, quality equipment
+    - These require some effort or exploration to find and are tied to specific room locations
+- Rarity 3: Special items found only in designated rooms - one special room per biome gets these
+    - Examples: powerful magical artifacts, ancient relics, legendary weapons, biome-specific treasures
+    - These are rare and tied to specific special locations within each biome
+- Rarity 4: Legendary items (not yet implemented - placeholder for future use)
+    - Reserved for future implementation of ultra-rare legendary items
 
-The special effects should be phrased as "allows player to [action]" and should be appropriate for the item's rarity level:
-- Rarity 3: Generate 1 powerful special effect
-- Rarity 4: Generate 2 extremely powerful special effects
-- Rarity 1 & 2: NO special effects allowed
+CAPABILITY EXAMPLES:
+- Simple physical: "throw", "poke", "mark territory", "create noise"
+- Utility actions: "unlock doors", "navigate", "heal wounds", "communicate", "light fires"
+- Magical/Tech actions: "hack systems", "cast spells", "phase through walls"
+- Special powers: "become invisible", "fly", "teleport", "control elements"
 
-Examples of special effects:
-- "allows player to fly"
-- "allows player to become invisible"
-- "allows player to teleport"
-- "allows player to control fire"
-- "allows player to walk through walls"
-- "allows player to jump super high"
-- "allows player to slice through metal"
+The item should:
+- Fit the world's theme and technology level
+- Be reasonable to find in the given situation
+- Have capabilities that make sense for what it is
+- Be appropriately powerful for its rarity
+- Can be mundane or magical based on your creative judgment
 
-The item should fit the context provided and be appropriate for a fantasy setting.
-Respond in JSON format with exactly these fields: "name" and "special_effects".
+Respond in JSON format with exactly these fields: "name", "rarity", "description", "capabilities"
 
-Example response for rarity 3+:
+EXAMPLE RESPONSES:
+
+Mundane item:
 {
-    "name": "Staff of Eternal Light",
-    "special_effects": "allows player to fly freely and allows player to become completely invisible"
-}
-
-Example response for rarity 1-2:
-{
-    "name": "Simple Wooden Staff",
-    "special_effects": ""
+    "name": "Smooth River Stone",
+    "rarity": 1,
+    "description": "A perfectly rounded gray stone worn smooth by water",
+    "capabilities": ["throw at targets", "mark paths", "create noise", "skip on water"]
 }"""
 
+    def _get_naming_guidance(self, style: str, biome: str) -> str:
+        """Get specific naming guidance for the selected style and biome"""
+        guidance_map = {
+            "descriptive": f"NAMING STYLE: Use descriptive adjectives that evoke the item's appearance or nature (e.g., 'Thornwood Staff', 'Crimson Sand Amulet'). Focus on {biome} themes.",
+            "material_based": f"NAMING STYLE: Emphasize the primary material or construction (e.g., 'Obsidian Blade', 'Silkweave Cloak'). Consider {biome}-appropriate materials.",
+            "elemental": f"NAMING STYLE: Incorporate elemental or magical properties (e.g., 'Emberstone', 'Frostbite Dagger'). Use {biome}-relevant elements.",
+            "location_based": f"NAMING STYLE: Reference the origin or discovery location (e.g., 'Wasteland Relic', 'Deepwood Charm'). Connect to {biome} geography.",
+            "mysterious": f"NAMING STYLE: Create enigmatic, mystical names (e.g., 'The Whisperer's Token', 'Shadow's Edge'). Add {biome} mystery elements.",
+            "crafted": f"NAMING STYLE: Suggest skilled craftsmanship (e.g., 'Artisan's Hammer', 'Masterwork Bow'). Include {biome} cultural crafting traditions.",
+            "ancient": f"NAMING STYLE: Evoke age and forgotten knowledge (e.g., 'Relic of the Old Ones', 'Forgotten Artifact'). Reference {biome} ancient history.",
+            "biome_specific": f"NAMING STYLE: Directly incorporate {biome} elements (e.g., 'Desert Wind Stone', 'Forest Spirit Branch'). Make it uniquely {biome}."
+        }
+        return guidance_map.get(style, guidance_map["descriptive"])
+
     def generate_prompt(self, context: Dict[str, Any]) -> str:
-        """Generate the prompt for the AI"""
-        location_context = context.get('location', 'a mysterious location')
-        theme_context = context.get('theme', 'fantasy')
+        """Generate the prompt for the AI with world and situational context"""
+        # Extract world context
+        world_seed = context.get('world_seed', 'Unknown World')
+        world_theme = context.get('world_theme', 'fantasy')
+        main_quest = context.get('main_quest', 'Unknown quest')
         
-        # Generate rarity first so we can tell the AI how many special effects to create
-        rarity = self.generate_rarity()
+        # Extract situational context
+        room_description = context.get('room_description', 'a mysterious location')
+        room_biome = context.get('room_biome', 'unknown')
+        player_action = context.get('player_action', 'searching')
+        situation_context = context.get('situation_context', 'exploring')
+        room_availability = context.get('room_item_availability', {})
         
-        # Store rarity in context for later use
-        context['rarity'] = rarity
-        
-        # Get item type if available
-        item_type = None
-        # Use item_type from context if provided, otherwise get random one
-        if 'item_type' in context and context['item_type']:
-            # If item_type is already a string (from item_type.name), we need to get the actual object
-            if isinstance(context['item_type'], str):
-                # Try to find the item type by name
-                try:
-                    item_type = self.item_type_manager.get_item_type_by_name(context['item_type'])
-                except ValueError:
-                    # If not found, get a random one
-                    if self.item_type_manager and self.item_type_manager.item_types:
-                        item_type = self.item_type_manager.get_random_item_type()
+        # Build contextual prompt
+        world_context_text = f"""
+WORLD CONTEXT:
+- World: {world_seed}
+- Theme: {world_theme}
+- Main Quest: {main_quest}
+
+SITUATION CONTEXT:
+- Location: {room_description}
+- Biome: {room_biome}
+- Player Action: {player_action}
+- Situation: {situation_context}
+
+Generate an item that:
+1. Fits perfectly with the {world_theme} world theme
+2. Makes sense to find in this {room_biome} location
+3. Is reasonable to obtain from "{player_action}"
+4. Has capabilities appropriate for this world's technology/magic level
+5. **Choose appropriate rarity based on what the player is trying to grab and room availability**
+"""
+
+        # Handle desired rarity (for room generation)
+        desired_rarity = context.get('desired_rarity')
+        if desired_rarity:
+            world_context_text += f"""
+**REQUIRED RARITY: {desired_rarity}**
+- You MUST generate an item with exactly rarity {desired_rarity}
+- Create an item appropriate for this rarity level
+"""
+            
+            # Apply naming styles for 2+ star items
+            if desired_rarity >= 2:
+                selected_style = random.choice(self.naming_styles)
+                naming_guidance = self._get_naming_guidance(selected_style, room_biome)
+                world_context_text += f"\n{naming_guidance}\n"
+        else:
+            # Handle basic item detection for player actions
+            basic_items = ['rock', 'stone', 'stick', 'branch', 'twig', 'leaf', 'dirt', 'mud', 'pebble', 'sand', 'grass', 'bone', 'shell']
+            is_basic_item = any(item in player_action.lower() for item in basic_items)
+            
+            if is_basic_item:
+                world_context_text += """
+**BASIC ITEM DETECTED**
+- Player is grabbing a basic/mundane object (rock, stick, etc.)
+- You MUST use rarity 1 for basic items like rocks, sticks, leaves, etc.
+- Keep it simple and mundane - no magical properties
+"""
             else:
-                # If it's already an object, use it directly
-                item_type = context['item_type']
-        elif self.item_type_manager and self.item_type_manager.item_types:
-            # No item_type in context, get random one
-            item_type = self.item_type_manager.get_random_item_type()
-            context['item_type'] = item_type
+                # Add room availability context for non-basic items
+                if room_availability:
+                    has_3star = room_availability.get('has_three_star_item', False)
+                    available_2star = room_availability.get('two_star_items_available', 0)
+                    
+                    world_context_text += f"""
+ROOM ITEM AVAILABILITY:
+- 3-star special item available: {has_3star}
+- 2-star normal items available: {available_2star}
+- 1-star basic items: Always available
+
+**RARITY SELECTION GUIDANCE:**
+- If player is grabbing something that sounds like a special/magical/rare item AND room has 3-star available → use rarity 3
+- If player is grabbing something useful/crafted/moderate AND room has 2-star available → use rarity 2  
+- If player is grabbing basic/mundane objects OR room has no higher items → use rarity 1
+- Let the player's specific action and the item's nature guide the rarity choice
+
+**NAMING STYLE FOR 2+ STAR ITEMS:**
+- If you choose rarity 2 or 3, use creative naming with thematic elements
+- Consider the biome and world context for naming inspiration
+- Make names evocative and memorable for higher rarity items
+"""
+                    
+                    # Add specific naming style guidance if 2+ star items are available
+                    if has_3star or available_2star > 0:
+                        selected_style = random.choice(self.naming_styles)
+                        naming_guidance = self._get_naming_guidance(selected_style, room_biome)
+                        world_context_text += f"\n{naming_guidance}\n"
         
-        # Add rarity-specific instructions
-        if rarity == 3:
-            rarity_instruction = "This is a RARITY 3 item. Generate exactly 1 powerful special effect."
-        elif rarity == 4:
-            rarity_instruction = "This is a RARITY 4 item. Generate exactly 2 extremely powerful special effects."
-        else:
-            rarity_instruction = "This is a RARITY 1 or 2 item. No special effects needed."
-        
-        # Add item type information if available
-        if item_type and hasattr(item_type, 'name') and item_type.name:
-            type_instruction = f"\n\nITEM TYPE: {item_type.name}\nDESCRIPTION: {item_type.description}\nCAPABILITIES: {', '.join(item_type.capabilities)}\n\nCRITICAL: The item name MUST contain the word '{item_type.name}' or a clear synonym. For example:\n- If type is 'Sword', name MUST be like 'Iron Sword', 'Steel Sword', 'Crystal Sword', 'Ancient Sword'\n- If type is 'Map', name MUST be like 'Treasure Map', 'Ancient Map', 'Navigation Map', 'Secret Map'\n- If type is 'Potion', name MUST be like 'Healing Potion', 'Magic Potion', 'Restoration Potion', 'Elixir Potion'\n- If type is 'Key', name MUST be like 'Ancient Key', 'Crystal Key', 'Mystic Key', 'Golden Key'\n- If type is 'Shield', name MUST be like 'Iron Shield', 'Steel Shield', 'Magic Shield', 'Ancient Shield'\n- If type is 'Bow', name MUST be like 'Wooden Bow', 'Elven Bow', 'Magic Bow', 'Ancient Bow'\n\nDO NOT create generic names like 'metallic fragment' or 'crystal shard'. The name MUST clearly indicate it is a {item_type.name.lower()}."
-        else:
-            type_instruction = ""
-        
-        prompt = f"{self.system_prompt}\n\n{rarity_instruction}{type_instruction}\n\nGenerate an item that would be found in {location_context} with a {theme_context} theme."
+        prompt = f"{self.system_prompt}\n{world_context_text}"
         return prompt
     
     def parse_response(self, response: str, context: Dict[str, Any] = None) -> Dict[str, Any]:
@@ -118,39 +201,31 @@ Example response for rarity 1-2:
                 data = json.loads(response)
             
             # Ensure required fields exist
-            if 'name' not in data:
-                raise ValueError("Missing required fields")
+            required_fields = ['name', 'rarity', 'description', 'capabilities']
+            for field in required_fields:
+                if field not in data:
+                    raise ValueError(f"Missing required field: {field}")
             
-            # Use rarity from context if available, otherwise generate
-            rarity = context.get('rarity', self.generate_rarity())
+            # Validate rarity is in correct range
+            rarity = data['rarity']
+            if not isinstance(rarity, int) or rarity < 1 or rarity > 4:
+                rarity = 2  # Default to common if invalid
             
-            # ENFORCE RARITY RESTRICTION: Only allow special effects for rarity 3 and 4
-            if rarity >= 3:
-                # Use AI-generated special effects for rarity 3 and 4
-                if 'special_effects' in data and data['special_effects']:
-                    special_effects = data['special_effects']
-                else:
-                    # No special effects if AI didn't generate them
-                    special_effects = "No special effects"
-            else:
-                # FORCE no special effects for rarity 1 and 2, regardless of AI output
-                special_effects = "No special effects"
+            # Ensure capabilities is a list
+            capabilities = data['capabilities']
+            if isinstance(capabilities, str):
+                # If it's a string, split it into a list
+                capabilities = [cap.strip() for cap in capabilities.split(',')]
+            elif not isinstance(capabilities, list):
+                capabilities = ["unknown capability"]
             
-            # Include item type information if available
+            # Build clean item data
             item_data = {
-                'name': data['name'],
-                'special_effects': special_effects,
-                'rarity': rarity
+                'name': data['name'].strip(),
+                'rarity': rarity,
+                'description': data['description'].strip(),
+                'capabilities': capabilities
             }
-            
-            # Add item type information if available
-            if 'item_type' in context and context['item_type']:
-                item_type = context['item_type']
-                if hasattr(item_type, 'name') and item_type.name:
-                    item_data['type'] = item_type.name
-                    item_data['type_description'] = item_type.description
-                    item_data['type_capabilities'] = item_type.capabilities
-
             
             return item_data
             
@@ -158,42 +233,36 @@ Example response for rarity 1-2:
             # Fallback parsing for malformed responses
             lines = response.strip().split('\n')
             name = "Mysterious Item"
-            special_effects = "No special effects"
+            description = "An unknown object"
+            capabilities = ["unknown capability"]
+            rarity = 1
             
             for line in lines:
                 line = line.strip()
                 if 'name' in line.lower() and ':' in line:
                     name = line.split(':', 1)[1].strip().strip('"\'{}')
-                elif 'special_effects' in line.lower() and ':' in line:
-                    special_effects = line.split(':', 1)[1].strip().strip('"\'{}')
+                elif 'description' in line.lower() and ':' in line:
+                    description = line.split(':', 1)[1].strip().strip('"\'{}')
+                elif 'rarity' in line.lower() and ':' in line:
+                    try:
+                        rarity = int(line.split(':', 1)[1].strip())
+                        if rarity < 1 or rarity > 4:
+                            rarity = 1
+                    except:
+                        rarity = 1
             
-            rarity = context.get('rarity', self.generate_rarity())
-            
-            # ENFORCE RARITY RESTRICTION: Only allow special effects for rarity 3 and 4
-            if rarity < 3:
-                special_effects = "No special effects"
-            
-            # Include item type information if available
             item_data = {
                 'name': name,
-                'special_effects': special_effects,
-                'rarity': rarity
+                'rarity': rarity,
+                'description': description,
+                'capabilities': capabilities
             }
-            
-            # Add item type information if available
-            if 'item_type' in context and context['item_type']:
-                item_type = context['item_type']
-                if hasattr(item_type, 'name') and item_type.name:
-                    item_data['type'] = item_type.name
-                    item_data['type_description'] = item_type.description
-                    item_data['type_capabilities'] = item_type.capabilities
-
             
             return item_data
     
     def validate_output(self, output: Dict[str, Any]) -> bool:
         """Validate that the output meets template requirements"""
-        required_fields = ['name', 'special_effects', 'rarity']
+        required_fields = ['name', 'rarity', 'description', 'capabilities']
         
         # Check all required fields exist
         for field in required_fields:
@@ -204,48 +273,46 @@ Example response for rarity 1-2:
         if not isinstance(output['name'], str) or len(output['name']) == 0:
             return False
         
-        if not isinstance(output['special_effects'], str) or len(output['special_effects']) == 0:
+        if not isinstance(output['description'], str) or len(output['description']) == 0:
             return False
         
         if not isinstance(output['rarity'], int) or output['rarity'] < 1 or output['rarity'] > 4:
             return False
         
-        # ENFORCE RARITY RESTRICTION: Validate that special effects are only present for rarity 3 and 4
-        if not self._validate_rarity_restriction(output):
+        if not isinstance(output['capabilities'], list) or len(output['capabilities']) == 0:
             return False
         
         return True
     
-    def _validate_rarity_restriction(self, output: Dict[str, Any]) -> bool:
-        """Validate that special effects are only present for rarity 3 and 4 items"""
-        rarity = output.get('rarity', 0)
-        special_effects = output.get('special_effects', '')
-        
-        # For rarity 1 and 2, special effects must be empty or "No special effects"
-        if rarity < 3:
-            if special_effects and special_effects.lower() not in ['', 'no special effects', 'none']:
-                return False
-        
-        # For rarity 3 and 4, special effects should be present
-        if rarity >= 3:
-            if not special_effects or special_effects.lower() in ['', 'no special effects', 'none']:
-                return False
-        
-        return True
-    
-
-    
-    def generate_item(self, context: Dict[str, Any] = None) -> Dict[str, Any]:
-        """Generate a complete item using this template"""
+    async def generate_item(self, ai_handler, context: Dict[str, Any] = None) -> Dict[str, Any]:
+        """Generate a complete item using AI"""
         if context is None:
             context = {}
         
         prompt = self.generate_prompt(context)
-        # This would be called by the AI handler
-        # For now, return a placeholder
-        rarity = self.generate_rarity()
-        return {
-            'name': 'Placeholder Item',
-            'special_effects': 'No special effects',
-            'rarity': rarity
-        } 
+        
+        try:
+            # Generate item using AI
+            ai_response = await ai_handler.generate_text(prompt)
+            item_data = self.parse_response(ai_response, context)
+            
+            # Validate the output
+            if self.validate_output(item_data):
+                return item_data
+            else:
+                # Return fallback item if validation fails
+                return {
+                    'name': 'Unknown Item',
+                    'rarity': 1,
+                    'description': 'A mysterious object',
+                    'capabilities': ['unknown capability']
+                }
+                
+        except Exception as e:
+            # Return fallback item if generation fails
+            return {
+                'name': 'Mysterious Item',
+                'rarity': 1,
+                'description': 'An enigmatic object',
+                'capabilities': ['unknown capability']
+            } 

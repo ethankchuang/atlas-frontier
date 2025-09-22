@@ -156,37 +156,6 @@ class Database:
             logger.error(f"Error setting item {item_id}: {str(e)}")
             raise
 
-    @staticmethod
-    async def get_item_types() -> Optional[List[Dict[str, Any]]]:
-        """Get item types for the current world"""
-        try:
-            item_types_data = redis_client.get("item_types")
-            if item_types_data:
-                if isinstance(item_types_data, bytes):
-                    item_types_data = item_types_data.decode('utf-8')
-                return json.loads(item_types_data)
-            return None
-        except Exception as e:
-            logger.error(f"Error getting item types: {str(e)}")
-            raise
-
-    @staticmethod
-    async def set_item_types(item_types_data: List[Dict[str, Any]]) -> bool:
-        """Save item types for the current world"""
-        try:
-            logger.debug(f"Setting item types with data: {item_types_data}")
-            # For lists, we need to serialize each item individually
-            serializable_data = []
-            for item_data in item_types_data:
-                serializable_item = {}
-                for key, value in item_data.items():
-                    serializable_item[key] = Database._serialize_value(value)
-                serializable_data.append(serializable_item)
-            logger.debug(f"Serialized item types data: {serializable_data}")
-            return redis_client.set("item_types", json.dumps(serializable_data))
-        except Exception as e:
-            logger.error(f"Error setting item types: {str(e)}")
-            raise
 
     @staticmethod
     async def get_monster_types() -> Optional[List[Dict[str, Any]]]:

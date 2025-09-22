@@ -3,7 +3,7 @@ import useGameStore from '@/store/gameStore';
 import InventoryList from './InventoryList';
 
 const PauseMenu: React.FC = () => {
-    const { isMenuOpen, setIsMenuOpen } = useGameStore();
+    const { isMenuOpen, setIsMenuOpen, player } = useGameStore();
     const [view, setView] = useState<'root' | 'inventory'>('root');
 
     // Reset to root each time menu opens
@@ -65,7 +65,7 @@ const PauseMenu: React.FC = () => {
                                     Back
                                 </button>
                             </div>
-                            <InventoryList />
+                            <InventoryList key={player?.inventory?.length || 0} />
                         </div>
                     )}
                 </div>

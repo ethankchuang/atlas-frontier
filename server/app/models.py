@@ -70,7 +70,6 @@ class Player(BaseModel):
     memory_log: List[str] = Field(default_factory=list)
     last_action: Optional[str] = None  # ISO format datetime string
     last_action_text: Optional[str] = None  # Store the actual action text
-    pending_item_type: Optional[Dict[str, Any]] = None  # Store pending item type for discovery
     health: int = 20
 
 class GameState(BaseModel):

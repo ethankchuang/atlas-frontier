@@ -2,6 +2,7 @@ from typing import Any, Dict, List, Optional
 from .database import Database as RedisDatabase
 from .supabase_database import SupabaseDatabase
 from .logger import setup_logging
+from .config import settings
 import logging
 
 # Configure logging
@@ -12,30 +13,59 @@ class HybridDatabase:
     """
     Hybrid database that routes operations to appropriate backends:
     - Redis for transient, high-frequency, and performance-critical data
-    - Supabase for persistent game data
+    - Supabase for persistent game data (with Redis fallback if Supabase not configured)
     """
+    
+    @staticmethod
+    def _is_supabase_configured() -> bool:
+        """Check if Supabase is properly configured"""
+        return bool(settings.SUPABASE_URL and settings.SUPABASE_SERVICE_ROLE_KEY)
 
-    # === PERSISTENT DATA (Supabase) ===
+    # === PERSISTENT DATA (Supabase with Redis fallback) ===
     
     @staticmethod
     async def get_room(room_id: str) -> Optional[Dict[str, Any]]:
-        """Get room data from Supabase"""
-        return await SupabaseDatabase.get_room(room_id)
+        """Get room data from Supabase or Redis fallback"""
+        if HybridDatabase._is_supabase_configured():
+            try:
+                return await SupabaseDatabase.get_room(room_id)
+            except Exception as e:
+                logger.warning(f"[HybridDatabase] Supabase get_room failed, falling back to Redis: {str(e)}")
+        
+        return await RedisDatabase.get_room(room_id)
 
     @staticmethod
     async def set_room(room_id: str, room_data: Dict[str, Any]) -> bool:
-        """Save room data to Supabase"""
-        return await SupabaseDatabase.set_room(room_id, room_data)
+        """Save room data to Supabase or Redis fallback"""
+        if HybridDatabase._is_supabase_configured():
+            try:
+                return await SupabaseDatabase.set_room(room_id, room_data)
+            except Exception as e:
+                logger.warning(f"[HybridDatabase] Supabase set_room failed, falling back to Redis: {str(e)}")
+        
+        return await RedisDatabase.set_room(room_id, room_data)
 
     @staticmethod
     async def get_player(player_id: str) -> Optional[Dict[str, Any]]:
-        """Get player data from Supabase"""
-        return await SupabaseDatabase.get_player(player_id)
+        """Get player data from Supabase or Redis fallback"""
+        if HybridDatabase._is_supabase_configured():
+            try:
+                return await SupabaseDatabase.get_player(player_id)
+            except Exception as e:
+                logger.warning(f"[HybridDatabase] Supabase get_player failed, falling back to Redis: {str(e)}")
+        
+        return await RedisDatabase.get_player(player_id)
 
     @staticmethod
     async def set_player(player_id: str, player_data: Dict[str, Any]) -> bool:
-        """Save player data to Supabase"""
-        return await SupabaseDatabase.set_player(player_id, player_data)
+        """Save player data to Supabase or Redis fallback"""
+        if HybridDatabase._is_supabase_configured():
+            try:
+                return await SupabaseDatabase.set_player(player_id, player_data)
+            except Exception as e:
+                logger.warning(f"[HybridDatabase] Supabase set_player failed, falling back to Redis: {str(e)}")
+        
+        return await RedisDatabase.set_player(player_id, player_data)
 
     @staticmethod
     async def get_players_for_user(user_id: str) -> List[Dict[str, Any]]:
@@ -54,13 +84,25 @@ class HybridDatabase:
 
     @staticmethod
     async def get_item(item_id: str) -> Optional[Dict[str, Any]]:
-        """Get item data from Supabase"""
-        return await SupabaseDatabase.get_item(item_id)
+        """Get item data from Supabase or Redis fallback"""
+        if HybridDatabase._is_supabase_configured():
+            try:
+                return await SupabaseDatabase.get_item(item_id)
+            except Exception as e:
+                logger.warning(f"[HybridDatabase] Supabase get_item failed, falling back to Redis: {str(e)}")
+        
+        return await RedisDatabase.get_item(item_id)
 
     @staticmethod
     async def set_item(item_id: str, item_data: Dict[str, Any]) -> bool:
-        """Save item data to Supabase"""
-        return await SupabaseDatabase.set_item(item_id, item_data)
+        """Save item data to Supabase or Redis fallback"""
+        if HybridDatabase._is_supabase_configured():
+            try:
+                return await SupabaseDatabase.set_item(item_id, item_data)
+            except Exception as e:
+                logger.warning(f"[HybridDatabase] Supabase set_item failed, falling back to Redis: {str(e)}")
+        
+        return await RedisDatabase.set_item(item_id, item_data)
 
     @staticmethod
     async def get_monster(monster_id: str) -> Optional[Dict[str, Any]]:
@@ -72,15 +114,6 @@ class HybridDatabase:
         """Save monster data to Supabase"""
         return await SupabaseDatabase.set_monster(monster_id, monster_data)
 
-    @staticmethod
-    async def get_item_types() -> Optional[List[Dict[str, Any]]]:
-        """Get item types from Supabase"""
-        return await SupabaseDatabase.get_item_types()
-
-    @staticmethod
-    async def set_item_types(item_types_data: List[Dict[str, Any]]) -> bool:
-        """Save item types to Supabase"""
-        return await SupabaseDatabase.set_item_types(item_types_data)
 
     @staticmethod
     async def get_monster_types() -> Optional[List[Dict[str, Any]]]:
@@ -104,18 +137,36 @@ class HybridDatabase:
 
     @staticmethod
     async def get_room_by_coordinates(x: int, y: int) -> Optional[Dict[str, Any]]:
-        """Get room at specific coordinates from Supabase"""
-        return await SupabaseDatabase.get_room_by_coordinates(x, y)
+        """Get room at specific coordinates from Supabase or Redis fallback"""
+        if HybridDatabase._is_supabase_configured():
+            try:
+                return await SupabaseDatabase.get_room_by_coordinates(x, y)
+            except Exception as e:
+                logger.warning(f"[HybridDatabase] Supabase get_room_by_coordinates failed, falling back to Redis: {str(e)}")
+        
+        return await RedisDatabase.get_room_by_coordinates(x, y)
 
     @staticmethod
     async def set_room_coordinates(room_id: str, x: int, y: int) -> bool:
-        """Set coordinate mapping for a room in Supabase"""
-        return await SupabaseDatabase.set_room_coordinates(room_id, x, y)
+        """Set coordinate mapping for a room in Supabase or Redis fallback"""
+        if HybridDatabase._is_supabase_configured():
+            try:
+                return await SupabaseDatabase.set_room_coordinates(room_id, x, y)
+            except Exception as e:
+                logger.warning(f"[HybridDatabase] Supabase set_room_coordinates failed, falling back to Redis: {str(e)}")
+        
+        return await RedisDatabase.set_room_coordinates(room_id, x, y)
 
     @staticmethod
     async def get_adjacent_rooms(x: int, y: int) -> Dict[str, Optional[str]]:
-        """Get adjacent room IDs at coordinates around (x, y) from Supabase"""
-        return await SupabaseDatabase.get_adjacent_rooms(x, y)
+        """Get adjacent room IDs at coordinates around (x, y) from Supabase or Redis fallback"""
+        if HybridDatabase._is_supabase_configured():
+            try:
+                return await SupabaseDatabase.get_adjacent_rooms(x, y)
+            except Exception as e:
+                logger.warning(f"[HybridDatabase] Supabase get_adjacent_rooms failed, falling back to Redis: {str(e)}")
+        
+        return await RedisDatabase.get_adjacent_rooms(x, y)
 
     @staticmethod
     async def is_coordinate_discovered(x: int, y: int) -> bool:
@@ -139,33 +190,98 @@ class HybridDatabase:
 
     @staticmethod
     async def atomic_create_room_at_coordinates(room_id: str, x: int, y: int, room_data: Dict[str, Any]) -> bool:
-        """Atomically create a room at specific coordinates in Supabase"""
-        return await SupabaseDatabase.atomic_create_room_at_coordinates(room_id, x, y, room_data)
+        """Atomically create a room at specific coordinates in Supabase or Redis fallback"""
+        if HybridDatabase._is_supabase_configured():
+            try:
+                return await SupabaseDatabase.atomic_create_room_at_coordinates(room_id, x, y, room_data)
+            except Exception as e:
+                logger.warning(f"[HybridDatabase] Supabase atomic_create_room_at_coordinates failed, falling back to Redis: {str(e)}")
+        
+        return await RedisDatabase.atomic_create_room_at_coordinates(room_id, x, y, room_data)
 
     @staticmethod
     async def get_chunk_biome(chunk_id: str) -> Optional[Dict[str, Any]]:
-        """Get biome data for a chunk from Supabase"""
-        return await SupabaseDatabase.get_chunk_biome(chunk_id)
+        """Get biome data for a chunk from Supabase or Redis fallback"""
+        if HybridDatabase._is_supabase_configured():
+            try:
+                return await SupabaseDatabase.get_chunk_biome(chunk_id)
+            except Exception as e:
+                logger.warning(f"[HybridDatabase] Supabase get_chunk_biome failed, falling back to Redis: {str(e)}")
+        
+        # Redis fallback - return None since Redis doesn't store chunk biomes
+        return None
 
     @staticmethod
     async def set_chunk_biome(chunk_id: str, biome_data: Dict[str, Any]) -> bool:
-        """Set biome data for a chunk in Supabase"""
-        return await SupabaseDatabase.set_chunk_biome(chunk_id, biome_data)
+        """Set biome data for a chunk in Supabase or Redis fallback"""
+        if HybridDatabase._is_supabase_configured():
+            try:
+                return await SupabaseDatabase.set_chunk_biome(chunk_id, biome_data)
+            except Exception as e:
+                logger.warning(f"[HybridDatabase] Supabase set_chunk_biome failed, falling back to Redis: {str(e)}")
+        
+        # Redis fallback - return False since Redis doesn't store chunk biomes
+        return False
 
     @staticmethod
     async def get_all_biomes() -> List[Dict[str, Any]]:
-        """Return a list of all biome dicts from Supabase"""
-        return await SupabaseDatabase.get_all_biomes()
+        """Return a list of all biome dicts from Supabase or Redis fallback"""
+        if HybridDatabase._is_supabase_configured():
+            try:
+                return await SupabaseDatabase.get_all_biomes()
+            except Exception as e:
+                logger.warning(f"[HybridDatabase] Supabase get_all_biomes failed, falling back to Redis: {str(e)}")
+        
+        # Redis fallback - return empty list since Redis doesn't store biomes
+        return []
 
     @staticmethod
     async def get_all_saved_biomes() -> List[Dict[str, Any]]:
-        """Return a list of all biome dicts from Supabase (alias for get_all_biomes)"""
-        return await SupabaseDatabase.get_all_biomes()
+        """Return a list of all biome dicts from Supabase or Redis fallback"""
+        if HybridDatabase._is_supabase_configured():
+            try:
+                return await SupabaseDatabase.get_all_biomes()
+            except Exception as e:
+                logger.warning(f"[HybridDatabase] Supabase get_all_biomes failed, falling back to Redis: {str(e)}")
+        
+        # Redis fallback - return empty list since Redis doesn't store biomes
+        return []
 
     @staticmethod
     async def save_biome(biome_data: Dict[str, Any]) -> bool:
-        """Save a new biome to Supabase"""
-        return await SupabaseDatabase.save_biome(biome_data)
+        """Save a new biome to Supabase or Redis fallback"""
+        if HybridDatabase._is_supabase_configured():
+            try:
+                return await SupabaseDatabase.save_biome(biome_data)
+            except Exception as e:
+                logger.warning(f"[HybridDatabase] Supabase save_biome failed, falling back to Redis: {str(e)}")
+        
+        # Redis fallback - return False since Redis doesn't store biomes
+        return False
+    
+    @staticmethod
+    async def get_biome_three_star_room(biome: str) -> Optional[str]:
+        """Get the room ID that has the 3-star item for a biome"""
+        if HybridDatabase._is_supabase_configured():
+            try:
+                return await SupabaseDatabase.get_biome_three_star_room(biome)
+            except Exception as e:
+                logger.warning(f"[HybridDatabase] Supabase get_biome_three_star_room failed, falling back to Redis: {str(e)}")
+        
+        # Redis fallback - return None since Redis doesn't store biome 3-star rooms
+        return None
+    
+    @staticmethod
+    async def set_biome_three_star_room(biome: str, room_id: str) -> bool:
+        """Set the room ID that has the 3-star item for a biome"""
+        if HybridDatabase._is_supabase_configured():
+            try:
+                return await SupabaseDatabase.set_biome_three_star_room(biome, room_id)
+            except Exception as e:
+                logger.warning(f"[HybridDatabase] Supabase set_biome_three_star_room failed, falling back to Redis: {str(e)}")
+        
+        # Redis fallback - return False since Redis doesn't store biome 3-star rooms
+        return False
 
     # === TRANSIENT DATA (Redis) ===
     

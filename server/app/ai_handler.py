@@ -205,19 +205,56 @@ class AIHandler:
         room: Room,
         game_state: GameState,
         npcs: List[NPC],
-        potential_item_type=None,
         monsters: List[Dict[str, any]] = None,
         chat_history: Optional[List[Dict[str, any]]] = None
     ) -> AsyncGenerator[Union[str, Dict[str, any]], None]:
         """Process a player's action using the LLM with streaming"""
+        # Load actual room items for AI context
+        room_items = []
+        logger.info(f"[AI Context] Room has {len(room.items)} items: {room.items}")
+        if room.items:
+            from .hybrid_database import HybridDatabase as Database
+            db = Database()
+            for item_id in room.items:
+                try:
+                    item_data = await db.get_item(item_id)
+                    if item_data:
+                        logger.info(f"[AI Context] Loaded room item: {item_data.get('name', 'Unknown')} (ID: {item_id})")
+                        room_items.append(item_data)
+                    else:
+                        logger.warning(f"[AI Context] Room item {item_id} not found in database!")
+                except Exception as e:
+                    logger.warning(f"[AI Context] Failed to load room item {item_id}: {str(e)}")
+        
+        logger.info(f"[AI Context] Final room_items for AI: {[item.get('name', 'Unknown') for item in room_items]}")
+        
+        # Debug: Log the full room items data
+        for item in room_items:
+            logger.info(f"[AI Context] Room item details: {item}")
+        
+        # Calculate item availability dynamically from actual room items
+        has_three_star = any(item.get('rarity') == 3 for item in room_items)
+        two_star_count = sum(1 for item in room_items if item.get('rarity') == 2)
+        
+        item_availability = {
+            "has_three_star_item": has_three_star,
+            "two_star_items_available": two_star_count,
+            "one_star_items_always_available": True
+        }
+        
+        # Debug: Log the full context being sent to AI
+        logger.info(f"[AI Context] Sending context to AI with {len(room_items)} room items")
+        
         context = {
             "player": player.dict(),
             "room": room.dict(),
             "game_state": game_state.dict(),
             "npcs": [npc.dict() for npc in npcs],
             "monsters": monsters or [],
+            "room_items": room_items,  # Include actual room items
             "action": action,
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.utcnow().isoformat(),
+            "item_availability": item_availability
         }
 
         # Include recent room chat (last 10 messages, newest first) for continuity
@@ -260,11 +297,11 @@ class AIHandler:
                 "dialogue_history": [],
                 "memory_log": []
             }
-        ]
-    },
-    "reward_item": {
-        "deserves_item": true,
-        "item_type": "optional, one of: Sword, Bow, Shield, Armor, Utility Tool, Potion, Map, Key, Torch, Amulet"
+        ],
+        "item_award": {
+            "type": "room_item",
+            "item_name": "EXACT name of the room item to award (must match room items list exactly)"
+        }
     }
 }
 '''
@@ -294,22 +331,10 @@ class AIHandler:
                 "",
             ])
         
-        # Add item discovery context if applicable
-        if potential_item_type:
-            prompt_parts.extend([
-                "ITEM DISCOVERY CONTEXT:",
-                f"The player might discover a {potential_item_type.name.lower()}: {potential_item_type.description}",
-                f"Capabilities: {', '.join(potential_item_type.capabilities)}",
-                "When describing item discovery, be specific about finding this type of item.",
-                "",
-            ])
-        
-
-        
         prompt_parts.extend([
             "",
             "CRITICAL RULES FOR CONCISE RESPONSES:",
-            "1. Keep narrative responses to 1-2 sentences maximum",
+            "1. Keep narrative responses to 2-4 sentences maximum",
             "2. Focus only on the most important details of what happens",
             "3. Remove all fluff, unnecessary elaboration, and flowery language",
             "4. For movement: Describe only the essential transition and arrival",
@@ -335,52 +360,123 @@ class AIHandler:
             "  - Do NOT simulate the duel outcome here; the server will initiate combat and handle resolution.",
             "  - Keep the narrative to the immediate pre-fight moment (no long analyses).",
             "",
-            "ITEM REWARD POLICY (CRITICAL):",
-            "- **TRUST YOUR JUDGMENT:** Analyze the player's action and determine if they should receive an item",
-            "- If the player is clearly trying to obtain, collect, or interact with an item, set reward_item.deserves_item to true",
-            "- If the player is just exploring, looking around, or investigating without clear intent to collect, set reward_item.deserves_item to false",
-            "- **CRITICAL:** Do NOT update the player's inventory directly. Only use the reward_item field",
-            "- Use your understanding of the action context to make the decision - no hardcoded keywords",
+            "ROOM ITEMS:",
+            "- The following items are available in this room:",
+        ])
+        
+        # Add actual room items to the prompt
+        if context.get("room_items"):
+            for item in context["room_items"]:
+                rarity_stars = "★" * item.get('rarity', 1) + "☆" * (4 - item.get('rarity', 1))
+                prompt_parts.append(f"  * {rarity_stars} {item['name']}: {item['description']}")
+            prompt_parts.append("")
+            prompt_parts.append("NOTE: These items exist in the room. Describe them naturally when relevant to the player's action.")
+        else:
+            prompt_parts.append("  * No specific items have been placed in this room yet")
+            prompt_parts.append("")
+            prompt_parts.append("NOTE: This room has no pre-existing items. Only describe basic environmental objects when relevant.")
+        
+        prompt_parts.extend([
+            "- When players OBSERVE (look, search, examine), you may describe these items if relevant",
+            "- Example: 'You notice a shiny vial sitting on a moss-covered stone'",
+            "- NEVER reference 'items listed in the room' or other meta-game information",
+            "- When players try to GRAB specific items, check if they match the above list",
+            "- Players can also grab basic environmental objects (rocks, sticks, etc.) for 1-star items",
             "",
-            "ITEM TYPE SELECTION (CRITICAL):",
-            "- When you mention an item in your narrative, you MUST specify the item_type in reward_item.item_type",
-            "- Available item types: Sword, Bow, Shield, Armor, Utility Tool, Potion, Map, Key, Torch, Amulet",
-            "- **VARY YOUR CHOICES:** Don't always pick the same item type. Consider the room's atmosphere and biome",
-            "- **MATCH NARRATIVE TO TYPE:** If you mention a 'sword' in narrative, set item_type to 'Sword'",
-            "- **CONTEXTUAL CHOICES:** Choose item types that make sense for the environment and situation",
-            "- **ROOM CONTEXT MATTERS:** In dark areas, consider Torch. In combat areas, consider Sword/Shield. In mysterious areas, consider Amulet/Key",
-            "- **BIOME CONSIDERATIONS:** Desert areas might have Map/Key, forest areas might have Bow/Utility Tool, etc.",
-            "- If no item is mentioned in narrative, leave item_type undefined or null",
+            "ITEM AVAILABILITY AND REWARD POLICY (CRITICAL):",
+            "- Use context.item_availability to understand what items are available in this room:",
+            "  * has_three_star_item: true/false - room has a special rare item",
+            "  * two_star_items_available: number - how many normal items remain",
+            "  * one_star_items_always_available: always true - basic junk items",
             "",
-            "ITEM TYPE USAGE (CRITICAL):",
-            "- If you have information about a specific item type (sword, amulet, key, etc.), use it in your narrative",
-            "- Instead of saying \"hidden object\" or \"item\", be specific: \"sword\", \"amulet\", \"key\", etc.",
-            "- Make the narrative match the item type being discovered",
+            "- **OBSERVATION ACTIONS** (look, examine, search, etc.):",
+            "  * DESCRIBE the specific room items NOT by their actual names and instead JUST their descriptions",
+            "  * Example: 'You see a shiny vial glowing faintly on the ground'",
+            "  * DO NOT say 'no items besides the one listed' or reference game data",
+            "  * CRITICAL: Match player descriptions to item descriptions, not just names!",
+            "  * DO NOT directly refer to items as items, integrate them naturally into the scene. keep the immersion",
+            "  * If room has items, describe them naturally in the narrative",
+            "  * If room has no items, describe environmental objects they could grab",
+            "  * Do NOT include item_award for observation actions",
+            "  * ONLY reward items if the player explicitly tries to grab them",
+            "",
+            "- **UNIFIED ITEM AWARD SYSTEM - CRITICAL INSTRUCTIONS:**",
+            "  * ANALYZE player intent to determine what item they want",
+            "  * If player says 'grab sword' and there's only one sword-type item → award that room item",
+            "  * If player says 'take the crystal' and there's a 'Crystal Shard' → award that room item",
+            "  * If player says 'grab a rock' → generate a basic environmental item",
+            "  * Use your intelligence to match player intent to available room items",
+            "",
+            "- **TO AWARD A ROOM ITEM (CRITICAL - MUST DO THIS):**",
+            "  * When player grabs a room item, you MUST include item_award in your JSON",
+            "  * Set updates.item_award.type to \"room_item\"",
+            "  * Set updates.item_award.item_name to the EXACT name from the room items list",
+            "  * Example: if room has '★★★ Sword of Blossoming Dawn' and player says 'grab sword'",
+            "  * Set: \"item_award\": {\"type\": \"room_item\", \"item_name\": \"Sword of Blossoming Dawn\"}",
+            "  * WITHOUT this, the player will NOT receive the item!",
+            "",
+            "- **TO GENERATE A BASIC ENVIRONMENTAL ITEM:**",
+            "  * When player grabs basic environmental objects (rock, stick, branch, leaf, etc.)",
+            "  * AND verigiy if the object is reasonable to find in the current environment. If it isn't then do not award the player the item",
+            "  * Set updates.item_award.type to \"generate_item\"",
+            "  * Optionally set updates.item_award.rarity to 1 (defaults to 1 if not specified)",
+            "  * Example: player says 'grab a rock'",
+            "  * Set: \"item_award\": {\"type\": \"generate_item\", \"rarity\": 1}",
+            "",
+            "- **IF ITEM DOESN'T EXIST:**",
+            "  * Tell player the item is not there",
+            "  * Do NOT include item_award in updates",
+            "  * Example: 'grab golden crown' but no crown → 'You don't see any golden crown here'",
+            "",
+            "UNIFIED ITEM AWARD SYSTEM:",
+            "- **For room items**: {\"type\": \"room_item\", \"item_name\": \"Exact Item Name\"}",
+            "- **For generated items**: {\"type\": \"generate_item\", \"rarity\": 1}",
+            "- **For no item**: Don't include item_award at all",
+            "- Focus on analyzing player intent and matching to available room items",
+            "- Be intelligent about matching: 'sword' could match 'Blade of Storms', 'crystal' could match 'Crystal Shard'",
+            "- CRITICAL: Match player descriptions to item descriptions, not just names!",
+            "- Example: 'dark pendant' should match 'Cinderthorn Amulet' because it's described as 'dark, ash-encrusted pendant'",
             "",
             "EXAMPLES:",
-            "1. Player action: \"look around\" (in a dark cave)",
-            "   - Narrative: \"You notice a torch mounted on the wall, its flame still flickering.\"",
-            "   - Memory: \"Found a torch on the wall\"",
-            "   - JSON: {\"updates\": {\"player\": {\"memory_log\": [\"Found a torch on the wall\"]}}, \"reward_item\": {\"deserves_item\": false, \"item_type\": \"Torch\"}}",
-            "2. Player action: \"grab the torch\"",
-            "   - Narrative: \"You pull the torch from its mount, feeling the warmth of its flame.\"",
-            "   - Memory: \"Retrieved the torch from the wall\"",
-            "   - JSON: {\"updates\": {\"player\": {\"memory_log\": [\"Retrieved the torch from the wall\"]}}, \"reward_item\": {\"deserves_item\": true, \"item_type\": \"Torch\"}}",
-            "3. Player action: \"search for items\" (in a forest)",
-            "   - Narrative: \"You spot a bow leaning against a tree, its string still taut.\"",
-            "   - Memory: \"Found a bow against a tree\"",
-            "   - JSON: {\"updates\": {\"player\": {\"memory_log\": [\"Found a bow against a tree\"]}}, \"reward_item\": {\"deserves_item\": false, \"item_type\": \"Bow\"}}",
-            "4. Player action: \"collect the bow\"",
-            "   - Narrative: \"You carefully lift the bow, testing its draw weight.\"",
-            "   - Memory: \"Retrieved the bow from the tree\"",
-            "   - JSON: {\"updates\": {\"player\": {\"memory_log\": [\"Retrieved the bow from the tree\"]}}, \"reward_item\": {\"deserves_item\": true, \"item_type\": \"Bow\"}}",
-            "5. Player action: \"look for hidden items\" (in a mysterious temple)",
-            "   - Narrative: \"You find no items visible in the shadowed expanse.\"",
-            "   - Memory: \"Looked for hidden items\"",
-            "   - JSON: {\"updates\": {\"player\": {\"memory_log\": [\"Looked for hidden items\"]}}, \"reward_item\": {\"deserves_item\": false}}",
+            "1. Player action: \"look around\" (room has: ★★★ Mystical Orb, ★★ Crafted Dagger, ★★ Iron Shield)",
+            "   - Narrative: \"The chamber holds ancient secrets. A Mystical Orb glows on the altar, while a Crafted Dagger and Iron Shield rest on nearby shelves.\"",
+            "   - Memory: \"Explored the chamber, found Mystical Orb, Crafted Dagger, and Iron Shield\"",
+            "   - JSON: {\"updates\": {\"player\": {\"memory_log\": [\"Explored the chamber, found Mystical Orb, Crafted Dagger, and Iron Shield\"]}}",
+            "2. Player action: \"grab the orb\" (matches 'Mystical Orb')",
+            "   - Narrative: \"You carefully lift the mystical orb from the altar, feeling its magical energy pulse through your hands.\"",
+            "   - Memory: \"Retrieved the mystical orb\"",
+            "   - JSON: {\"updates\": {\"player\": {\"memory_log\": [\"Retrieved the mystical orb\"]}, \"item_award\": {\"type\": \"room_item\", \"item_name\": \"Mystical Orb\"}}",
+            "   - CRITICAL: The item_award field is what actually gives the player the item!",
+            "   - System: Awards the specific 'Mystical Orb' room item",
+            "   - NOTE: item_award has type and item_name",
+            "3. Player action: \"take sword\" (no sword in room)",
+            "   - Narrative: \"You look around but don't see any sword in this chamber.\"",
+            "   - Memory: \"Searched for sword but found none\"",
+            "   - JSON: {\"updates\": {\"player\": {\"memory_log\": [\"Searched for sword but found none\"]}}",
+            "   - System: No item given, no item_award field",
+            "4. Player action: \"grab shield\" (matches 'Iron Shield')",
+            "   - Narrative: \"You lift the iron shield from the shelf, testing its weight and balance.\"",
+            "   - Memory: \"Retrieved the iron shield\"",
+            "   - JSON: {\"updates\": {\"player\": {\"memory_log\": [\"Retrieved the iron shield\"]}, \"item_award\": {\"type\": \"room_item\", \"item_name\": \"Iron Shield\"}}",
+            "   - System: Awards the specific 'Iron Shield' room item",
+            "5. Player action: \"get the blade\" (player means dagger, AI analyzes intent)",
+            "   - Narrative: \"You grasp the crafted dagger's handle, noting its fine craftsmanship.\"",
+            "   - Memory: \"Retrieved the crafted dagger\"",
+            "   - JSON: {\"updates\": {\"player\": {\"memory_log\": [\"Retrieved the crafted dagger\"]}, \"item_award\": {\"type\": \"room_item\", \"item_name\": \"Crafted Dagger\"}}",
+            "   - System: AI intelligently matches 'blade' intent to 'Crafted Dagger'",
+            "6. Player action: \"grab a rock\" (basic environmental item)",
+            "   - Narrative: \"You pick up a smooth stone from the chamber floor.\"",
+            "   - Memory: \"Collected a stone\"",
+            "   - JSON: {\"updates\": {\"player\": {\"memory_log\": [\"Collected a stone\"]}, \"item_award\": {\"type\": \"generate_item\", \"rarity\": 1}}",
+            "   - System: Generates 1-star basic environmental item",
+            "7. Player action: \"take stick\" (basic environmental item)",
+            "   - Narrative: \"You snap off a sturdy branch from debris in the corner.\"",
+            "   - Memory: \"Collected a branch\"",
+            "   - JSON: {\"updates\": {\"player\": {\"memory_log\": [\"Collected a branch\"]}, \"item_award\": {\"type\": \"generate_item\", \"rarity\": 1}}",
+            "   - System: Generates 1-star basic environmental item",
             "",
             "CRITICAL JSON RULES:",
-            "- deserves_item must be a boolean value (true/false), NOT a string (\"true\"/\"false\")",
+            "- item_award.type must be either \"room_item\" or \"generate_item\"",
             "- All JSON must be valid and properly formatted",
             "- Do not include any comments or extra text in the JSON",
             "- Only include the updates object if there are actual updates to make",
@@ -392,16 +488,29 @@ class AIHandler:
             json_template,
             "",
             "**CRITICAL: ALWAYS include the reward_item field in your JSON response!**",
-            "**CRITICAL: Set reward_item.deserves_item to true for grab/take actions!**",
-            "**CRITICAL: Set reward_item.deserves_item to false for look/search actions!**",
+            "**CRITICAL: Room items → item_award.item_name + deserves_item=false!**",
+            "**CRITICAL: Basic environmental items → deserves_item=true (no item_award)!**",
             "",
             "Only include fields in updates that need to be changed. The updates object is optional.",
             "Do not include any comments in the JSON.",
             "",
-            "STRICT ITEM AWARDING RULES:",
-            "- Observation-only verbs (look, search, examine, scan, survey, inspect) MUST set reward_item.deserves_item=false",
-            "- Interaction verbs (grab, take, pick up, collect, retrieve) MAY set reward_item.deserves_item=true if an item is clearly being obtained",
-            "- Do not award items for hints or visual discoveries alone"
+            "CRITICAL - NEVER DO THIS:",
+            "❌ BAD: 'You see no new items besides the one already listed in the room'",
+            "❌ BAD: 'There are no additional items besides what's listed'", 
+            "❌ BAD: 'No items besides the item already in the room'",
+            "❌ BAD: Describing items that aren't in the room items list (like 'a small pouch')",
+            "❌ BAD: Making up items that don't exist in the room",
+            "❌ BAD: {\"item_award\": {\"item_name\": \"Item\"}} ← MISSING type field!",
+            "❌ BAD: {\"item_award\": {\"type\": \"wrong_type\"}} ← type must be room_item or generate_item!",
+            "✅ GOOD: Only describe the exact items from the room items list above",
+            "✅ GOOD: {\"item_award\": {\"type\": \"room_item\", \"item_name\": \"Item Name\"}}",
+            "✅ GOOD: {\"item_award\": {\"type\": \"generate_item\", \"rarity\": 1}}",
+            "",
+            "FINAL REMINDERS:",
+            "- **Room items**: Use {\"type\": \"room_item\", \"item_name\": \"Exact Name\"}",
+            "- **Basic environmental items**: Use {\"type\": \"generate_item\", \"rarity\": 1}",
+            "- **Non-existent items**: Tell player it's not there, no item_award",
+            "- **Always describe items by their actual names, never reference game data**"
         ])
         
         prompt = "\n".join(prompt_parts)
@@ -411,7 +520,7 @@ class AIHandler:
             stream = await client.chat.completions.create(
                 model="gpt-4.1-nano-2025-04-14",
                 messages=[
-                    {"role": "system", "content": "You are the game master of a fantasy MUD game. Keep all responses concise (1-2 sentences maximum). Focus only on essential details and remove all fluff. Make actions clear and direct. When players explore, you may hint at nearby items if it fits the scene, but do not award items unless they explicitly try to take them."},
+                    {"role": "system", "content": "You are the game master of a fantasy MUD game. Keep all responses concise (1-2 sentences maximum). Focus only on environmental details but remove all fluff. Make actions clear and direct. Be generous with item generation - when players grab/take anything, turn it into an item."},
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0.7,
@@ -448,6 +557,14 @@ class AIHandler:
                         if isinstance(parsed, dict) and "response" in parsed:
                             # Replace response with the already streamed narrative
                             parsed["response"] = narrative.strip()
+                            
+                            # Debug: Log the AI response to see if item_award is included
+                            logger.info(f"[AI Response] Full AI response: {parsed}")
+                            if "updates" in parsed and "item_award" in parsed["updates"]:
+                                logger.info(f"[AI Response] Item award found: {parsed['updates']['item_award']}")
+                            else:
+                                logger.warning(f"[AI Response] No item_award found in AI response!")
+                            
                             yield parsed
                             break
                     except Exception:

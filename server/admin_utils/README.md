@@ -68,6 +68,139 @@ python3 view_messages.py --export data_export.json
 - **Rooms Visited**: List of rooms explored
 - **Items Obtained**: Items collected during session
 
+## Item Viewer (`view_items.py`)
+
+A comprehensive tool to view all items in the game database, focusing on 2-star and above items since 1-star items are generated on-demand.
+
+### Usage
+
+```bash
+# View all 2-star and above items (default)
+python3 view_items.py
+
+# View all 3-star and above items
+python3 view_items.py --min-rarity 3
+
+# View only 4-star legendary items
+python3 view_items.py --rarity 4
+
+# Filter by room name
+python3 view_items.py --room "forest"
+
+# Filter by item name
+python3 view_items.py --item "sword"
+
+# Combine filters
+python3 view_items.py --min-rarity 3 --room "cave" --item "crystal"
+```
+
+### Command Line Options
+
+- `--min-rarity`: Minimum rarity to display (1-4, default: 2)
+- `--rarity`: Show only specific rarity level (1, 2, 3, or 4)
+- `--room`: Filter by room name or ID (partial match)
+- `--item`: Filter by item name (partial match)
+
+### Output Format
+
+For each item, displays:
+- **Name**: Item name
+- **ID**: Unique item identifier
+- **Rarity**: Star rating and rarity name (e.g., "★★★ (Rare)")
+- **Location**: Room title and ID where the item is located
+- **Description**: Item description (truncated if long)
+- **Capabilities**: List of what the player can do with the item
+- **Properties**: Additional item properties and stats
+
+### Summary Statistics
+
+At the end, shows:
+- Total items found
+- Breakdown by rarity level
+- Breakdown by room location
+
+## Biome 3-Star Item Viewer (`view_biome_three_star_items.py`)
+
+A comprehensive tool to view all biomes, their preallocated 3-star rooms, and the actual 3-star items.
+
+### Usage
+
+```bash
+# View summary of all biomes and their 3-star items (default)
+python3 view_biome_three_star_items.py
+
+# View summary only
+python3 view_biome_three_star_items.py summary
+
+# View detailed information for each biome
+python3 view_biome_three_star_items.py detailed
+
+# Export all biome data to JSON file
+python3 view_biome_three_star_items.py export
+
+# View all information (summary + detailed + export)
+python3 view_biome_three_star_items.py all
+```
+
+### Command Line Options
+
+- `summary`: Show summary statistics and overview of all biomes
+- `detailed`: Show detailed information for each biome including item data
+- `export`: Export all biome data to JSON file
+- `all`: Run all commands (summary + detailed + export)
+
+### Output Format
+
+#### Summary View
+- **Total biomes**: Count of all biomes in the database
+- **Biomes with 3-star rooms**: Count of biomes that have preallocated 3-star rooms
+- **Biomes with 3-star items**: Count of biomes that actually have 3-star items generated
+- **Coverage percentage**: Percentage of biomes with 3-star rooms
+
+For each biome:
+- **Name and description**: Biome identification
+- **Color**: Hex color code for the biome
+- **3-star room**: Room ID where the 3-star item should be
+- **Coordinates**: World coordinates (x, y) of the 3-star room
+- **3-star item**: Actual item details if generated
+
+#### Detailed View
+- Complete information for each biome including:
+  - Full item details (ID, name, description, capabilities)
+  - Room and coordinate information
+  - Status indicators for room and item existence
+
+#### Export Format
+- JSON file containing all biome data with timestamps
+- Useful for data analysis and backup purposes
+
+### 3-Star Item System
+
+This tool helps monitor the new preallocation system where:
+1. **New biomes** automatically get a preallocated 3-star room when created
+2. **3-star rooms** are placed at deterministic coordinates within each biome
+3. **3-star items** are generated when players visit the designated room
+4. **Guaranteed coverage**: Every biome is guaranteed to have exactly one 3-star room
+
+### Example Output
+
+```
+📊 SUMMARY:
+   Total biomes: 12
+   Biomes with 3-star rooms: 12
+   Biomes with 3-star items: 8
+   Coverage: 100.0% have 3-star rooms
+
+🌍 FOREST
+   Description: A dense woodland with towering trees
+   Color: #228B22
+   ✅ 3-star room: room_0_0
+   📍 Coordinates: (0, 0)
+   ⭐ 3-star item: Ancient Forest Staff
+      Description: A gnarled staff carved from ancient oak
+      Capabilities: cast nature spells, commune with animals, heal wounds
+```
+
 ## Debug Tools
 
 ### Redis Debug (`debug_redis.py`)

@@ -51,14 +51,6 @@ class MockDatabase:
             "world_seed": "test_world_123",
             "main_quest_summary": "A magical adventure in a fantasy realm"
         }
-        self.item_types = [
-            {"name": "Sword", "capabilities": ["slash", "stab", "cut", "defend"]},
-            {"name": "Shield", "capabilities": ["block", "deflect", "protect", "defend"]},
-            {"name": "Bow", "capabilities": ["shoot", "aim", "hunt", "defend"]},
-            {"name": "Staff", "capabilities": ["cast", "channel", "focus", "enhance"]},
-            {"name": "Potion", "capabilities": ["heal", "restore", "boost"]},
-            {"name": "Amulet", "capabilities": ["protect", "ward", "bless", "shield"]}
-        ]
     
     async def get_item(self, item_id: str):
         """Get mock item data"""
@@ -67,7 +59,6 @@ class MockDatabase:
                 "id": "sword1",
                 "name": "Steel Sword",
                 "item_type": "Sword",
-                "type_capabilities": ["slash", "stab", "cut", "defend"],
                 "special_effects": "No special effects",
                 "rarity": 2
             },
@@ -75,7 +66,6 @@ class MockDatabase:
                 "id": "shield1", 
                 "name": "Wooden Shield",
                 "item_type": "Shield",
-                "type_capabilities": ["block", "deflect", "protect", "defend"],
                 "special_effects": "No special effects",
                 "rarity": 1
             },
@@ -83,7 +73,6 @@ class MockDatabase:
                 "id": "potion1",
                 "name": "Healing Potion",
                 "item_type": "Potion", 
-                "type_capabilities": ["heal", "restore", "boost"],
                 "special_effects": "Restores 20 health points",
                 "rarity": 3
             },
@@ -91,7 +80,6 @@ class MockDatabase:
                 "id": "bow1",
                 "name": "Longbow",
                 "item_type": "Bow",
-                "type_capabilities": ["shoot", "aim", "hunt", "defend"],
                 "special_effects": "No special effects", 
                 "rarity": 2
             },
@@ -99,7 +87,6 @@ class MockDatabase:
                 "id": "armor1",
                 "name": "Leather Armor",
                 "item_type": "Armor",
-                "type_capabilities": ["protect", "defend", "guard"],
                 "special_effects": "No special effects",
                 "rarity": 1
             }
@@ -140,9 +127,6 @@ class MockDatabase:
         self.validation_rules[world_seed] = rules_data
         return True
     
-    async def get_item_types(self):
-        """Get mock item types"""
-        return self.item_types
 
 class MockAIHandler:
     """Mock AI handler for testing"""
@@ -253,7 +237,6 @@ async def test_world_context_generation():
     assert 'world_seed' in world_context, "World context should have world_seed"
     assert 'world_rules' in world_context, "World context should have world_rules"
     assert 'world_theme' in world_context, "World context should have world_theme"
-    assert 'available_item_types' in world_context, "World context should have available_item_types"
     
     # Verify fantasy theme inference
     assert world_context['world_theme'] == 'fantasy', "Should infer fantasy theme from quest"

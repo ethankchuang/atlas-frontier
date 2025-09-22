@@ -182,6 +182,7 @@ const ChatInput: React.FC = () => {
                                 const updatedPlayer = { ...store.player, ...(response.updates.player as Partial<Player>) };
                                 store.setPlayer(updatedPlayer);
                                 console.log('[ChatInput] Updated player state, new current_room:', updatedPlayer.current_room);
+                                console.log('[ChatInput] Updated player inventory:', updatedPlayer.inventory);
                             }
                         }
 

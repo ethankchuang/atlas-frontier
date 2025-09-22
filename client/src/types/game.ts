@@ -4,8 +4,10 @@ export interface Item {
     id: string;
     name: string;
     description: string;
-    is_takeable: boolean;
+    is_takeable?: boolean;
     properties: Record<string, string>;
+    rarity?: number;
+    capabilities?: string[];
 }
 
 export interface NPC {
