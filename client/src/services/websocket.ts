@@ -327,8 +327,9 @@ class WebSocketService {
         }
     }
 
-    private handleItemObtained(data: { player_id: string; item_name: string; item_rarity: number; rarity_stars: string; message: string; timestamp: string }) {
+    private handleItemObtained(data: { player_id: string; item_name: string; item_rarity: number; rarity_stars: string; message: string; timestamp: string; item_id?: string }) {
         console.log('[WebSocket] Handling item obtained update:', data);
+        console.log('[WebSocket] Current player ID:', this.playerId);
         
         // Only show item obtained messages for the current player
         if (data.player_id === this.playerId) {
@@ -336,7 +337,7 @@ class WebSocketService {
                 player_id: 'system',
                 room_id: this.roomId!,
                 message: data.message,
-                message_type: 'system',
+                message_type: 'item_obtained',
                 timestamp: data.timestamp,
                 item_name: data.item_name,
                 item_rarity: data.item_rarity,
@@ -345,6 +346,8 @@ class WebSocketService {
             const store = useGameStore.getState();
             store.addMessage(itemMessage);
             console.log('[WebSocket] Added item obtained message to chat:', data.message);
+        } else {
+            console.log('[WebSocket] Item obtained message not for current player, ignoring');
         }
     }
 

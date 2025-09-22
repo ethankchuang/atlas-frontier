@@ -215,37 +215,6 @@ class SupabaseDatabase:
             logger.error(f"Error setting monster {monster_id}: {str(e)}")
             raise
 
-    @staticmethod
-    async def get_item_types() -> Optional[List[Dict[str, Any]]]:
-        """Get item types from Supabase"""
-        try:
-            client = get_supabase_client()
-            result = client.table('global_data').select('data').eq('key', 'item_types').execute()
-            
-            if result.data and len(result.data) > 0:
-                return result.data[0]['data']
-            return None
-        except Exception as e:
-            logger.error(f"Error getting item types: {str(e)}")
-            raise
-
-    @staticmethod
-    async def set_item_types(item_types_data: List[Dict[str, Any]]) -> bool:
-        """Save item types to Supabase"""
-        try:
-            logger.debug(f"Setting item types with data: {item_types_data}")
-            client = get_supabase_client()
-            serializable_data = [SupabaseDatabase._serialize_data(item) for item in item_types_data]
-            
-            result = client.table('global_data').upsert({
-                'key': 'item_types',
-                'data': serializable_data
-            }).execute()
-            
-            return len(result.data) > 0
-        except Exception as e:
-            logger.error(f"Error setting item types: {str(e)}")
-            raise
 
     @staticmethod
     async def get_monster_types() -> Optional[List[Dict[str, Any]]]:
@@ -537,6 +506,37 @@ class SupabaseDatabase:
             return len(result.data) > 0
         except Exception as e:
             logger.error(f"Error saving biome {biome_data}: {str(e)}")
+            return False
+
+    @staticmethod
+    async def get_biome_three_star_room(biome: str) -> Optional[str]:
+        """Get the room ID that has the 3-star item for a biome"""
+        try:
+            client = get_supabase_client()
+            result = client.table('global_data').select('data').eq('key', f'biome_three_star_{biome}').execute()
+            
+            if result.data and len(result.data) > 0:
+                return result.data[0]['data'].get('room_id')
+            return None
+        except Exception as e:
+            logger.error(f"Error getting biome 3-star room for {biome}: {str(e)}")
+            return None
+
+    @staticmethod
+    async def set_biome_three_star_room(biome: str, room_id: str) -> bool:
+        """Set the room ID that has the 3-star item for a biome"""
+        try:
+            client = get_supabase_client()
+            serializable_data = SupabaseDatabase._serialize_data({'room_id': room_id})
+            
+            result = client.table('global_data').upsert({
+                'key': f'biome_three_star_{biome}',
+                'data': serializable_data
+            }).execute()
+            
+            return len(result.data) > 0
+        except Exception as e:
+            logger.error(f"Error setting biome 3-star room for {biome}: {str(e)}")
             return False
 
     @staticmethod

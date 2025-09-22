@@ -55,7 +55,7 @@ CREATE TABLE monsters (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Global game data (item_types, monster_types, game_state)
+-- Global game data (monster_types, game_state)
 CREATE TABLE global_data (
     key TEXT PRIMARY KEY,
     data JSONB NOT NULL,

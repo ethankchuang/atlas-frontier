@@ -76,7 +76,6 @@ class DynamicMoveValidator:
                 'main_quest': game_state.get('main_quest_summary', ''),
                 'world_rules': world_rules,
                 'world_theme': await self._infer_world_theme(world_seed, game_state),
-                'available_item_types': await self._get_available_item_types(),
                 'validation_mode': world_rules.get('validation_mode', 'adaptive')
             }
             
@@ -202,32 +201,9 @@ Make the rules appropriate for the world theme and context.
             logger.error(f"[DynamicMoveValidator] Error inferring world theme: {str(e)}")
             return 'generic'
     
-    async def _get_available_item_types(self) -> List[Dict[str, Any]]:
-        """Get all available item types for the current world."""
-        try:
-            item_types_data = await self.game_manager.db.get_item_types()
-            if item_types_data:
-                return item_types_data
-            else:
-                # Fallback to default item types
-                return await self._get_default_item_types()
-        except Exception as e:
-            logger.error(f"[DynamicMoveValidator] Error getting item types: {str(e)}")
-            return await self._get_default_item_types()
-    
-    async def _get_default_item_types(self) -> List[Dict[str, Any]]:
-        """Get default item types for fallback."""
-        return [
-            {"name": "Sword", "capabilities": ["slash", "stab", "cut", "defend"]},
-            {"name": "Shield", "capabilities": ["block", "deflect", "protect", "defend"]},
-            {"name": "Bow", "capabilities": ["shoot", "aim", "hunt", "defend"]},
-            {"name": "Staff", "capabilities": ["cast", "channel", "focus", "enhance"]},
-            {"name": "Potion", "capabilities": ["heal", "restore", "boost"]},
-            {"name": "Amulet", "capabilities": ["protect", "ward", "bless", "shield"]}
-        ]
     
     async def _get_player_inventory_with_types(self, player) -> List[Dict[str, Any]]:
-        """Get player's inventory items with their types and capabilities."""
+        """Get player's inventory items with their capabilities."""
         inventory_items = []
         
         for item_id in player.inventory:
@@ -238,23 +214,21 @@ Make the rules appropriate for the world theme and context.
                     logger.warning(f"[DynamicMoveValidator] Item {item_id} not found in database")
                     continue
                 
-                # Get item type capabilities
-                item_type_name = item_data.get('item_type', 'Unknown')
-                item_type_capabilities = item_data.get('type_capabilities', [])
-                
-                # Get special effects if any
-                special_effects = item_data.get('special_effects', '')
+                # Extract item information from new AI-generated structure
+                name = item_data.get('name', 'Unknown Item')
+                description = item_data.get('description', 'No description')
+                capabilities = item_data.get('capabilities', [])
+                rarity = item_data.get('rarity', 1)
                 
                 inventory_items.append({
                     'id': item_id,
-                    'name': item_data.get('name', 'Unknown Item'),
-                    'item_type': item_type_name,
-                    'capabilities': item_type_capabilities,
-                    'special_effects': special_effects,
-                    'rarity': item_data.get('rarity', 1)
+                    'name': name,
+                    'description': description,
+                    'capabilities': capabilities,
+                    'rarity': rarity
                 })
                 
-                logger.debug(f"[DynamicMoveValidator] Added inventory item: {item_data.get('name')} ({item_type_name}) with capabilities: {item_type_capabilities}")
+                logger.debug(f"[DynamicMoveValidator] Added inventory item: {name} with capabilities: {capabilities}")
                 
             except Exception as e:
                 logger.error(f"[DynamicMoveValidator] Error getting item {item_id}: {str(e)}")
@@ -293,12 +267,7 @@ Make the rules appropriate for the world theme and context.
             if action in move_lower:
                 return True
         
-        # Check for specific item mentions (dynamic based on available item types)
-        available_item_types = world_context.get('available_item_types', [])
-        for item_type in available_item_types:
-            item_name = item_type.get('name', '').lower()
-            if item_name in move_lower:
-                return True
+        # Check for specific item mentions
         
         # Check for common item keywords
         common_items = ['sword', 'knife', 'dagger', 'blade', 'axe', 'hammer', 'mace', 'bow', 'arrow', 'gun', 'pistol', 'rifle', 'staff', 'wand', 'shield', 'armor', 'helmet', 'gauntlets', 'boots', 'ring', 'amulet', 'potion', 'scroll', 'book', 'key', 'lockpick', 'tool', 'gear', 'device', 'machine', 'computer', 'hologram', 'implant', 'cyberdeck', 'drone', 'grenade', 'explosive']
@@ -318,14 +287,13 @@ Make the rules appropriate for the world theme and context.
         # Check each inventory item's capabilities
         for item in inventory_items:
             item_name = item['name'].lower()
-            item_type = item['item_type'].lower()
+            description = item['description'].lower()
             capabilities = [cap.lower() for cap in item['capabilities']]
-            special_effects = item['special_effects'].lower()
             
             # Check if the move mentions this specific item
-            if item_name in move_lower or item_type in move_lower:
+            if item_name in move_lower:
                 # Check if the item's capabilities support the action
-                if await self._capabilities_support_action_dynamic(move_lower, capabilities, special_effects, action_mappings):
+                if await self._capabilities_support_action_dynamic(move_lower, capabilities, description, action_mappings):
                     return True, f"Valid action using {item['name']}", None
                 else:
                     return False, f"Item {item['name']} doesn't support this action", f"Try using {item['name']} for: {', '.join(capabilities)}"
@@ -335,10 +303,10 @@ Make the rules appropriate for the world theme and context.
                 if capability in move_lower:
                     return True, f"Valid action using {item['name']} ({capability})", None
         
-        # Check for special effects that might support the action
+        # Check for high-rarity items with special capabilities
         for item in inventory_items:
-            if item['special_effects'] and await self._special_effects_support_action_dynamic(move_lower, item['special_effects'], world_context):
-                return True, f"Valid action using {item['name']} special effects", None
+            if item['rarity'] >= 3 and await self._item_description_supports_action_dynamic(move_lower, item['description'], world_context):
+                return True, f"Valid action using {item['name']} special abilities", None
         
         # If we get here, the player doesn't have the required equipment
         missing_equipment = await self._identify_missing_equipment_dynamic(move_lower, world_context)
@@ -392,13 +360,6 @@ Make the rules appropriate for the world theme and context.
     async def _identify_missing_equipment_dynamic(self, move: str, world_context: Dict[str, Any]) -> str:
         """Identify what equipment is missing based on world context."""
         move_lower = move.lower()
-        available_item_types = world_context.get('available_item_types', [])
-        
-        # Check against available item types first
-        for item_type in available_item_types:
-            item_name = item_type.get('name', '').lower()
-            if item_name in move_lower:
-                return f"{item_name} or similar {item_name} type"
         
         # Fallback to common equipment keywords
         equipment_keywords = {
@@ -446,7 +407,7 @@ Make the rules appropriate for the world theme and context.
             # Create context for AI
             inventory_summary = []
             for item in inventory_items:
-                inventory_summary.append(f"{item['name']} ({item['item_type']}): {', '.join(item['capabilities'])}")
+                inventory_summary.append(f"{item['name']} (rarity {item['rarity']}): {item['description']} - capabilities: {', '.join(item['capabilities'])}")
             
             world_theme = world_context.get('world_theme', 'generic')
             validation_mode = world_context.get('world_rules', {}).get('validation_mode', 'adaptive')
@@ -494,6 +455,39 @@ Return JSON:
         except Exception as e:
             logger.error(f"[DynamicMoveValidator] Error in AI validation: {str(e)}")
             return True, "AI validation error - allowing move", None
+    
+    async def _item_description_supports_action_dynamic(self, move: str, description: str, world_context: Dict[str, Any]) -> bool:
+        """Check if item description suggests it can support the action using AI."""
+        try:
+            # Use AI to determine if the item description suggests it can perform the action
+            prompt = f"""
+            Can this item perform the requested action based on its description?
+            
+            Item description: "{description}"
+            Player wants to: "{move}"
+            
+            Consider:
+            - What the item is and what it's designed for
+            - Whether the action matches the item's capabilities
+            - If the item's description suggests it could enable this action
+            
+            Return JSON: {{"can_perform": true/false, "reason": "brief explanation"}}
+            """
+            
+            response = await self.game_manager.ai_handler.generate_text(prompt)
+            
+            try:
+                result = json.loads(response)
+                can_perform = result.get('can_perform', False)
+                logger.debug(f"[DynamicMoveValidator] AI item description check: {can_perform} - {result.get('reason', 'No reason')}")
+                return can_perform
+            except json.JSONDecodeError:
+                logger.warning(f"[DynamicMoveValidator] Failed to parse AI item description response")
+                return False
+                
+        except Exception as e:
+            logger.error(f"[DynamicMoveValidator] Error in AI item description validation: {str(e)}")
+            return False
 
 # Backward compatibility - keep the old class name
 class MoveValidator(DynamicMoveValidator):

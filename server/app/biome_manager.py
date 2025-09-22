@@ -40,6 +40,10 @@ class BiomeManager:
             new_biome = await self._generate_new_biome(adjacent_biomes)
             await self.db.save_biome(new_biome)
             await self.db.set_chunk_biome(chunk_id, new_biome)
+            
+            # Preallocate 3-star room for new biome
+            await self._preallocate_three_star_room(new_biome["name"], chunk_id)
+            
             logger.info(f"[BiomeManager] Created new biome '{new_biome['name']}' for chunk {chunk_id}")
             return new_biome
         else:
@@ -94,6 +98,30 @@ class BiomeManager:
     async def _generate_new_biome(self, adjacent_biomes: Set[str]) -> Dict[str, str]:
         """Generate a new biome that's distinct from adjacent ones"""
         return await self.ai_handler.generate_biome_chunk("new_chunk", adjacent_biomes)
+    
+    async def _preallocate_three_star_room(self, biome_name: str, chunk_id: str) -> None:
+        """Preallocate a 3-star room for a new biome"""
+        # Check if this biome already has a 3-star room designated
+        existing_three_star_room = await self.db.get_biome_three_star_room(biome_name)
+        if existing_three_star_room:
+            logger.info(f"[BiomeManager] Biome '{biome_name}' already has 3-star room: {existing_three_star_room}")
+            return
+        
+        # Parse chunk coordinates to determine room coordinates
+        _, chunk_x_str, chunk_y_str = chunk_id.split('_')
+        chunk_x, chunk_y = int(chunk_x_str), int(chunk_y_str)
+        
+        # Calculate the center room of this chunk for the 3-star item
+        # Each chunk covers about 3x3 rooms, so we'll pick the center room
+        center_x = chunk_x * 3  # Approximate center
+        center_y = chunk_y * 3  # Approximate center
+        
+        # Create a deterministic room ID for this biome's 3-star room
+        room_id = f"room_{center_x}_{center_y}"
+        
+        # Store the 3-star room designation
+        await self.db.set_biome_three_star_room(biome_name, room_id)
+        logger.info(f"[BiomeManager] Preallocated 3-star room for biome '{biome_name}': {room_id} at ({center_x}, {center_y})")
     
     async def get_biome_for_coordinates(self, x: int, y: int) -> Optional[Dict[str, str]]:
         """Get biome for specific world coordinates"""

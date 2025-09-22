@@ -30,7 +30,7 @@ async def debug_retreat():
             "name": "DebugPlayer",
             "description": "A player for debugging"
         }
-        async with session.post(f"{base_url}/player", json=player_data) as response:
+        async with session.post(f"{base_url}/players", json=player_data) as response:
             if response.status != 200:
                 print(f"❌ Failed to create player: {response.status}")
                 return

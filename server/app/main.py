@@ -39,7 +39,6 @@ from .config import settings
 from .logger import setup_logging
 from .api_key_auth import api_key_auth
 import os
-from .templates.items import GenericItemTemplate
 from .monster_behavior import monster_behavior_manager
 from . import combat
 import uuid
@@ -133,6 +132,23 @@ class ConnectionManager:
         else:
             logger.warning(f"[WebSocket] Player {player_id} not found in room {room_id}")
 
+    async def send_personal_message(self, message: dict, player_id: str):
+        """Send a personal message to a specific player (finds their room automatically)"""
+        logger.info(f"[WebSocket] Sending personal message to player {player_id} - message type: {message.get('type')}")
+        
+        # Find which room the player is in
+        for room_id, connections in self.active_connections.items():
+            if player_id in connections:
+                try:
+                    await connections[player_id].send_json(message)
+                    logger.debug(f"[WebSocket] Sent personal message to player {player_id} in room {room_id}")
+                    return
+                except Exception as e:
+                    logger.error(f"[WebSocket] Failed to send personal message to player {player_id}: {str(e)}")
+                    return
+        
+        logger.warning(f"[WebSocket] Player {player_id} not found in any active room")
+
 def rarity_to_stars(rarity: int) -> str:
     """Convert rarity number to star representation"""
     return "★" * rarity + "☆" * (4 - rarity)
@@ -142,18 +158,14 @@ manager = ConnectionManager()
 game_manager = GameManager()
 game_manager.set_connection_manager(manager)
 
-# Item types will be loaded when game manager is first accessed
 @app.on_event("startup")
 async def startup_event():
-    """Load item types for existing worlds on startup"""
+    """Server startup initialization"""
     try:
-        # Load item types from database for existing worlds
-        await game_manager.load_item_types()
-        
-        logger.info("Server startup completed - types loaded successfully")
+        logger.info("Server startup completed successfully")
     except Exception as e:
         logger.error(f"Error during startup: {str(e)}")
-        # Continue starting up even if type loading fails
+        # Continue starting up even if initialization fails
 
 def get_game_manager():
     return game_manager
@@ -823,21 +835,7 @@ async def process_action_stream(
             # All actions go through AI processing for rich narrative responses
             logger.info(f"[Stream] Processing action with AI: {action_request.action}")
             
-            # Let the AI determine item discovery and rewards based on context
-            # No hardcoded keywords - trust the AI's judgment
-            pending_item_type = None
-            if hasattr(player, 'pending_item_type') and player.pending_item_type:
-                # Reconstruct ItemType object from stored data
-                from .templates.item_types import ItemType
-                pending_item_type = ItemType(
-                    name=player.pending_item_type['name'],
-                    description=player.pending_item_type['description'],
-                    capabilities=player.pending_item_type['capabilities']
-                )
-                logger.info(f"[Item Discovery] Using pending item type: {pending_item_type.name}")
-            
-            # Use the pending type if available
-            item_type_for_ai = pending_item_type
+            # AI will determine item discovery and rewards based on context using the unified system
             
             # Use AI processing for all actions (including movement)
             logger.info(f"[Stream] AI context includes {len(monsters)} monsters: {[m.get('name', 'Unknown') for m in monsters]}")
@@ -848,10 +846,14 @@ async def process_action_stream(
                 game_state=game_state,
                 npcs=npcs,
                 monsters=monsters,
-                potential_item_type=item_type_for_ai,
                 chat_history=recent_chat
             ):
                 if isinstance(chunk, dict):
+                    # Ensure chunk has the expected structure
+                    if "updates" not in chunk:
+                        logger.warning(f"[Stream] Chunk missing 'updates' field: {chunk}")
+                        chunk["updates"] = {}
+                    
                     # Apply updates BEFORE yielding the final response
                     if "player" in chunk["updates"]:
                         player_updates = chunk["updates"]["player"]
@@ -875,13 +877,25 @@ async def process_action_stream(
                             last_room = monster_behavior_manager.player_last_room.get(action_request.player_id)
                             target_room = connections.get(direction.lower())
                             is_retreat = (last_room is not None and target_room == last_room)
+                            
+                            print(f"\n🚨 [Movement] Retreat check:")
+                            print(f"   player: {action_request.player_id}")
+                            print(f"   last_room: {last_room}")
+                            print(f"   target_room: {target_room}")
+                            print(f"   is_retreat: {is_retreat}")
+                            print(f"   All player_last_room entries: {monster_behavior_manager.player_last_room}")
+                            logger.info(f"[Movement] Retreat check: player={action_request.player_id}, last_room={last_room}, target_room={target_room}, is_retreat={is_retreat}")
+                            logger.info(f"[Movement] All player_last_room entries: {monster_behavior_manager.player_last_room}")
 
                             # Aggressive blocking (allows retreat internally)
                             aggressive_block = None
                             if not is_retreat:
+                                logger.info(f"[Movement] Not a retreat - checking aggressive monster blocking")
                                 aggressive_block = await monster_behavior_manager.check_aggressive_monster_blocking(
                                     action_request.player_id, player.current_room, direction, game_manager
                                 )
+                            else:
+                                logger.info(f"[Movement] Retreat detected - skipping aggressive monster blocking")
                             if aggressive_block:
                                 monster_id, _ = aggressive_block
                                 combat_message = await monster_behavior_manager.handle_aggressive_combat_initiation(
@@ -914,11 +928,14 @@ async def process_action_stream(
                                 return
 
                             # Territorial blocking (skip on retreat)
+                            territorial_block = None
                             if not is_retreat:
                                 territorial_block = await monster_behavior_manager.check_territorial_blocking(
                                     action_request.player_id, player.current_room, direction, game_manager
                                 )
-                                if territorial_block:
+                            else:
+                                logger.info(f"[Movement] Retreat detected - skipping territorial monster blocking")
+                            if territorial_block:
                                     monster_id, _ = territorial_block
                                     combat_message = await monster_behavior_manager.handle_territorial_combat_initiation(
                                         action_request.player_id, monster_id, player.current_room, direction, game_manager
@@ -993,10 +1010,13 @@ async def process_action_stream(
                                     entry_direction = opposite_directions.get(direction.lower(), direction)
                                     
                                     logger.info(f"[MonsterBehavior] Player moved {direction}, entered from {entry_direction}")
+                                    logger.info(f"[MonsterBehavior] Calling handle_player_room_entry: player={action_request.player_id}, new_room={new_room_id}, old_room={old_room_id}")
                                     
                                     behavior_messages = await monster_behavior_manager.handle_player_room_entry(
                                         action_request.player_id, new_room_id, old_room_id, entry_direction, new_room_data, game_manager
                                     )
+                                    
+                                    logger.info(f"[MonsterBehavior] handle_player_room_entry completed, player_last_room now: {monster_behavior_manager.player_last_room}")
                                     
                                     # Send behavior messages to player if any
                                     for behavior_message in behavior_messages:
@@ -1038,8 +1058,138 @@ async def process_action_stream(
                         # Non-movement actions: aggressive monsters attack on any action (retreat handled in movement logic)
                         is_movement = ("player" in chunk.get("updates", {}) and "direction" in chunk["updates"].get("player", {}))
                         additional_content = ""
+                        
+                        # Also check if this was a movement action by looking at the original action
+                        is_movement_action = action_request.action.lower().startswith(("move ", "go ", "walk ", "run ", "head "))
+                        
+                        logger.info(f"[Stream] Action analysis: is_movement={is_movement}, is_movement_action={is_movement_action}, action='{action_request.action}'")
 
-                        if not is_movement:
+                        if not is_movement and not is_movement_action:
+                            logger.info(f"[Stream] Non-movement action detected - checking aggressive monster blocking")
+                            
+                            # Handle item awarding from AI (unified system) - MOVED HERE FOR NON-MOVEMENT ACTIONS
+                            try:
+                                # Check for unified item_award system
+                                item_award_info = chunk.get("updates", {}).get("item_award")
+                                if item_award_info is not None:
+                                    award_type = item_award_info.get("type")
+                                    awarded_item_name = item_award_info.get("item_name")
+                                    rarity = item_award_info.get("rarity", 1)
+
+                                    # Ensure updates scaffolding exists
+                                    if "updates" not in chunk or not isinstance(chunk["updates"], dict):
+                                        chunk["updates"] = {}
+                                    if "player" not in chunk["updates"] or not isinstance(chunk["updates"].get("player"), dict):
+                                        chunk["updates"]["player"] = {}
+
+                                    logger.info(f"[Item System] Processing item award: type={award_type}, name={awarded_item_name}, rarity={rarity}")
+
+                                    # Process unified item award system
+                                    item_id = None
+                                    item_data = None
+                                    
+                                    if award_type == "room_item" and awarded_item_name:
+                                        # Award specific room item
+                                        logger.info(f"[Item System] AI awarded room item: {awarded_item_name}")
+                                        
+                                        if room.items:
+                                            # Find the matching room item
+                                            item_found = False
+                                            for room_item_id in room.items[:]:
+                                                if item_found:
+                                                    break
+                                                try:
+                                                    room_item_data = await game_manager.db.get_item(room_item_id)
+                                                    if room_item_data and room_item_data['name'] == awarded_item_name:
+                                                        # Award this specific room item
+                                                        item_id = room_item_id
+                                                        item_data = room_item_data
+                                                        
+                                                        # Remove from room
+                                                        room.items.remove(room_item_id)
+                                                        await game_manager.db.set_room(room.id, room.dict())
+                                                        
+                                                        # Add to player inventory
+                                                        player.inventory.append(item_id)
+                                                        await game_manager.db.set_player(action_request.player_id, player.dict())
+                                                        
+                                                        logger.info(f"[Item System] AI awarded room item '{item_data['name']}' to player {action_request.player_id}")
+                                                        item_found = True
+                                                        break
+                                                except Exception as e:
+                                                    logger.warning(f"[Item System] Failed to check room item {room_item_id}: {str(e)}")
+                                    
+                                    elif award_type == "generate_item":
+                                        # Generate new item
+                                        logger.info(f"[Item System] AI requested generated item with rarity: {rarity}")
+                                        
+                                        try:
+                                            from .templates.items import AIItemGenerator
+                                            item_generator = AIItemGenerator()
+                                            
+                                            item_context = {
+                                                'world_seed': game_state.world_seed,
+                                                'world_theme': 'fantasy',
+                                                'main_quest': game_state.main_quest_summary,
+                                                'room_description': room.description,
+                                                'room_biome': room.biome or 'unknown',
+                                                'player_action': action_request.action,
+                                                'situation_context': 'basic_environmental_item',
+                                                'desired_rarity': rarity
+                                            }
+                                            
+                                            # Generate item
+                                            item_data = await item_generator.generate_item(game_manager.ai_handler, item_context)
+                                            
+                                            # Create unique item ID and store in database
+                                            import uuid
+                                            item_id = f"item_{str(uuid.uuid4())}"
+                                            item_data['id'] = item_id
+                                            await game_manager.db.set_item(item_id, item_data)
+                                            
+                                            # Add to player inventory
+                                            player.inventory.append(item_id)
+                                            await game_manager.db.set_player(action_request.player_id, player.dict())
+                                            
+                                            logger.info(f"[Item System] Generated item '{item_data['name']}' (rarity {rarity}) for player {action_request.player_id}")
+                                            
+                                        except Exception as e:
+                                            logger.error(f"[Item System] Failed to generate item: {str(e)}")
+                                    
+                                    # Send item notifications if an item was awarded
+                                    if item_id and item_data:
+                                        # Update response to include item information
+                                        chunk["updates"]["player"]["inventory"] = player.inventory
+                                        chunk["updates"]["new_item"] = {
+                                            "id": item_id,
+                                            "name": item_data['name'],
+                                            "description": item_data['description'],
+                                            "rarity": item_data['rarity'],
+                                            "capabilities": item_data['capabilities'],
+                                            "properties": {}
+                                        }
+                                        
+                                        # Create rarity stars for display
+                                        rarity_stars = "★" * item_data['rarity'] + "☆" * (4 - item_data['rarity'])
+                                        
+                                        # Send WebSocket notification to the player
+                                        from datetime import datetime
+                                        item_message = {
+                                            "type": "item_obtained",
+                                            "player_id": action_request.player_id,
+                                            "item_id": item_id,
+                                            "item_name": item_data['name'],
+                                            "item_rarity": item_data['rarity'],
+                                            "rarity_stars": rarity_stars,
+                                            "message": f"📦 You obtained: {rarity_stars} {item_data['name']}",
+                                            "timestamp": datetime.utcnow().isoformat()
+                                        }
+                                        
+                                        await manager.send_personal_message(item_message, action_request.player_id)
+
+                            except Exception as e:
+                                logger.error(f"[Item Handling] Unexpected error: {str(e)}")
+
                             # Handle explicit combat intent signaled by AI
                             combat_intent = chunk.get("updates", {}).get("combat")
                             if combat_intent is not None:
@@ -1157,62 +1307,33 @@ async def process_action_stream(
                                     }
                                 })
                                 return
+                        else:
+                            logger.info(f"[Stream] Movement action detected - skipping aggressive monster blocking (retreat logic already handled)")
 
                             # Fallback monster auto-reply disabled: only respond when AI explicitly sets updates.monster_interaction earlier
 
-                            # Handle item hinting/awarding from AI before yielding final response
-                            try:
-                                reward_info = chunk.get("reward_item")
-                                if reward_info is not None:
-                                    deserves_item = reward_info.get("deserves_item")
-                                    item_type_name = reward_info.get("item_type")
-
-                                    # Ensure updates scaffolding exists
-                                    if "updates" not in chunk or not isinstance(chunk["updates"], dict):
-                                        chunk["updates"] = {}
-                                    if "player" not in chunk["updates"] or not isinstance(chunk["updates"].get("player"), dict):
-                                        chunk["updates"]["player"] = {}
-
-                                    # If AI hinted an item type but not awarding yet → remember it for next action
-                                    if not deserves_item and item_type_name:
-                                        try:
-                                            from .templates.item_types import ItemType
-                                            item_type_obj = game_manager.item_type_manager.get_item_type_by_name(item_type_name)
-                                            player.pending_item_type = item_type_obj.to_dict()
-                                            await game_manager.db.set_player(action_request.player_id, player.dict())
-                                            logger.info(f"[Item Discovery] Pending item set for player {action_request.player_id}: {item_type_name}")
-                                        except Exception as e:
-                                            logger.error(f"[Item Discovery] Failed setting pending item type '{item_type_name}': {str(e)}")
-
-                                    # Do not parse action keywords; rely on AI decision, but enforce find-then-grab via pending discovery
-                                    # If AI requests award but no prior discovery exists, convert to pending hint instead
-
-                                    if deserves_item:
-                                        # Block blind grabs: require a pending discovered item
-                                        if not player.pending_item_type:
-                                            logger.info(f"[Item Award] Blocked item award (no prior discovery). has_pending={bool(player.pending_item_type)}")
-                                            # If the AI tried to award with a type but no pending exists, treat it as a hint instead
-                                            if item_type_name:
-                                                try:
-                                                    from .templates.item_types import ItemType
-                                                    item_type_obj = game_manager.item_type_manager.get_item_type_by_name(item_type_name)
-                                                    player.pending_item_type = item_type_obj.to_dict()
-                                                    await game_manager.db.set_player(action_request.player_id, player.dict())
-                                                    logger.info(f"[Item Discovery] Converted award to pending for player {action_request.player_id}: {item_type_name}")
-                                                except Exception as e:
-                                                    logger.error(f"[Item Discovery] Failed converting award to pending for '{item_type_name}': {str(e)}")
-                                            deserves_item = False
-
-                            except Exception as e:
-                                logger.error(f"[Item Handling] Unexpected error: {str(e)}")
-
                         # NOW yield the final response with updated player data (default path)
-                        final_content = chunk["response"] + (f"\n\n{additional_content}" if additional_content else "")
-                        yield json.dumps({
-                            "type": "final",
-                            "content": final_content,
-                            "updates": chunk["updates"]
-                        })
+                        try:
+                            # Extract only the narrative response, not the full JSON structure
+                            narrative_response = chunk.get("response", "")
+                            if not narrative_response:
+                                logger.warning(f"[Stream] No narrative response found in chunk: {chunk}")
+                                narrative_response = "You perform the action."
+                            
+                            final_content = narrative_response + (f"\n\n{additional_content}" if additional_content else "")
+                            yield json.dumps({
+                                "type": "final",
+                                "content": final_content,
+                                "updates": chunk.get("updates", {})
+                            })
+                        except Exception as e:
+                            logger.error(f"[Stream] Error generating final response: {str(e)}")
+                            # Fallback response to prevent freezing
+                            yield json.dumps({
+                                "type": "final",
+                                "content": "You perform the action.",
+                                "updates": {}
+                            })
                 else:
                     # This is a text chunk
                     yield json.dumps({
@@ -1221,7 +1342,14 @@ async def process_action_stream(
                     })
 
         except Exception as e:
-            yield json.dumps({"error": str(e)})
+            logger.error(f"[Stream] Critical error in event generator: {str(e)}")
+            import traceback
+            logger.error(f"[Stream] Traceback: {traceback.format_exc()}")
+            yield json.dumps({
+                "type": "error",
+                "content": "An error occurred while processing your action. Please try again.",
+                "updates": {}
+            })
 
     return EventSourceResponse(event_generator())
 

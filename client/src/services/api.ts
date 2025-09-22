@@ -254,8 +254,10 @@ class APIService {
 
                             // Upsert any newly created item from updates to populate inventory UI
                             if (data.updates?.new_item) {
+                                console.log('[API] Processing new_item update:', data.updates.new_item);
                                 const store = useGameStore.getState();
                                 store.upsertItems([data.updates.new_item]);
+                                console.log('[API] Item added to store, current itemsById:', Object.keys(store.itemsById));
                             }
 
                             // Handle room change

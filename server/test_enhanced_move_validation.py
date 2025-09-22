@@ -51,7 +51,6 @@ class MockDatabase:
                 "id": "sword1",
                 "name": "Steel Sword",
                 "item_type": "Sword",
-                "type_capabilities": ["slash", "stab", "cut", "defend"],
                 "special_effects": "No special effects",
                 "rarity": 2
             },
@@ -59,7 +58,6 @@ class MockDatabase:
                 "id": "shield1", 
                 "name": "Wooden Shield",
                 "item_type": "Shield",
-                "type_capabilities": ["block", "deflect", "protect", "defend"],
                 "special_effects": "No special effects",
                 "rarity": 1
             },
@@ -67,7 +65,6 @@ class MockDatabase:
                 "id": "potion1",
                 "name": "Healing Potion",
                 "item_type": "Potion", 
-                "type_capabilities": ["heal", "restore", "boost"],
                 "special_effects": "Restores 20 health points",
                 "rarity": 3
             },
@@ -75,7 +72,6 @@ class MockDatabase:
                 "id": "bow1",
                 "name": "Longbow",
                 "item_type": "Bow",
-                "type_capabilities": ["shoot", "aim", "hunt", "defend"],
                 "special_effects": "No special effects", 
                 "rarity": 2
             },
@@ -83,7 +79,6 @@ class MockDatabase:
                 "id": "armor1",
                 "name": "Leather Armor",
                 "item_type": "Armor",
-                "type_capabilities": ["protect", "defend", "guard"],
                 "special_effects": "No special effects",
                 "rarity": 1
             }
