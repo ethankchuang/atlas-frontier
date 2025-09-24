@@ -81,7 +81,7 @@ const ChatDisplay: React.FC = () => {
                             {message.description}
                         </div>
                         {message.atmospheric_presence && (
-                            <div className="text-orange-400 text-base mb-3 italic">
+                            <div className="text-yellow-400 text-base mb-3 font-bold">
                                 {message.atmospheric_presence}
                             </div>
                         )}

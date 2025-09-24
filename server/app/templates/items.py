@@ -32,6 +32,7 @@ Generate a unique item that fits perfectly with the world and situation provided
 CRITICAL REQUIREMENTS:
 1. NAME: Creative, thematic name (1-4 words) that clearly indicates what the item is
     Vary the type of the item, favor items that are tools / able to actively be used
+    For example sword, axe, bow, magic wand, etc. 
 2. RARITY: Choose 1-4 based on situation importance and world context
 3. DESCRIPTION: Brief, focused description of what it is and looks like  
 4. CAPABILITIES: List of things the player can do with this item (be creative but logical)
@@ -44,6 +45,7 @@ RARITY GUIDELINES:
 - Rarity 1: Random junk items with no restrictions - give these out whenever you feel like it (rocks, sticks, fish, basic mundane objects)
     - Examples: "Smooth Rock", "Broken Stick", "Dead Fish", "Rusty Coin", "Pebble"
     - These are common items players can find anywhere by grabbing random objects
+    - These items should NOT have any magical properties or abilities
 - Rarity 2: Normal items with moderate utility - distributed based on room data (0-4 items per room)
     - Examples: crafted tools, useful materials, basic magical items, quality equipment
     - These require some effort or exploration to find and are tied to specific room locations
@@ -64,7 +66,7 @@ The item should:
 - Be reasonable to find in the given situation
 - Have capabilities that make sense for what it is
 - Be appropriately powerful for its rarity
-- Can be mundane or magical based on your creative judgment
+- Be a tool that the player has to actively use
 
 Respond in JSON format with exactly these fields: "name", "rarity", "description", "capabilities"
 
@@ -92,7 +94,49 @@ Mundane item:
         }
         return guidance_map.get(style, guidance_map["descriptive"])
 
-    def generate_prompt(self, context: Dict[str, Any]) -> str:
+    async def _get_recent_items_context(self, context: Dict[str, Any]) -> str:
+        """Get context about recently generated 2/3 star items to help AI vary item generation"""
+        try:
+            # Get database instance from context or create new one
+            db = context.get('database')
+            if not db:
+                from ..hybrid_database import HybridDatabase
+                db = HybridDatabase()
+            
+            # Get recent 2/3 star items
+            recent_items = await db.get_recent_high_rarity_items(min_rarity=2, limit=15)
+            
+            if not recent_items:
+                return ""
+            
+            # Format the context
+            context_text = "\n**RECENTLY GENERATED ITEMS (for variety reference):**\n"
+            context_text += "Here are some recently generated 2/3 star items to help you create something different:\n\n"
+            
+            for item in recent_items[:10]:  # Show up to 10 recent items
+                name = item.get('name', 'Unknown Item')
+                rarity = item.get('rarity', 1)
+                description = item.get('description', 'No description')
+                capabilities = item.get('capabilities', [])
+                
+                # Truncate long descriptions
+                if len(description) > 100:
+                    description = description[:100] + "..."
+                
+                context_text += f"- **{name}** (Rarity {rarity}): {description}\n"
+                if capabilities:
+                    context_text += f"  Capabilities: {', '.join(capabilities[:3])}\n"  # Show first 3 capabilities
+                context_text += "\n"
+            
+            context_text += "**IMPORTANT:** Use this list to ensure your new item is unique and different from these recent items. Avoid similar names, themes, or capabilities.\n"
+            
+            return context_text
+            
+        except Exception as e:
+            # If there's an error getting recent items, continue without context
+            return ""
+
+    async def generate_prompt(self, context: Dict[str, Any]) -> str:
         """Generate the prompt for the AI with world and situational context"""
         # Extract world context
         world_seed = context.get('world_seed', 'Unknown World')
@@ -165,12 +209,6 @@ ROOM ITEM AVAILABILITY:
 - 2-star normal items available: {available_2star}
 - 1-star basic items: Always available
 
-**RARITY SELECTION GUIDANCE:**
-- If player is grabbing something that sounds like a special/magical/rare item AND room has 3-star available → use rarity 3
-- If player is grabbing something useful/crafted/moderate AND room has 2-star available → use rarity 2  
-- If player is grabbing basic/mundane objects OR room has no higher items → use rarity 1
-- Let the player's specific action and the item's nature guide the rarity choice
-
 **NAMING STYLE FOR 2+ STAR ITEMS:**
 - If you choose rarity 2 or 3, use creative naming with thematic elements
 - Consider the biome and world context for naming inspiration
@@ -183,7 +221,10 @@ ROOM ITEM AVAILABILITY:
                         naming_guidance = self._get_naming_guidance(selected_style, room_biome)
                         world_context_text += f"\n{naming_guidance}\n"
         
-        prompt = f"{self.system_prompt}\n{world_context_text}"
+        # Add recent items context for variety
+        recent_items_context = await self._get_recent_items_context(context)
+        
+        prompt = f"{self.system_prompt}\n{world_context_text}{recent_items_context}"
         return prompt
     
     def parse_response(self, response: str, context: Dict[str, Any] = None) -> Dict[str, Any]:
@@ -289,7 +330,7 @@ ROOM ITEM AVAILABILITY:
         if context is None:
             context = {}
         
-        prompt = self.generate_prompt(context)
+        prompt = await self.generate_prompt(context)
         
         try:
             # Generate item using AI

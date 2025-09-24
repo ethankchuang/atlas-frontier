@@ -315,19 +315,33 @@ class AIHandler:
             "",
         ]
         
-        # Add monster description context if there are monsters in the room
-        if monsters and len(monsters) > 0:
+        # Add monster description context if there are NON-AGGRESSIVE monsters in the room
+        non_aggressive_monsters = [m for m in monsters if m.get('aggressiveness') != 'aggressive'] if monsters else []
+        if non_aggressive_monsters and len(non_aggressive_monsters) > 0:
             prompt_parts.extend([
-                "MONSTER OBSERVATION GUIDELINES:",
-                "- When players examine, observe, or ask about creatures/monsters/enemies:",
-                "- You HAVE DETAILED monster information in the context - use it!",
-                "- Provide DETAILED visual descriptions based on monster attributes",
-                "- Include size, appearance, behavior, and atmospheric details", 
-                "- Mention special effects subtly in their behavior",
-                "- DO NOT reveal direct stats, aggressiveness levels, or game mechanics",
-                "- Make descriptions immersive and atmospheric",
-                "- Vary descriptions to avoid repetition",
-                f"- IMPORTANT: There are {len(monsters)} monsters in this room - acknowledge their presence!",
+                "ROOM CREATURES:",
+                "- The following creatures inhabit this room:",
+            ])
+            
+            # Add creature details similar to items
+            for monster in non_aggressive_monsters:
+                creature_desc = f"  * {monster.get('name', 'Unknown')}: {monster.get('description', 'A mysterious creature')}"
+                if monster.get('aggressiveness') == 'territorial':
+                    # Add blocking direction if available
+                    creature_desc += f" (guarding a passage)"
+                prompt_parts.append(creature_desc)
+            
+            prompt_parts.extend([
+                "",
+                "NOTE: These creatures exist in the room. Describe them naturally when relevant to the player's action.",
+                "- When players OBSERVE (look, search, examine), you may describe these creatures if relevant",
+                "- Example: 'You notice a watchful creature near the northern passage'",
+                "- NEVER reference 'creatures listed in the room' or other meta-game information",
+                "- Integrate creature descriptions naturally into the scene, keep the immersion",
+                "- For TERRITORIAL creatures: ALWAYS mention they are blocking/guarding a specific direction",
+                "- For PASSIVE creatures: Show them minding their own business",
+                "- For NEUTRAL creatures: Show them observing cautiously",
+                f"- IMPORTANT: There are {len(non_aggressive_monsters)} non-aggressive creatures in this room - acknowledge their presence naturally!",
                 "",
             ])
         
@@ -391,6 +405,7 @@ class AIHandler:
             "",
             "- **OBSERVATION ACTIONS** (look, examine, search, etc.):",
             "  * DESCRIBE the specific room items NOT by their actual names and instead JUST their descriptions",
+            "  * Integrate the players observation of items into the room. The items should not stand out as items but rather a part of the room",
             "  * Example: 'You see a shiny vial glowing faintly on the ground'",
             "  * DO NOT say 'no items besides the one listed' or reference game data",
             "  * CRITICAL: Match player descriptions to item descriptions, not just names!",
@@ -530,8 +545,14 @@ class AIHandler:
             buffer = ""
             narrative = ""
             narrative_complete = False
+            chunk_count = 0
+            max_chunks = 1000  # Prevent infinite loops
 
             async for chunk in stream:
+                chunk_count += 1
+                if chunk_count > max_chunks:
+                    logger.warning(f"[Stream] Too many chunks received ({chunk_count}), breaking to prevent infinite loop")
+                    break
                 if chunk.choices[0].delta.content is not None:
                     content = chunk.choices[0].delta.content
                     buffer += content
@@ -567,12 +588,23 @@ class AIHandler:
                             
                             yield parsed
                             break
-                    except Exception:
-                        # Not yet complete JSON
+                    except json.JSONDecodeError as e:
+                        # Not yet complete JSON - this is normal during streaming
+                        logger.debug(f"[Stream] JSON not complete yet: {str(e)}")
+                        pass
+                    except Exception as e:
+                        # Other parsing errors - log and continue
+                        logger.warning(f"[Stream] JSON parsing error: {str(e)}")
                         pass
 
         except Exception as e:
             logger.error(f"[Stream Action] Error during streaming: {str(e)}")
+            # Yield a fallback response to prevent the client from hanging
+            yield {
+                "type": "final",
+                "content": "An error occurred while processing your action. Please try again.",
+                "updates": {}
+            }
             raise
 
     @staticmethod
@@ -817,7 +849,6 @@ You are inventing a biome for a new region of a medieval fantasy world. The regi
 - The new biome must be visually and thematically DISTINCT from all adjacent biomes: {adj_biome_str}.
 - The biome must have a large, obvious impact on the image and name of all rooms within it (not just subtle differences).
 - The biome name must be short, evocative, and creative (e.g., 'crimson forest', 'ashen tundra', 'misty mountain', 'sunken swamp').
-- Avoid using only the most generic names unless you add a unique twist (e.g., 'crimson desert', 'frozen plains').
 - The description should be 1-2 sentences, concise, and evocative.
 - The color should be a hex code that visually represents the biome's appearance and feel.
 - Choose colors that are visually distinct from typical adjacent biomes (e.g., green for forests, brown/tan for deserts, blue for water, etc.).

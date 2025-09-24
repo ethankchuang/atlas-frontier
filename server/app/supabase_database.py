@@ -217,6 +217,34 @@ class SupabaseDatabase:
 
 
     @staticmethod
+    async def get_recent_high_rarity_items(min_rarity: int = 2, limit: int = 20) -> List[Dict[str, Any]]:
+        """Get recently generated items with specified minimum rarity for AI context"""
+        try:
+            client = get_supabase_client()
+            
+            # Query items with minimum rarity, ordered by creation time (most recent first)
+            # We'll use the id field as a proxy for creation time since newer items have more recent UUIDs
+            result = client.table('items').select('data').execute()
+            
+            if not result.data:
+                return []
+            
+            # Filter items by rarity and sort by ID (newer UUIDs come later alphabetically)
+            filtered_items = []
+            for item_row in result.data:
+                item_data = item_row.get('data', {})
+                if item_data.get('rarity', 1) >= min_rarity:
+                    filtered_items.append(item_data)
+            
+            # Sort by ID (newer items have later UUIDs) and limit
+            filtered_items.sort(key=lambda x: x.get('id', ''), reverse=True)
+            return filtered_items[:limit]
+            
+        except Exception as e:
+            logger.error(f"Error getting recent high rarity items: {str(e)}")
+            return []
+
+    @staticmethod
     async def get_monster_types() -> Optional[List[Dict[str, Any]]]:
         """Get monster types from Supabase"""
         try:

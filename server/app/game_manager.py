@@ -763,7 +763,17 @@ class GameManager:
                     current_room_id = "room_start"
                 
                 logger.info(f"[Item Distribution] Current room ID: {current_room_id}, 3-star room ID: {biome_three_star_room}")
+                
+                # Check for match with current room ID or handle the (0,0) special case
+                is_three_star_room = False
                 if biome_three_star_room == current_room_id:
+                    is_three_star_room = True
+                elif x == 0 and y == 0 and biome_three_star_room == "room_0_0":
+                    # Handle case where biome manager stored "room_0_0" but we're checking "room_start"
+                    is_three_star_room = True
+                    logger.info(f"[Item Distribution] Matched room_0_0 with room_start for coordinates (0,0)")
+                
+                if is_three_star_room:
                     has_three_star = True
                     logger.info(f"[Item Distribution] Room at ({x}, {y}) is the preallocated 3-star room for biome '{biome}'")
             else:
@@ -808,7 +818,8 @@ class GameManager:
                     'room_biome': biome,
                     'room_title': room_title,
                     'situation_context': 'room_generation_3star',
-                    'desired_rarity': 3
+                    'desired_rarity': 3,
+                    'database': self.db  # Pass database for recent items context
                 }
                 
                 item_data = await item_generator.generate_item(self.ai_handler, item_context)
@@ -831,7 +842,8 @@ class GameManager:
                     'room_biome': biome,
                     'room_title': room_title,
                     'situation_context': 'room_generation_2star',
-                    'desired_rarity': 2
+                    'desired_rarity': 2,
+                    'database': self.db  # Pass database for recent items context
                 }
                 
                 item_data = await item_generator.generate_item(self.ai_handler, item_context)

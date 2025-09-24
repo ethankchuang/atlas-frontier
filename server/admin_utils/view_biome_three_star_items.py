@@ -46,7 +46,13 @@ async def get_all_biomes_with_three_star_info() -> List[Dict[str, Any]]:
         three_star_item = None
         if three_star_room_id:
             try:
-                room_data = await db.get_room(three_star_room_id)
+                # Handle special case: if the stored room ID is "room_0_0" but coordinates are (0,0),
+                # the actual room is "room_start"
+                actual_room_id = three_star_room_id
+                if three_star_room_id == "room_0_0" and coordinates == (0, 0):
+                    actual_room_id = "room_start"
+                
+                room_data = await db.get_room(actual_room_id)
                 if room_data and room_data.get('items'):
                     # Check if any item in the room is rarity 3
                     for item_id in room_data['items']:
