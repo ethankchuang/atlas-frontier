@@ -20,6 +20,10 @@ class MonsterBehaviorManager:
         # Track player's last room for aggressive monster logic
         # Format: {player_id: room_id}
         self.player_last_room = {}
+        
+        # Track monsters that have already fought players to prevent re-aggression
+        # Format: {player_id: {monster_id: True}} - monsters that have fought this player
+        self.monster_combat_history = {}
     
     async def handle_player_room_entry(
         self, 
@@ -107,10 +111,30 @@ class MonsterBehaviorManager:
                     logger.error(f"[MonsterBehavior] Failed to persist territorial block: {str(e)}")
         
         # Handle aggressive monsters (they can coexist with territorial ones)
-        for monster_id, monster_name in aggressive_monsters:
-            messages.append(await self._handle_aggressive_monster(
-                player_id, monster_id, monster_name, new_room_id, game_manager
-            ))
+        # LIMIT: Only allow ONE aggressive monster to attack per room entry
+        # This prevents overwhelming the player with multiple back-to-back combats
+        if aggressive_monsters:
+            # Filter out monsters that have already fought this player
+            available_monsters = []
+            for monster_id, monster_name in aggressive_monsters:
+                if not self._has_monster_fought_player(player_id, monster_id):
+                    available_monsters.append((monster_id, monster_name))
+            
+            if available_monsters:
+                # Choose the first available aggressive monster to attack
+                monster_id, monster_name = available_monsters[0]
+                messages.append(await self._handle_aggressive_monster(
+                    player_id, monster_id, monster_name, new_room_id, game_manager
+                ))
+                
+                # Store info about other aggressive monsters that are being ignored
+                if len(available_monsters) > 1:
+                    other_monsters = [name for _, name in available_monsters[1:]]
+                    messages.append(f"⚠️ Other aggressive creatures ({', '.join(other_monsters)}) watch from the shadows, waiting for their turn...")
+            else:
+                # All aggressive monsters have already fought this player
+                fought_monsters = [name for _, name in aggressive_monsters]
+                messages.append(f"⚔️ The aggressive creatures ({', '.join(fought_monsters)}) have already fought you and won't attack again unless you choose to fight them.")
         
         return [msg for msg in messages if msg]  # Filter out None messages
     
@@ -176,6 +200,9 @@ class MonsterBehaviorManager:
                 self.aggressive_monsters[room_id] = {}
             self.aggressive_monsters[room_id][monster_id] = monster_name
             
+            # Record that this monster is about to fight the player
+            self._record_monster_combat(player_id, monster_id)
+            
             return f"⚔️ {monster_name} charges at you aggressively! The monster will attack if you try to move to a new room!"
             
         except Exception as e:
@@ -232,6 +259,23 @@ class MonsterBehaviorManager:
             'down': 'up'
         }
         return opposites.get(direction.lower(), direction)
+    
+    def _has_monster_fought_player(self, player_id: str, monster_id: str) -> bool:
+        """Check if a monster has already fought this player"""
+        return self.monster_combat_history.get(player_id, {}).get(monster_id, False)
+    
+    def _record_monster_combat(self, player_id: str, monster_id: str):
+        """Record that a monster has fought this player"""
+        if player_id not in self.monster_combat_history:
+            self.monster_combat_history[player_id] = {}
+        self.monster_combat_history[player_id][monster_id] = True
+        logger.info(f"[MonsterBehavior] Recorded combat: {monster_id} vs {player_id}")
+    
+    def _clear_player_combat_history(self, player_id: str):
+        """Clear combat history for a player (when they leave the room)"""
+        if player_id in self.monster_combat_history:
+            del self.monster_combat_history[player_id]
+            logger.info(f"[MonsterBehavior] Cleared combat history for {player_id}")
     
     async def check_territorial_blocking(
         self, 

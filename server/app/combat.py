@@ -511,6 +511,17 @@ async def send_duel_results(
             await manager.send_to_player(room_id, player1_id, outcome_message)
             await manager.send_to_player(room_id, player2_id, outcome_message)
             
+            # Record combat history to prevent re-aggression
+            try:
+                from .monster_behavior import monster_behavior_manager
+                # If a monster won, record that it has fought the player
+                if winner_id and isinstance(winner_id, str) and winner_id.startswith("monster_"):
+                    player_id = player1_id if winner_id == player2_id else player2_id
+                    monster_behavior_manager._record_monster_combat(player_id, winner_id)
+                    logger.info(f"[Combat] Recorded monster victory: {winner_id} defeated {player_id}")
+            except Exception as e:
+                logger.error(f"[Combat] Error recording monster combat history: {str(e)}")
+            
             # FUTURE: Replace immediate removal with corpse/loot persistence and respawn timers.
             # Temporary behavior: if a monster loses a duel, remove it from the room for now
             try:

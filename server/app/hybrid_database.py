@@ -452,3 +452,15 @@ class HybridDatabase:
     async def get_npc_memories(npc_id: str, query: str, n_results: int = 5) -> List[Dict[str, Any]]:
         """Query NPC's relevant memories (ChromaDB)"""
         return await RedisDatabase.get_npc_memories(npc_id, query, n_results)
+
+    @staticmethod
+    async def get_recent_high_rarity_items(min_rarity: int = 2, limit: int = 20) -> List[Dict[str, Any]]:
+        """Get recently generated items with specified minimum rarity for AI context"""
+        try:
+            if HybridDatabase._is_supabase_configured():
+                return await SupabaseDatabase.get_recent_high_rarity_items(min_rarity, limit)
+            else:
+                return await RedisDatabase.get_recent_high_rarity_items(min_rarity, limit)
+        except Exception as e:
+            logger.warning(f"[HybridDatabase] Error getting recent high rarity items: {str(e)}")
+            return []

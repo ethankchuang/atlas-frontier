@@ -283,7 +283,7 @@ async def handle_duel_message(message: dict, room_id: str, player_id: str, game_
             return
 
 async def get_room_monsters_description(room_id: str, game_manager: GameManager) -> str:
-    """Get a description of monsters in the room for display to players"""
+    """Get a description of AGGRESSIVE monsters in the room for display to players when entering"""
     try:
         room_data = await game_manager.db.get_room(room_id)
         if not room_data or not room_data.get('monsters'):
@@ -293,35 +293,32 @@ async def get_room_monsters_description(room_id: str, game_manager: GameManager)
         for monster_id in room_data['monsters']:
             monster_data = await game_manager.db.get_monster(monster_id)
             if monster_data and monster_data.get('is_alive', True):
-                name = monster_data['name']
                 aggressiveness = monster_data['aggressiveness']
-                size = monster_data['size']
                 
-                # Create descriptive text based on attributes
-                size_desc = {
-                    'insect': 'tiny',
-                    'chicken': 'small', 
-                    'human': 'medium-sized',
-                    'horse': 'large',
-                    'dinosaur': 'enormous',
-                    'colossal': 'massive'
-                }.get(size, 'strange')
-                
-                aggr_desc = {
-                    'passive': 'peaceful',
-                    'neutral': 'watchful',
-                    'territorial': 'defensive',
-                    'aggressive': 'menacing'
-                }.get(aggressiveness, 'mysterious')
-                
-                monster_descriptions.append(f"A {size_desc}, {aggr_desc} {name}")
+                # ONLY show aggressive monsters in this function
+                if aggressiveness == 'aggressive':
+                    name = monster_data['name']
+                    size = monster_data['size']
+                    
+                    # Create concise description focusing on aggression
+                    size_desc = {
+                        'insect': 'tiny',
+                        'chicken': 'small', 
+                        'human': 'medium-sized',
+                        'horse': 'large',
+                        'dinosaur': 'enormous',
+                        'colossal': 'massive'
+                    }.get(size, 'strange')
+                    
+                    # Focus on how the monster is approaching/aggressing
+                    monster_descriptions.append(f"A {size_desc} {name} charging toward you menacingly")
         
         if monster_descriptions:
             if len(monster_descriptions) == 1:
-                return f"🐲 {monster_descriptions[0]} is here."
+                return f"⚔️ {monster_descriptions[0]}!"
             else:
                 monsters_text = ", ".join(monster_descriptions[:-1]) + f", and {monster_descriptions[-1]}"
-                return f"🐲 You see {monsters_text} in this area."
+                return f"⚔️ {monsters_text}!"
         
         return ""
         
@@ -509,6 +506,8 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, player_id: str)
                     "room": room_dict
                 })
                 logger.info(f"[WebSocket] Successfully sent initial room state for {room_id}")
+                
+                # Aggressive monster descriptions are now included in atmospheric_presence via room info
             except Exception as e:
                 logger.error(f"[WebSocket] Error preparing room state: {str(e)}")
                 logger.error(f"[WebSocket] Room data: {room_data}")
@@ -992,6 +991,12 @@ async def process_action_stream(
                             await game_manager.db.add_to_room_players(new_room_id, action_request.player_id)
                             logger.info(f"[Stream] Updated room player lists: removed from {old_room_id}, added to {new_room_id}")
                             
+                            # Clear combat history when player leaves a room
+                            try:
+                                monster_behavior_manager._clear_player_combat_history(action_request.player_id)
+                            except Exception as e:
+                                logger.error(f"[Stream] Error clearing combat history: {str(e)}")
+                            
                             # Handle monster behaviors when entering new room
                             try:
                                 new_room_data = await game_manager.db.get_room(new_room_id)
@@ -1025,6 +1030,9 @@ async def process_action_stream(
                                             "message": behavior_message,
                                             "timestamp": datetime.now().isoformat()
                                         })
+                                    
+                                    # Aggressive monster descriptions are now included in atmospheric_presence via room info
+                            
                             except Exception as e:
                                 logger.error(f"[Stream] Error handling monster behaviors: {str(e)}")
                             
@@ -1135,7 +1143,8 @@ async def process_action_stream(
                                                 'room_biome': room.biome or 'unknown',
                                                 'player_action': action_request.action,
                                                 'situation_context': 'basic_environmental_item',
-                                                'desired_rarity': rarity
+                                                'desired_rarity': rarity,
+                                                'database': game_manager.db  # Pass database for recent items context
                                             }
                                             
                                             # Generate item
@@ -1415,106 +1424,16 @@ async def get_room_info(room_id: str, game_manager: GameManager = Depends(get_ga
         raise HTTPException(status_code=500, detail=str(e))
 
 async def get_atmospheric_monster_presence(room_data: Dict[str, Any], game_manager: GameManager = None) -> str:
-    """Generate AI-powered atmospheric descriptions of monsters in a room"""
+    """Generate aggressive monster descriptions for atmospheric presence"""
     try:
         if not room_data or not room_data.get('monsters'):
             return ""
         
-        # Get monster data
-        monsters_info = []
-        for monster_id in room_data['monsters']:
-            if game_manager:
-                monster_data = await game_manager.db.get_monster(monster_id)
-                if monster_data and monster_data.get('is_alive', True):
-                    monsters_info.append(monster_data)
+        # Get aggressive monster descriptions
+        room_id = room_data.get('id', '')
+        aggressive_monster_desc = await get_room_monsters_description(room_id, game_manager)
         
-        if not monsters_info:
-            return ""
-            
-        # Create AI prompt for atmospheric description
-        biome = room_data.get('biome', 'unknown area')
-        room_title = room_data.get('title', 'this location')
-        
-        # Get territorial blocking information
-        territorial_info = {}
-        if game_manager and hasattr(game_manager, 'monster_behavior_manager'):
-            room_id = room_data.get('id', '')
-            # Ensure territorial blocks exist; if missing, assign one deterministically
-            for monster in monsters_info:
-                if monster.get('aggressiveness') == 'territorial':
-                    if room_id not in game_manager.monster_behavior_manager.territorial_blocks:
-                        game_manager.monster_behavior_manager.territorial_blocks[room_id] = {}
-                    current = game_manager.monster_behavior_manager.territorial_blocks[room_id].get(monster['id'])
-                    if not current:
-                        # Choose a direction to block based on available connections (fallback to first key)
-                        connections = room_data.get('connections', {}) or {}
-                        blocked_direction = None
-                        if connections:
-                            # Pick first direction key deterministically
-                            blocked_direction = list(connections.keys())[0]
-                        else:
-                            blocked_direction = 'north'
-                        game_manager.monster_behavior_manager.territorial_blocks[room_id][monster['id']] = blocked_direction
-                        current = blocked_direction
-                    territorial_info[monster['id']] = current
-        
-        # Build monster context for AI
-        monster_context = []
-        for monster in monsters_info:
-            monster_context_item = {
-                'id': monster['id'],
-                'name': monster['name'],
-                'size': monster['size'],
-                'description': monster['description'],
-                'aggressiveness': monster['aggressiveness']
-            }
-            # Add territorial blocking information if available
-            if monster['id'] in territorial_info:
-                monster_context_item['blocking_direction'] = territorial_info[monster['id']]
-            monster_context.append(monster_context_item)
-        
-        # Generate AI description
-        if game_manager and hasattr(game_manager, 'ai_handler'):
-            # Build creature details with territorial blocking info
-            creature_details = []
-            for m in monster_context:
-                detail = f"- A {m['size']}-sized creature: {m['description']} (appears {m['aggressiveness']})"
-                if 'blocking_direction' in m:
-                    detail += f" - BLOCKING {m['blocking_direction'].upper()} EXIT"
-                creature_details.append(detail)
-            
-            prompt = f"""You are describing what a player sees when entering a room with monsters. Write an atmospheric description from the player's perspective, as if observing these creatures from a distance.
- 
- IMPORTANT GUIDELINES:
- - Write from the player's perspective ("You see...", "You notice...")
- - Describe what the creatures LOOK like, not their stats or abilities
- - Make it feel like distant observation - mysterious but visual
- - Keep it atmospheric and immersive
- - Don't mention creature names directly
- - Focus on visual appearance and behavior
- - 2-3 sentences maximum
- - CRITICAL: Show their aggressiveness through behavior:
-   * AGGRESSIVE monsters: "charging toward you", "rushing in your direction", "advancing menacingly"
-   * TERRITORIAL monsters: "guarding the [direction] path", "blocking the [direction] exit", "watching the [direction] passage"
-   * PASSIVE monsters: "minding their own business", "peacefully grazing", "ignoring your presence"
-   * NEUTRAL monsters: "observing you cautiously", "keeping their distance", "watching you warily"
- - CRITICAL: If a monster is blocking a direction, mention it clearly: "guarding the [direction] exit", "blocking the [direction] path"
- 
- Room: {room_title} ({biome})
- Creatures:\n{chr(10).join(creature_details)}
- 
- Return only the atmospheric description, no JSON.
- """
- 
-            description = await game_manager.ai_handler.generate_text(prompt)
-            return description.strip()
-        
-        # Fallback: Simple description if AI fails
-        if len(monsters_info) == 1:
-            monster = monsters_info[0]
-            return f"You notice a {monster['size']} creature moving through the {biome}..."
-        else:
-            return f"You observe {len(monsters_info)} creatures inhabiting this {biome}..."
+        return aggressive_monster_desc
         
     except Exception as e:
         logger.error(f"Error generating atmospheric monster presence: {str(e)}")

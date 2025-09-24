@@ -174,6 +174,9 @@ class WebSocketService {
                 case 'monster_combat_outcome':
                     this.handleMonsterCombatOutcome(data);
                     break;
+                case 'system':
+                    this.handleSystemMessage(data);
+                    break;
                 
                 case 'room_update':
                     console.log('[WebSocket] Received room update:', {
@@ -195,6 +198,18 @@ class WebSocketService {
 
     private handleChatMessage(message: ChatMessage) {
         useGameStore.getState().addMessage(message);
+    }
+
+    private handleSystemMessage(data: { message: string; timestamp: string }) {
+        console.log('[WebSocket] Handling system message:', data);
+        const systemMessage: ChatMessage = {
+            player_id: 'system',
+            room_id: '', // Will be filled by the store
+            message: data.message,
+            message_type: 'system',
+            timestamp: data.timestamp
+        };
+        useGameStore.getState().addMessage(systemMessage);
     }
 
     private handlePresenceUpdate(data: { player_id: string; status: 'joined' | 'disconnected' | 'left'; player_data?: Player }) {

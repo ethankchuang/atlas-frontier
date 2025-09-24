@@ -156,6 +156,39 @@ class Database:
             logger.error(f"Error setting item {item_id}: {str(e)}")
             raise
 
+    @staticmethod
+    async def get_recent_high_rarity_items(min_rarity: int = 2, limit: int = 20) -> List[Dict[str, Any]]:
+        """Get recently generated items with specified minimum rarity for AI context"""
+        try:
+            # Get all item keys
+            item_keys = redis_client.keys("item:*")
+            
+            if not item_keys:
+                return []
+            
+            # Get all items and filter by rarity
+            filtered_items = []
+            for key in item_keys:
+                try:
+                    item_data = redis_client.get(key)
+                    if item_data:
+                        if isinstance(item_data, bytes):
+                            item_data = item_data.decode('utf-8')
+                        item = json.loads(item_data)
+                        if item.get('rarity', 1) >= min_rarity:
+                            filtered_items.append(item)
+                except Exception as e:
+                    logger.warning(f"Error loading item from key {key}: {str(e)}")
+                    continue
+            
+            # Sort by ID (newer items have later UUIDs) and limit
+            filtered_items.sort(key=lambda x: x.get('id', ''), reverse=True)
+            return filtered_items[:limit]
+            
+        except Exception as e:
+            logger.error(f"Error getting recent high rarity items: {str(e)}")
+            return []
+
 
     @staticmethod
     async def get_monster_types() -> Optional[List[Dict[str, Any]]]:
