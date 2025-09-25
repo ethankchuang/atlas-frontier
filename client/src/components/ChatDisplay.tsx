@@ -66,6 +66,13 @@ const ChatDisplay: React.FC = () => {
                     </div>
                 );
 
+            case 'ai_response':
+                return (
+                    <div className="mb-3 text-green-400 font-mono text-xl">
+                        {message.message}
+                    </div>
+                );
+
             case 'room_description':
                 return (
                     <div className="mb-6 font-mono">

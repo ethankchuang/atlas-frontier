@@ -712,6 +712,42 @@ async def join_game(
             'room': room
         }
 
+# Get player messages endpoint (requires auth)
+@app.get("/player/{player_id}/messages")
+async def get_player_messages(
+    player_id: str,
+    limit: int = 10,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+    game_manager: GameManager = Depends(get_game_manager)
+):
+    """Get recent messages for a specific player"""
+    # Verify the player belongs to the current user
+    player = await game_manager.get_player(player_id)
+    if not player:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Player not found"
+        )
+    
+    if player.user_id != current_user['id']:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only access your own player's messages"
+        )
+    
+    try:
+        logger.info(f"[Player Messages] Fetching messages for player {player_id} with limit {limit}")
+        messages = await game_manager.db.get_player_messages(player_id, limit)
+        logger.info(f"[Player Messages] Retrieved {len(messages)} messages for player {player_id}")
+        for i, msg in enumerate(messages):
+            logger.info(f"[Player Messages] Message {i+1}: {msg.get('message', 'No message')[:50]}... (type: {msg.get('message_type', 'unknown')})")
+        return {"messages": messages}
+    except Exception as e:
+        logger.error(f"[Player Messages] Error fetching messages for player {player_id}: {str(e)}")
+        import traceback
+        logger.error(f"[Player Messages] Traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=400, detail=str(e))
+
 # Get specific player endpoint (requires auth)
 @app.get("/player/{player_id}")
 async def get_player_by_id(
@@ -780,6 +816,25 @@ async def process_action_stream(
             room = Room(**room_data)
             game_state_data = await game_manager.db.get_game_state()
             game_state = GameState(**game_state_data)
+
+            # Store the player's action as a message
+            try:
+                from .models import ChatMessage
+                from datetime import datetime as dt
+                action_message = ChatMessage(
+                    player_id=action_request.player_id,
+                    room_id=player.current_room,
+                    message=f">> {action_request.action}",
+                    message_type="system",
+                    timestamp=dt.utcnow()
+                )
+                logger.info(f"[Stream] Attempting to store player action: {action_request.action} for player {action_request.player_id}")
+                result = await game_manager.db.store_player_message(action_request.player_id, action_message)
+                logger.info(f"[Stream] Player action storage result: {result}")
+            except Exception as e:
+                logger.error(f"[Stream] Failed to store player action as message: {str(e)}")
+                import traceback
+                logger.error(f"[Stream] Traceback: {traceback.format_exc()}")
 
             # Get NPCs in the room
             npcs = []
@@ -853,6 +908,27 @@ async def process_action_stream(
                         logger.warning(f"[Stream] Chunk missing 'updates' field: {chunk}")
                         chunk["updates"] = {}
                     
+                    # Store the AI response as a message
+                    if chunk.get("type") == "final" and "response" in chunk:
+                        try:
+                            from .models import ChatMessage
+                            from datetime import datetime as dt
+                            ai_response_message = ChatMessage(
+                                player_id=action_request.player_id,
+                                room_id=player.current_room,
+                                message=chunk["response"],
+                                message_type="ai_response",
+                                timestamp=dt.utcnow(),
+                                is_ai_response=True
+                            )
+                            logger.info(f"[Stream] Attempting to store AI response for player {action_request.player_id}")
+                            result = await game_manager.db.store_player_message(action_request.player_id, ai_response_message)
+                            logger.info(f"[Stream] AI response storage result: {result}")
+                        except Exception as e:
+                            logger.error(f"[Stream] Failed to store AI response as message: {str(e)}")
+                            import traceback
+                            logger.error(f"[Stream] Traceback: {traceback.format_exc()}")
+
                     # Apply updates BEFORE yielding the final response
                     if "player" in chunk["updates"]:
                         player_updates = chunk["updates"]["player"]
@@ -1509,8 +1585,8 @@ async def send_chat(
     game_manager: GameManager = Depends(get_game_manager)
 ):
     try:
-        # Store the chat message
-        await game_manager.db.store_chat_message(message.room_id, message)
+        # Store the chat message in player history only
+        await game_manager.db.store_player_message(message.player_id, message)
         
         # Broadcast the message to all players in the room
         await manager.broadcast_to_room(

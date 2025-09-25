@@ -596,28 +596,80 @@ class Database:
             logger.error(f"Error atomically creating room {room_id} at ({x}, {y}): {str(e)}")
             return False
 
+
     @staticmethod
-    async def store_chat_message(room_id: str, message: 'ChatMessage') -> bool:
-        """Store a chat message in the room's chat history"""
+    async def store_player_message(player_id: str, message: 'ChatMessage') -> bool:
+        """Store a chat message in the player's message history"""
         try:
-            key = f"chat:room:{room_id}"
+            key = f"messages:player:{player_id}"
             message_data = message.dict()
             message_data['timestamp'] = message_data['timestamp'].isoformat()
+            
+            logger.info(f"[Database] Storing message for player {player_id}: {message_data.get('message', 'No message')[:50]}... (type: {message_data.get('message_type', 'unknown')})")
+            logger.info(f"[Database] Message data: {message_data}")
             
             # Add to Redis list (left push for newest first)
             redis_client.lpush(key, json.dumps(message_data))
             
-            # Trim to keep only last 1000 messages per room
+            # Trim to keep only last 1000 messages per player
             redis_client.ltrim(key, 0, 999)
             
             # Set TTL for automatic cleanup
             redis_client.expire(key, 60 * 60 * 24 * 30)  # 30 days
             
-            logger.debug(f"Stored chat message in room {room_id}: {message.id}")
+            # Verify the message was stored
+            stored_count = redis_client.llen(key)
+            logger.info(f"[Database] Message stored successfully. Total messages for player {player_id}: {stored_count}")
             return True
         except Exception as e:
-            logger.error(f"Error storing chat message: {str(e)}")
+            logger.error(f"Error storing player message: {str(e)}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
             raise
+
+    @staticmethod
+    async def get_player_messages(player_id: str, limit: int = 10) -> List[Dict[str, Any]]:
+        """Get recent messages for a specific player"""
+        try:
+            key = f"messages:player:{player_id}"
+            
+            logger.info(f"[Database] Retrieving messages for player {player_id} with limit {limit}")
+            logger.info(f"[Database] Redis key: {key}")
+            
+            # Check if key exists
+            key_exists = redis_client.exists(key)
+            logger.info(f"[Database] Key exists: {key_exists}")
+            
+            if not key_exists:
+                logger.info(f"[Database] No messages found for player {player_id}")
+                return []
+            
+            # Get total count
+            total_count = redis_client.llen(key)
+            logger.info(f"[Database] Total messages in Redis for player {player_id}: {total_count}")
+            
+            # Get messages from Redis list
+            messages_data = redis_client.lrange(key, 0, limit - 1)
+            logger.info(f"[Database] Retrieved {len(messages_data)} raw message data from Redis")
+            
+            messages = []
+            for i, msg_data in enumerate(messages_data):
+                try:
+                    message = json.loads(msg_data.decode('utf-8') if isinstance(msg_data, bytes) else msg_data)
+                    messages.append(message)
+                    logger.info(f"[Database] Parsed message {i+1}: {message.get('message', 'No message')[:50]}... (type: {message.get('message_type', 'unknown')})")
+                except json.JSONDecodeError as e:
+                    logger.warning(f"[Database] Failed to parse message {i+1}: {str(e)}")
+                    continue
+            
+            logger.info(f"[Database] Successfully retrieved {len(messages)} messages for player {player_id}")
+            return messages
+            
+        except Exception as e:
+            logger.error(f"Error getting player messages: {str(e)}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            return []
 
     @staticmethod
     async def store_action_record(player_id: str, action_record: 'ActionRecord') -> bool:
@@ -736,46 +788,6 @@ class Database:
             logger.error(f"Error getting actions in time window: {str(e)}")
             return []
     
-    @staticmethod
-    async def get_chat_history(player_id: Optional[str] = None, room_id: Optional[str] = None, limit: int = 50) -> List[Dict[str, Any]]:
-        """Get chat history with optional filtering"""
-        try:
-            # Get all chat room keys
-            pattern = "chat:room:*"
-            keys = redis_client.keys(pattern)
-            
-            if not keys:
-                return []
-            
-            # Get all messages
-            messages = []
-            for key in keys:
-                try:
-                    room_messages = redis_client.lrange(key, 0, -1)
-                    for msg_data in room_messages:
-                        try:
-                            message = json.loads(msg_data.decode('utf-8') if isinstance(msg_data, bytes) else msg_data)
-                            
-                            # Apply filters
-                            if player_id and message.get('player_id') != player_id:
-                                continue
-                            if room_id and message.get('room_id') != room_id:
-                                continue
-                            
-                            messages.append(message)
-                        except json.JSONDecodeError:
-                            continue
-                except Exception as e:
-                    logger.warning(f"Error reading chat room {key}: {str(e)}")
-                    continue
-            
-            # Sort by timestamp (newest first) and limit
-            messages.sort(key=lambda x: x.get('timestamp', ''), reverse=True)
-            return messages[:limit]
-            
-        except Exception as e:
-            logger.error(f"Error getting chat history: {str(e)}")
-            return []
     
     @staticmethod
     async def get_game_sessions(player_id: Optional[str] = None, limit: int = 50) -> List[Dict[str, Any]]:
