@@ -47,8 +47,6 @@ class AIHandler:
 
         CRITICAL: Keep descriptions to 1-2 sentences maximum. Focus only on the most important visual and atmospheric details. Remove all fluff and unnecessary elaboration.
 
-        If monsters are present in the room, subtly hint at their presence in the description without being too explicit (e.g., "strange sounds echo from the shadows" or "movement can be seen in the underbrush").
-
         Return a JSON object with these exact fields:
         {json_template}
         """
@@ -257,11 +255,11 @@ class AIHandler:
             "item_availability": item_availability
         }
 
-        # Include recent room chat (last 10 messages, newest first) for continuity
+        # Include recent player messages (last 20 messages, newest first) for continuity
         if chat_history:
             try:
                 safe_chat = []
-                for m in chat_history[:10]:
+                for m in chat_history[:20]:
                     # Sanitize and keep only relevant fields
                     safe_chat.append({
                         "player_id": m.get("player_id"),
@@ -311,7 +309,7 @@ class AIHandler:
             f"Process this player action in a fantasy MUD game.",
             f"Context: {json.dumps(context)}",
             "",
-            "Use the last 10 room chat messages in context.recent_chat (newest first) for continuity. Only reference them if relevant to the current action; do not restate them verbatim.",
+            "Use the last 20 player messages in context.recent_chat (newest first) for continuity. Only reference them if relevant to the current action; do not restate them verbatim.",
             "",
         ]
         
@@ -330,20 +328,6 @@ class AIHandler:
                     # Add blocking direction if available
                     creature_desc += f" (guarding a passage)"
                 prompt_parts.append(creature_desc)
-            
-            prompt_parts.extend([
-                "",
-                "NOTE: These creatures exist in the room. Describe them naturally when relevant to the player's action.",
-                "- When players OBSERVE (look, search, examine), you may describe these creatures if relevant",
-                "- Example: 'You notice a watchful creature near the northern passage'",
-                "- NEVER reference 'creatures listed in the room' or other meta-game information",
-                "- Integrate creature descriptions naturally into the scene, keep the immersion",
-                "- For TERRITORIAL creatures: ALWAYS mention they are blocking/guarding a specific direction",
-                "- For PASSIVE creatures: Show them minding their own business",
-                "- For NEUTRAL creatures: Show them observing cautiously",
-                f"- IMPORTANT: There are {len(non_aggressive_monsters)} non-aggressive creatures in this room - acknowledge their presence naturally!",
-                "",
-            ])
         
         prompt_parts.extend([
             "",
@@ -364,7 +348,7 @@ class AIHandler:
             "MONSTER DIALOGUE GUIDELINES:",
             "- If the player clearly speaks to a monster/creature (e.g., addresses it, asks it something, tries to converse):",
             "  - Set updates.monster_interaction with the player's spoken message and the target monster_id (if multiple present).",
-            "  - Do NOT invent combat or block logic; the server will handle aggressiveness and outcomes.",
+            "  - Enemies should talk back to player with intelligence according to their data",
             "  - For rooms with exactly one monster, you may omit monster_id; the server will resolve it.",
             "  - Keep the narrative response concise; the server will produce the creature's actual reply.",
             "",
@@ -391,29 +375,29 @@ class AIHandler:
             prompt_parts.append("NOTE: This room has no pre-existing items. Only describe basic environmental objects when relevant.")
         
         prompt_parts.extend([
-            "- When players OBSERVE (look, search, examine), you may describe these items if relevant",
-            "- Example: 'You notice a shiny vial sitting on a moss-covered stone'",
-            "- NEVER reference 'items listed in the room' or other meta-game information",
-            "- When players try to GRAB specific items, check if they match the above list",
-            "- Players can also grab basic environmental objects (rocks, sticks, etc.) for 1-star items",
-            "",
             "ITEM AVAILABILITY AND REWARD POLICY (CRITICAL):",
             "- Use context.item_availability to understand what items are available in this room:",
             "  * has_three_star_item: true/false - room has a special rare item",
             "  * two_star_items_available: number - how many normal items remain",
             "  * one_star_items_always_available: always true - basic junk items",
+            "- Players can always grab basic environmental objects (rocks, sticks, etc.) for 1-star items",
             "",
             "- **OBSERVATION ACTIONS** (look, examine, search, etc.):",
+            "  * Think about how broad the players search is. Are they getting a general survey of the land? Are they investigating a specific point of interest? The amount of information you reveal will depend on this",
+            "  * The monsters and items exist in the room, but do not reference them directly",
+            "  * The rooms are big, the player cannot see everything at once. If the player doesn't specify a specific search, assume they are searching broadly and just give them an overview of the area. Do not give details like specific items and medium - small sized creatures in broad searches, only give those details in specific searches",
+            "  * For example if they just say look around, describe the room very broadly, like what the secenery looks like and maybe some big monsters in the room",
+            "  * Do not give precise details for broad inspection, instead give points of interest for the player to specifically search",
+            "  * Compare the size of details to size of search. A broad search would reveal overall description of the land and maybe some big creatures standing out. A specific search would reveal specific items and smaller creatures to the player",            "  * Use the chat logs, make sure that the player eventually knows about all of the items and monsters",
+            "  * For example: player says 'look around' -> 'you see large trees and mountains in the back. A large dragon is flying around to you left",
+            "  * For example: player says 'investigate the trees' -> 'you see a rusty sword leaning against the tree. You also spot a small animal watching you form the distance",
+            "  * Describe the room based off the biome and room name"
             "  * DESCRIBE the specific room items NOT by their actual names and instead JUST their descriptions",
-            "  * Integrate the players observation of items into the room. The items should not stand out as items but rather a part of the room",
-            "  * Example: 'You see a shiny vial glowing faintly on the ground'",
             "  * DO NOT say 'no items besides the one listed' or reference game data",
-            "  * CRITICAL: Match player descriptions to item descriptions, not just names!",
             "  * DO NOT directly refer to items as items, integrate them naturally into the scene. keep the immersion",
-            "  * If room has items, describe them naturally in the narrative",
-            "  * If room has no items, describe environmental objects they could grab",
             "  * Do NOT include item_award for observation actions",
             "  * ONLY reward items if the player explicitly tries to grab them",
+            "  * DO NOT LIST OUT ALL OF THE ITEMS AND / OR MONSTERS IN THE ROOM"
             "",
             "- **UNIFIED ITEM AWARD SYSTEM - CRITICAL INSTRUCTIONS:**",
             "  * ANALYZE player intent to determine what item they want",
@@ -451,44 +435,6 @@ class AIHandler:
             "- Be intelligent about matching: 'sword' could match 'Blade of Storms', 'crystal' could match 'Crystal Shard'",
             "- CRITICAL: Match player descriptions to item descriptions, not just names!",
             "- Example: 'dark pendant' should match 'Cinderthorn Amulet' because it's described as 'dark, ash-encrusted pendant'",
-            "",
-            "EXAMPLES:",
-            "1. Player action: \"look around\" (room has: ★★★ Mystical Orb, ★★ Crafted Dagger, ★★ Iron Shield)",
-            "   - Narrative: \"The chamber holds ancient secrets. A Mystical Orb glows on the altar, while a Crafted Dagger and Iron Shield rest on nearby shelves.\"",
-            "   - Memory: \"Explored the chamber, found Mystical Orb, Crafted Dagger, and Iron Shield\"",
-            "   - JSON: {\"updates\": {\"player\": {\"memory_log\": [\"Explored the chamber, found Mystical Orb, Crafted Dagger, and Iron Shield\"]}}",
-            "2. Player action: \"grab the orb\" (matches 'Mystical Orb')",
-            "   - Narrative: \"You carefully lift the mystical orb from the altar, feeling its magical energy pulse through your hands.\"",
-            "   - Memory: \"Retrieved the mystical orb\"",
-            "   - JSON: {\"updates\": {\"player\": {\"memory_log\": [\"Retrieved the mystical orb\"]}, \"item_award\": {\"type\": \"room_item\", \"item_name\": \"Mystical Orb\"}}",
-            "   - CRITICAL: The item_award field is what actually gives the player the item!",
-            "   - System: Awards the specific 'Mystical Orb' room item",
-            "   - NOTE: item_award has type and item_name",
-            "3. Player action: \"take sword\" (no sword in room)",
-            "   - Narrative: \"You look around but don't see any sword in this chamber.\"",
-            "   - Memory: \"Searched for sword but found none\"",
-            "   - JSON: {\"updates\": {\"player\": {\"memory_log\": [\"Searched for sword but found none\"]}}",
-            "   - System: No item given, no item_award field",
-            "4. Player action: \"grab shield\" (matches 'Iron Shield')",
-            "   - Narrative: \"You lift the iron shield from the shelf, testing its weight and balance.\"",
-            "   - Memory: \"Retrieved the iron shield\"",
-            "   - JSON: {\"updates\": {\"player\": {\"memory_log\": [\"Retrieved the iron shield\"]}, \"item_award\": {\"type\": \"room_item\", \"item_name\": \"Iron Shield\"}}",
-            "   - System: Awards the specific 'Iron Shield' room item",
-            "5. Player action: \"get the blade\" (player means dagger, AI analyzes intent)",
-            "   - Narrative: \"You grasp the crafted dagger's handle, noting its fine craftsmanship.\"",
-            "   - Memory: \"Retrieved the crafted dagger\"",
-            "   - JSON: {\"updates\": {\"player\": {\"memory_log\": [\"Retrieved the crafted dagger\"]}, \"item_award\": {\"type\": \"room_item\", \"item_name\": \"Crafted Dagger\"}}",
-            "   - System: AI intelligently matches 'blade' intent to 'Crafted Dagger'",
-            "6. Player action: \"grab a rock\" (basic environmental item)",
-            "   - Narrative: \"You pick up a smooth stone from the chamber floor.\"",
-            "   - Memory: \"Collected a stone\"",
-            "   - JSON: {\"updates\": {\"player\": {\"memory_log\": [\"Collected a stone\"]}, \"item_award\": {\"type\": \"generate_item\", \"rarity\": 1}}",
-            "   - System: Generates 1-star basic environmental item",
-            "7. Player action: \"take stick\" (basic environmental item)",
-            "   - Narrative: \"You snap off a sturdy branch from debris in the corner.\"",
-            "   - Memory: \"Collected a branch\"",
-            "   - JSON: {\"updates\": {\"player\": {\"memory_log\": [\"Collected a branch\"]}, \"item_award\": {\"type\": \"generate_item\", \"rarity\": 1}}",
-            "   - System: Generates 1-star basic environmental item",
             "",
             "CRITICAL JSON RULES:",
             "- item_award.type must be either \"room_item\" or \"generate_item\"",
@@ -578,6 +524,9 @@ class AIHandler:
                         if isinstance(parsed, dict) and "response" in parsed:
                             # Replace response with the already streamed narrative
                             parsed["response"] = narrative.strip()
+                            
+                            # Set the type field for the main.py message storage logic
+                            parsed["type"] = "final"
                             
                             # Debug: Log the AI response to see if item_award is included
                             logger.info(f"[AI Response] Full AI response: {parsed}")

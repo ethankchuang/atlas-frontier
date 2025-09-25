@@ -470,11 +470,12 @@ class GameManager:
                 if monster_data:
                     monsters.append(monster_data)
             
-            # Fetch last 10 chat messages for this room (newest-first)
+            # Fetch last 20 player messages for AI context (newest-first)
             try:
-                recent_chat = await self.db.get_chat_history(room_id=current_room_id, limit=10)
+                recent_chat = await self.db.get_player_messages(player_id, limit=20)
+                self.logger.info(f"[GameManager] Fetched {len(recent_chat)} recent messages for player {player_id}")
             except Exception as e:
-                self.logger.warning(f"[GameManager] Failed to fetch recent chat for room {current_room_id}: {str(e)}")
+                self.logger.warning(f"[GameManager] Failed to fetch recent player messages for {player_id}: {str(e)}")
                 recent_chat = []
             
             async for chunk in self.ai_handler.stream_action(

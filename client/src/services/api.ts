@@ -418,6 +418,10 @@ class APIService {
         return this.request<Player>(`/player/${playerId}`);
     }
 
+    async getPlayerMessages(playerId: string, limit: number = 10): Promise<{ messages: ChatMessage[] }> {
+        return this.request<{ messages: ChatMessage[] }>(`/player/${playerId}/messages?limit=${limit}`);
+    }
+
     logout(): void {
         this.clearAuthToken();
     }

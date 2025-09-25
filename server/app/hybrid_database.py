@@ -301,12 +301,12 @@ class HybridDatabase:
         return await RedisDatabase.get_room_players(room_id)
 
     @staticmethod
-    async def store_chat_message(room_id: str, message: 'ChatMessage') -> bool:
-        """Store a chat message in the room's chat history (Redis)"""
-        return await RedisDatabase.store_chat_message(room_id, message)
+    async def store_player_message(player_id: str, message) -> bool:
+        """Store a chat message in the player's message history (Redis)"""
+        return await RedisDatabase.store_player_message(player_id, message)
 
     @staticmethod
-    async def store_action_record(player_id: str, action_record: 'ActionRecord') -> bool:
+    async def store_action_record(player_id: str, action_record) -> bool:
         """Store a player action and AI response (Redis)"""
         return await RedisDatabase.store_action_record(player_id, action_record)
 
@@ -321,9 +321,9 @@ class HybridDatabase:
         return await RedisDatabase.get_actions_in_time_window(player_id, cutoff_timestamp)
 
     @staticmethod
-    async def get_chat_history(player_id: Optional[str] = None, room_id: Optional[str] = None, limit: int = 50) -> List[Dict[str, Any]]:
-        """Get chat history with optional filtering (Redis)"""
-        return await RedisDatabase.get_chat_history(player_id, room_id, limit)
+    async def get_player_messages(player_id: str, limit: int = 10) -> List[Dict[str, Any]]:
+        """Get recent messages for a specific player (Redis)"""
+        return await RedisDatabase.get_player_messages(player_id, limit)
 
     @staticmethod
     async def get_game_sessions(player_id: Optional[str] = None, limit: int = 50) -> List[Dict[str, Any]]:

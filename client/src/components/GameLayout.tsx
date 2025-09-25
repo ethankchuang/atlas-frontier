@@ -69,6 +69,26 @@ const GameLayout: React.FC<GameLayoutProps> = ({ playerId }) => {
                 setPlayersInRoom(roomInfo.players);
                 upsertItems(roomInfo.items || []);
 
+                // Load player's previous messages
+                try {
+                    const messagesData = await apiService.getPlayerMessages(playerId, 10);
+                    const gameStore = useGameStore.getState();
+                    // Reverse the messages to display in chronological order (oldest first)
+                    const reversedMessages = [...messagesData.messages].reverse();
+                    reversedMessages.forEach((message: ChatMessage) => {
+                        console.log('[GameLayout] Loading message:', {
+                            type: message.message_type,
+                            content: message.message.substring(0, 50) + '...',
+                            timestamp: message.timestamp
+                        });
+                        gameStore.addMessage(message);
+                    });
+                    console.log('[GameLayout] Loaded', messagesData.messages.length, 'previous messages for player');
+                } catch (error) {
+                    console.warn('[GameLayout] Failed to load player messages:', error);
+                    // Continue without messages - not critical
+                }
+
                 // Mark initial room as visited on minimap
                 addVisitedCoordinate(roomInfo.room.x, roomInfo.room.y);
 
