@@ -8,6 +8,14 @@ const InventoryList: React.FC = () => {
     useEffect(() => {
         console.log('[InventoryList] Player inventory updated:', player?.inventory);
         console.log('[InventoryList] ItemsById updated:', Object.keys(itemsById));
+        
+        // Check for missing items
+        if (player?.inventory) {
+            const missingItems = player.inventory.filter(itemId => !itemsById[itemId]);
+            if (missingItems.length > 0) {
+                console.warn('[InventoryList] Missing item data for:', missingItems);
+            }
+        }
     }, [player?.inventory, itemsById]);
 
     if (!player) {
@@ -19,6 +27,18 @@ const InventoryList: React.FC = () => {
     if (inventory.length === 0) {
         return (
             <div className="text-green-300 font-mono text-xl">Your inventory is empty.</div>
+        );
+    }
+
+    // Check if we're still loading item data
+    const missingItems = inventory.filter(itemId => !itemsById[itemId]);
+    const isLoading = missingItems.length > 0;
+
+    if (isLoading) {
+        return (
+            <div className="text-yellow-300 font-mono text-xl">
+                Loading inventory items... ({inventory.length - missingItems.length}/{inventory.length} loaded)
+            </div>
         );
     }
 

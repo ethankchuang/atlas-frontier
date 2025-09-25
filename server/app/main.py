@@ -203,6 +203,26 @@ async def handle_duel_message(message: dict, room_id: str, player_id: str, game_
                 "player2_control": 0,
                 "finishing_window_owner": None
             }
+            
+            # Create active duel record for disconnect handling
+            active_duel_data = {
+                "duel_id": duel_id,
+                "player1_id": challenger_id,
+                "player2_id": target_id,
+                "room_id": room_id,
+                "current_round": 1,
+                "player1_condition": "Healthy",
+                "player2_condition": "Healthy",
+                "player1_vital": 6,
+                "player2_vital": 6,
+                "player1_control": 0,
+                "player2_control": 0,
+                "player1_max_vital": 6,
+                "player2_max_vital": 6,
+                "start_time": datetime.utcnow().isoformat(),
+                "is_active": True
+            }
+            await game_manager.db.create_active_duel(active_duel_data)
             await manager.broadcast_to_room(room_id, {
                 "type": "duel_challenge",
                 "challenger_id": challenger_id,
@@ -277,6 +297,8 @@ async def handle_duel_message(message: dict, room_id: str, player_id: str, game_
             duel_id = message.get("duel_id")
             if duel_id and duel_id in duel_pending:
                 del duel_pending[duel_id]
+                # Also clean up active duel record
+                await game_manager.db.end_active_duel(duel_id)
             return
         except Exception as e:
             logger.error(f"[handle_duel_message] Error handling duel_outcome: {str(e)}")
@@ -538,6 +560,10 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, player_id: str)
                 )
     except WebSocketDisconnect:
         logger.info(f"[WebSocket] Client disconnected - room: {room_id}, player: {player_id}")
+        
+        # Handle duel forfeit on disconnect
+        await handle_player_disconnect(player_id, room_id)
+        
         manager.disconnect(room_id, player_id)
         await manager.broadcast_to_room(
             room_id=room_id,
@@ -546,6 +572,75 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, player_id: str)
     except Exception as e:
         logger.error(f"[WebSocket] Error in connection: {str(e)}")
         manager.disconnect(room_id, player_id)
+
+# ===============================
+# Duel Forfeit Handler
+# ===============================
+
+async def handle_player_disconnect(player_id: str, room_id: str):
+    """Handle player disconnect, including duel forfeit logic"""
+    try:
+        # Check if player is in any active duels
+        active_duels = await game_manager.db.get_active_duels_for_player(player_id)
+        
+        for duel in active_duels:
+            if duel.get('is_active', False):
+                logger.info(f"[Duel Forfeit] Player {player_id} disconnected during active duel {duel.get('duel_id')}")
+                
+                # Determine the opponent
+                opponent_id = duel.get('player2_id') if duel.get('player1_id') == player_id else duel.get('player1_id')
+                opponent_name = "Unknown"
+                
+                # Get opponent name
+                try:
+                    opponent_data = await game_manager.db.get_player(opponent_id)
+                    if opponent_data:
+                        opponent_name = opponent_data.get('name', 'Unknown')
+                except Exception as e:
+                    logger.warning(f"[Duel Forfeit] Could not get opponent name: {str(e)}")
+                
+                # End the duel
+                await game_manager.db.end_active_duel(duel.get('duel_id'))
+                
+                # Send forfeit message to opponent
+                try:
+                    await manager.send_personal_message(
+                        player_id=opponent_id,
+                        room_id=duel.get('room_id', room_id),
+                        message={
+                            "type": "duel_forfeit",
+                            "message": f"{player_id} has forfeited the duel by disconnecting. You win!",
+                            "opponent_name": player_id,
+                            "result": "forfeit_win"
+                        }
+                    )
+                    logger.info(f"[Duel Forfeit] Sent forfeit notification to opponent {opponent_id}")
+                except Exception as e:
+                    logger.error(f"[Duel Forfeit] Failed to notify opponent: {str(e)}")
+                
+                # Broadcast to room that duel ended
+                try:
+                    await manager.broadcast_to_room(
+                        room_id=duel.get('room_id', room_id),
+                        message={
+                            "type": "duel_ended",
+                            "message": f"Duel ended - {player_id} forfeited by disconnecting",
+                            "result": "forfeit",
+                            "winner": opponent_id,
+                            "loser": player_id
+                        }
+                    )
+                    logger.info(f"[Duel Forfeit] Broadcasted duel end to room {duel.get('room_id', room_id)}")
+                except Exception as e:
+                    logger.error(f"[Duel Forfeit] Failed to broadcast duel end: {str(e)}")
+                
+                logger.info(f"[Duel Forfeit] Successfully processed forfeit for duel {duel.get('duel_id')}")
+        
+        if not active_duels:
+            logger.info(f"[Duel Forfeit] Player {player_id} had no active duels")
+            
+    except Exception as e:
+        logger.error(f"[Duel Forfeit] Error handling player disconnect: {str(e)}")
 
 # ===============================
 # Authentication Endpoints
@@ -653,6 +748,19 @@ async def check_username_availability(username: str):
 async def health_check():
     return {"status": "healthy"}
 
+@app.get("/test-cors")
+async def test_cors():
+    return {"status": "cors_working", "message": "CORS is working"}
+
+@app.get("/debug/duel-state")
+async def debug_duel_state():
+    """Debug endpoint to check duel state"""
+    global duel_pending
+    return {
+        "duel_pending": duel_pending,
+        "duel_pending_count": len(duel_pending)
+    }
+
 # Game initialization endpoint (admin only - creates world)
 @app.post("/start")
 async def start_game(game_manager: GameManager = Depends(get_game_manager)):
@@ -702,8 +810,49 @@ async def join_game(
             'room': starting_room
         }
     else:
-        # Player already in game, return current state
+        # Player already in game, check if they were in combat and lost
         room_data = await game_manager.db.get_room(player.current_room)
+        if room_data:
+            room = Room(**room_data)
+            
+            # Check if player was in combat with aggressive monsters
+            # If so, move them to a safe location (starting room)
+            if room.monsters:
+                # Check if any monsters are aggressive
+                has_aggressive_monsters = False
+                for monster_id in room.monsters:
+                    try:
+                        monster_data = await game_manager.db.get_monster(monster_id)
+                        if monster_data and monster_data.get('aggressiveness') == 'aggressive':
+                            has_aggressive_monsters = True
+                            break
+                    except Exception as e:
+                        logger.warning(f"[Join Game] Error checking monster {monster_id}: {str(e)}")
+                
+                if has_aggressive_monsters:
+                    logger.info(f"[Join Game] Player {player_id} rejoining in room with aggressive monsters, moving to safe location")
+                    
+                    # Move player to starting room
+                    starting_room = await game_manager.ensure_starting_room()
+                    old_room_id = player.current_room
+                    player.current_room = starting_room.id
+                    
+                    # Update player location
+                    await game_manager.db.set_player(player_id, player.dict())
+                    
+                    # Update room player lists
+                    await game_manager.db.remove_from_room_players(old_room_id, player_id)
+                    await game_manager.db.add_to_room_players(starting_room.id, player_id)
+                    
+                    logger.info(f"[Join Game] Moved player {player_id} from {old_room_id} to {starting_room.id}")
+                    
+                    return {
+                        'message': f'Welcome back, {player.name}! You were moved to safety.',
+                        'player': player,
+                        'room': starting_room
+                    }
+        
+        # Normal rejoin - return current state
         room = Room(**room_data) if room_data else None
         
         return {
@@ -711,6 +860,206 @@ async def join_game(
             'player': player,
             'room': room
         }
+
+# Get player inventory items endpoint (requires auth)
+@app.get("/player/{player_id}/inventory")
+async def get_player_inventory(
+    player_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+    game_manager: GameManager = Depends(get_game_manager)
+):
+    """Get player's inventory items with full item data"""
+    # Get the player and verify ownership
+    player = await game_manager.get_player(player_id)
+    if not player:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Player not found"
+        )
+    
+    # Verify the player belongs to the current user
+    if player.user_id != current_user['id']:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only access your own player's inventory"
+        )
+    
+    # Load inventory items
+    inventory_items = []
+    for item_id in player.inventory:
+        try:
+            item_data = await game_manager.db.get_item(item_id)
+            if item_data:
+                inventory_items.append(item_data)
+            else:
+                logger.warning(f"[Player Inventory] Item {item_id} not found for player {player_id}")
+        except Exception as e:
+            logger.error(f"[Player Inventory] Error loading item {item_id}: {str(e)}")
+    
+    logger.info(f"[Player Inventory] Loaded {len(inventory_items)} items for player {player_id}")
+    return {"items": inventory_items}
+
+# Get player visited coordinates endpoint (requires auth)
+@app.get("/player/{player_id}/visited-coordinates")
+async def get_player_visited_coordinates(
+    player_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+    game_manager: GameManager = Depends(get_game_manager)
+):
+    """Get player's visited coordinates and minimap state"""
+    # Get the player and verify ownership
+    player = await game_manager.get_player(player_id)
+    if not player:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Player not found"
+        )
+    
+    # Verify the player belongs to the current user
+    if player.user_id != current_user['id']:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only access your own player's data"
+        )
+    
+    logger.info(f"[Player Coordinates] Retrieved {len(player.visited_coordinates)} visited coordinates for player {player_id}")
+    return {
+        "visited_coordinates": player.visited_coordinates,
+        "visited_biomes": player.visited_biomes,
+        "biome_colors": player.biome_colors
+    }
+
+# Update player visited coordinates endpoint (requires auth)
+@app.post("/player/{player_id}/visit-coordinate")
+async def mark_coordinate_visited(
+    player_id: str,
+    coordinate_data: dict,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+    game_manager: GameManager = Depends(get_game_manager)
+):
+    """Mark a coordinate as visited for a player"""
+    # Get the player and verify ownership
+    player = await game_manager.get_player(player_id)
+    if not player:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Player not found"
+        )
+    
+    # Verify the player belongs to the current user
+    if player.user_id != current_user['id']:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only update your own player's data"
+        )
+    
+    x = coordinate_data.get('x')
+    y = coordinate_data.get('y')
+    biome = coordinate_data.get('biome')
+    biome_color = coordinate_data.get('biome_color')
+    
+    if x is None or y is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="x and y coordinates are required"
+        )
+    
+    coord_key = f"{x},{y}"
+    
+    # Update player's visited coordinates
+    if coord_key not in player.visited_coordinates:
+        player.visited_coordinates.append(coord_key)
+    
+    if biome:
+        player.visited_biomes[coord_key] = biome
+    
+    if biome_color and biome:
+        player.biome_colors[biome] = biome_color
+    
+    # Save updated player data
+    await game_manager.db.set_player(player_id, player.dict())
+    
+    logger.info(f"[Player Coordinates] Marked coordinate ({x},{y}) as visited for player {player_id}")
+    return {"success": True, "message": f"Coordinate ({x},{y}) marked as visited"}
+
+# Clear combat state endpoint (requires auth)
+@app.post("/player/{player_id}/clear-combat-state")
+async def clear_combat_state(
+    player_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+    game_manager: GameManager = Depends(get_game_manager)
+):
+    """Clear any active combat state for a player (used when rejoining)"""
+    logger.info(f"[Clear Combat] Clearing combat state for player {player_id}")
+    
+    try:
+        # Get the player and verify ownership
+        player = await game_manager.get_player(player_id)
+        if not player:
+            logger.warning(f"[Clear Combat] Player {player_id} not found")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Player not found"
+            )
+        
+        # Verify the player belongs to the current user
+        if player.user_id != current_user['id']:
+            logger.warning(f"[Clear Combat] Player {player_id} does not belong to user {current_user['id']}")
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You can only clear your own player's combat state"
+            )
+        
+        # Clear from global duel_pending dictionary
+        global duel_pending
+        cleared_pending_duels = 0
+        duels_to_remove = []
+        
+        for duel_id, duel_info in duel_pending.items():
+            if (player_id == duel_info.get('player1_id') or 
+                player_id == duel_info.get('player2_id')):
+                logger.info(f"[Clear Combat] Removing player {player_id} from duel_pending duel {duel_id}")
+                duels_to_remove.append(duel_id)
+                cleared_pending_duels += 1
+        
+        # Remove duels from pending
+        for duel_id in duels_to_remove:
+            del duel_pending[duel_id]
+        
+        # Check for active duels and end them
+        active_duels = await game_manager.db.get_active_duels_for_player(player_id)
+        cleared_duels = 0
+        
+        for duel in active_duels:
+            if duel.get('is_active', False):
+                logger.info(f"[Clear Combat] Ending active duel {duel.get('duel_id')} for player {player_id}")
+                await game_manager.db.end_active_duel(duel.get('duel_id'))
+                cleared_duels += 1
+        
+        # Clear any monster combat history
+        try:
+            from .monster_behavior import MonsterBehaviorManager
+            monster_behavior_manager = MonsterBehaviorManager(game_manager.db)
+            monster_behavior_manager._clear_player_combat_history(player_id)
+            logger.info(f"[Clear Combat] Cleared monster combat history for player {player_id}")
+        except Exception as e:
+            logger.warning(f"[Clear Combat] Failed to clear monster combat history: {str(e)}")
+        
+        logger.info(f"[Clear Combat] Cleared {cleared_duels} active duels and {cleared_pending_duels} pending duels for player {player_id}")
+        return {
+            "success": True, 
+            "message": f"Cleared {cleared_duels} active duels and {cleared_pending_duels} pending duels",
+            "cleared_duels": cleared_duels,
+            "cleared_pending_duels": cleared_pending_duels
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[Clear Combat] Unexpected error clearing combat state for player {player_id}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to clear combat state"
+        )
 
 # Get player messages endpoint (requires auth)
 @app.get("/player/{player_id}/messages")
@@ -789,17 +1138,24 @@ async def process_action_stream(
     
     async def event_generator():
         try:
-            # Check if player is in a duel
+            # Check if player is in a duel - but also check if the duel is actually active
             for duel_id, duel_info in duel_pending.items():
                 if (action_request.player_id == duel_info['player1_id'] or 
                     action_request.player_id == duel_info['player2_id']):
-                    # Player is in a duel - don't process normal actions
-                    yield json.dumps({
-                        "type": "final",
-                        "content": "⚔️ You are in a duel! Use the chat input to submit your combat move.",
-                        "updates": {}
-                    })
-                    return
+                    # Check if this is an active duel (not completed)
+                    if duel_info.get('is_active', True):  # Default to True for backwards compatibility
+                        logger.info(f"[Action Stream] Player {action_request.player_id} is in active duel {duel_id}")
+                        # Player is in a duel - don't process normal actions
+                        yield json.dumps({
+                            "type": "final",
+                            "content": "⚔️ You are in a duel! Use the chat input to submit your combat move.",
+                            "updates": {}
+                        })
+                        return
+                    else:
+                        logger.info(f"[Action Stream] Player {action_request.player_id} was in completed duel {duel_id}, clearing from duel_pending")
+                        # Remove completed duel from pending
+                        del duel_pending[duel_id]
 
             # Get initial state
             player_data = await game_manager.db.get_player(action_request.player_id)

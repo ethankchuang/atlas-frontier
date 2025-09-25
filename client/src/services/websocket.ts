@@ -136,6 +136,13 @@ class WebSocketService {
             }
             const { type } = data;
 
+            // AGGRESSIVE: Clear stuck duel state on every message
+            const store = useGameStore.getState();
+            if (store.isInDuel && !store.duelOpponent) {
+                console.warn('[WebSocket] Detected stuck duel state, clearing');
+                store.forceClearDuelState();
+            }
+
             console.log('[WebSocket] Processing message type:', type);
             switch (type) {
                 case 'chat':

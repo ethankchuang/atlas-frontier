@@ -438,6 +438,64 @@ class Database:
             return False
 
     @staticmethod
+    async def create_active_duel(duel_data: Dict[str, Any]) -> bool:
+        """Create an active duel record"""
+        try:
+            duel_id = duel_data.get('duel_id')
+            if not duel_id:
+                return False
+            logger.debug(f"Creating active duel {duel_id}")
+            return redis_client.set(f"active_duel:{duel_id}", json.dumps(duel_data))
+        except Exception as e:
+            logger.error(f"Error creating active duel: {str(e)}")
+            return False
+
+    @staticmethod
+    async def get_active_duel(duel_id: str) -> Optional[Dict[str, Any]]:
+        """Get an active duel by ID"""
+        try:
+            duel_data = redis_client.get(f"active_duel:{duel_id}")
+            if duel_data:
+                if isinstance(duel_data, bytes):
+                    duel_data = duel_data.decode('utf-8')
+                return json.loads(duel_data)
+            return None
+        except Exception as e:
+            logger.error(f"Error getting active duel {duel_id}: {str(e)}")
+            return None
+
+    @staticmethod
+    async def get_active_duels_for_player(player_id: str) -> List[Dict[str, Any]]:
+        """Get all active duels for a specific player"""
+        try:
+            active_duels = []
+            duel_keys = redis_client.keys("active_duel:*")
+            
+            for key in duel_keys:
+                duel_data = redis_client.get(key)
+                if duel_data:
+                    if isinstance(duel_data, bytes):
+                        duel_data = duel_data.decode('utf-8')
+                    duel = json.loads(duel_data)
+                    if duel.get('is_active', False) and (duel.get('player1_id') == player_id or duel.get('player2_id') == player_id):
+                        active_duels.append(duel)
+            
+            return active_duels
+        except Exception as e:
+            logger.error(f"Error getting active duels for player {player_id}: {str(e)}")
+            return []
+
+    @staticmethod
+    async def end_active_duel(duel_id: str) -> bool:
+        """End an active duel"""
+        try:
+            logger.debug(f"Ending active duel {duel_id}")
+            return redis_client.delete(f"active_duel:{duel_id}")
+        except Exception as e:
+            logger.error(f"Error ending active duel {duel_id}: {str(e)}")
+            return False
+
+    @staticmethod
     async def set_room_generation_status(room_id: str, status: str) -> bool:
         """Set room generation status: 'pending', 'generating', 'ready', 'error'"""
         try:

@@ -50,6 +50,7 @@ interface GameStore {
 
     // Biome colors - track color for each biome
     biomeColors: { [key: string]: string };
+    setBiomeColors: (colors: { [key: string]: string }) => void;
 
     // Connection state
     isConnected: boolean;
@@ -116,6 +117,7 @@ interface GameStore {
     updateDuelClocks: (p1Vital: number, p2Vital: number, p1Control: number, p2Control: number) => void;
     prepareNextRound: (round: number) => void;
     endDuel: () => void;
+    forceClearDuelState: () => void;
 }
 
 function pastelColorFromString(str: string) {
@@ -225,6 +227,17 @@ const useGameStore = create<GameStore>((set, get) => ({
                 newBiomeColors[biome] = pastelColorFromString(biome);
             }
         }
+        
+        // Sync to server if we have a player
+        if (state.player) {
+            const biomeColor = biome ? newBiomeColors[biome] : undefined;
+            // Don't await this - let it run in background
+            import('../services/api').then(apiModule => {
+                apiModule.default.markCoordinateVisited(state.player!.id, x, y, biome, biomeColor)
+                    .catch(error => console.warn('[GameStore] Failed to sync coordinate to server:', error));
+            });
+        }
+        
         return { visitedCoordinates: newVisitedCoordinates, visitedBiomes: newVisitedBiomes, biomeColors: newBiomeColors };
     }),
     isCoordinateVisited: (x: number, y: number) => {
@@ -232,6 +245,7 @@ const useGameStore = create<GameStore>((set, get) => ({
         const coordKey = `${x},${y}`;
         return state.visitedCoordinates.has(coordKey);
     },
+    setBiomeColors: (colors) => set({ biomeColors: colors }),
     setIsConnected: (connected) => set({ isConnected: connected }),
     setIsLoading: (loading) => set({ isLoading: loading }),
     setIsMovementLoading: (loading) => set({ isMovementLoading: loading }),
@@ -324,6 +338,27 @@ const useGameStore = create<GameStore>((set, get) => ({
         player1MaxVital: 6,
         player2MaxVital: 6,
     }),
+    forceClearDuelState: () => {
+        console.log('[GameStore] Force clearing all duel state');
+        set({ 
+            isInDuel: false, 
+            duelOpponent: null, 
+            myDuelMove: null,
+            opponentDuelMove: null,
+            bothMovesSubmitted: false,
+            currentRound: 1,
+            player1Condition: "Healthy",
+            player2Condition: "Healthy",
+            player1Vital: 6,
+            player2Vital: 6,
+            player1Control: 0,
+            player2Control: 0,
+            player1MaxVital: 6,
+            player2MaxVital: 6,
+            duelChallenge: null
+        });
+        console.log('[GameStore] Force cleared all duel state');
+    },
 }));
 
 export default useGameStore;

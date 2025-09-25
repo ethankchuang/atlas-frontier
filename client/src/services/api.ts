@@ -422,6 +422,35 @@ class APIService {
         return this.request<{ messages: ChatMessage[] }>(`/player/${playerId}/messages?limit=${limit}`);
     }
 
+    async getPlayerInventory(playerId: string): Promise<{ items: Item[] }> {
+        return this.request<{ items: Item[] }>(`/player/${playerId}/inventory`);
+    }
+
+    async getPlayerVisitedCoordinates(playerId: string): Promise<{ 
+        visited_coordinates: string[], 
+        visited_biomes: { [key: string]: string }, 
+        biome_colors: { [key: string]: string } 
+    }> {
+        return this.request<{ 
+            visited_coordinates: string[], 
+            visited_biomes: { [key: string]: string }, 
+            biome_colors: { [key: string]: string } 
+        }>(`/player/${playerId}/visited-coordinates`);
+    }
+
+    async markCoordinateVisited(playerId: string, x: number, y: number, biome?: string, biomeColor?: string): Promise<{ success: boolean; message: string }> {
+        return this.request<{ success: boolean; message: string }>(`/player/${playerId}/visit-coordinate`, {
+            method: 'POST',
+            body: JSON.stringify({ x, y, biome, biome_color: biomeColor })
+        });
+    }
+
+    async clearCombatState(playerId: string): Promise<{ success: boolean; message: string; cleared_duels: number }> {
+        return this.request<{ success: boolean; message: string; cleared_duels: number }>(`/player/${playerId}/clear-combat-state`, {
+            method: 'POST'
+        });
+    }
+
     logout(): void {
         this.clearAuthToken();
     }
