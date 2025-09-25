@@ -71,6 +71,10 @@ class Player(BaseModel):
     last_action: Optional[str] = None  # ISO format datetime string
     last_action_text: Optional[str] = None  # Store the actual action text
     health: int = 20
+    # Minimap state persistence
+    visited_coordinates: List[str] = Field(default_factory=list)  # ["0,0", "1,0", etc.]
+    visited_biomes: Dict[str, str] = Field(default_factory=dict)  # {"0,0": "forest", etc.}
+    biome_colors: Dict[str, str] = Field(default_factory=dict)  # {"forest": "#color", etc.}
 
 class GameState(BaseModel):
     world_seed: str
@@ -133,3 +137,20 @@ class GameSession(BaseModel):
     total_actions: int = 0
     rooms_visited: List[str] = Field(default_factory=list)
     items_obtained: List[str] = Field(default_factory=list)
+
+class ActiveDuel(BaseModel):
+    duel_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    player1_id: str
+    player2_id: str
+    room_id: str
+    current_round: int = 1
+    player1_condition: str = "Healthy"
+    player2_condition: str = "Healthy"
+    player1_vital: int = 6
+    player2_vital: int = 6
+    player1_control: int = 0
+    player2_control: int = 0
+    player1_max_vital: int = 6
+    player2_max_vital: int = 6
+    start_time: datetime = Field(default_factory=datetime.utcnow)
+    is_active: bool = True

@@ -80,6 +80,50 @@ const ChatInput: React.FC = () => {
             return;
         }
 
+        // FALLBACK: If we're stuck in duel mode but no opponent, clear it
+        if (isInDuel && !duelOpponent) {
+            console.warn('[ChatInput] Detected stuck duel state - clearing');
+            const gameStore = useGameStore.getState();
+            gameStore.forceClearDuelState();
+            
+            const message: ChatMessage = {
+                player_id: player.id,
+                room_id: currentRoom.id,
+                message: "Duel state cleared. You can now continue playing normally.",
+                message_type: 'system',
+                timestamp: new Date().toISOString()
+            };
+            addMessage(message);
+        }
+
+        // DEBUG: Log duel state for debugging
+        if (isInDuel) {
+            console.log('[ChatInput] DEBUG: Duel state detected:', {
+                isInDuel,
+                duelOpponent,
+                myDuelMove,
+                opponentDuelMove,
+                bothMovesSubmitted,
+                currentRound
+            });
+        }
+
+        // AGGRESSIVE FALLBACK: If we're in duel mode but no opponent, force clear it
+        if (isInDuel && !duelOpponent) {
+            console.warn('[ChatInput] AGGRESSIVE: Force clearing stuck duel state');
+            const gameStore = useGameStore.getState();
+            gameStore.forceClearDuelState();
+            
+            const message: ChatMessage = {
+                player_id: player.id,
+                room_id: currentRoom.id,
+                message: "Stuck duel state detected and cleared. Continuing with your action.",
+                message_type: 'system',
+                timestamp: new Date().toISOString()
+            };
+            addMessage(message);
+        }
+
         // Only add command to history if it's not a chat or emote
         if (!isEmote && !trimmedInput.startsWith('/')) {
             // Add the user's typed command to chat history

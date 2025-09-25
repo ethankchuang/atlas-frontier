@@ -89,6 +89,67 @@ const GameLayout: React.FC<GameLayoutProps> = ({ playerId }) => {
                     // Continue without messages - not critical
                 }
 
+                // Load player's inventory items
+                try {
+                    const inventoryData = await apiService.getPlayerInventory(playerId);
+                    console.log('[GameLayout] Loading inventory items:', inventoryData.items.length);
+                    upsertItems(inventoryData.items);
+                    console.log('[GameLayout] Loaded', inventoryData.items.length, 'inventory items for player');
+                } catch (error) {
+                    console.warn('[GameLayout] Failed to load player inventory:', error);
+                    // Continue without inventory - not critical
+                }
+
+                // Load player's visited coordinates and minimap state
+                try {
+                    const coordinatesData = await apiService.getPlayerVisitedCoordinates(playerId);
+                    console.log('[GameLayout] Loading visited coordinates:', coordinatesData.visited_coordinates.length);
+                    
+                    // Restore visited coordinates to the store
+                    const gameStore = useGameStore.getState();
+                    coordinatesData.visited_coordinates.forEach(coordKey => {
+                        const [x, y] = coordKey.split(',').map(Number);
+                        const biome = coordinatesData.visited_biomes[coordKey];
+                        gameStore.addVisitedCoordinate(x, y, biome);
+                    });
+                    
+                    // Restore biome colors
+                    gameStore.setBiomeColors(coordinatesData.biome_colors);
+                    
+                    console.log('[GameLayout] Loaded', coordinatesData.visited_coordinates.length, 'visited coordinates for player');
+                } catch (error) {
+                    console.warn('[GameLayout] Failed to load player coordinates:', error);
+                    // Continue without coordinates - not critical
+                }
+
+                // Clear any existing duel state on rejoin - AGGRESSIVE CLEARING
+                const gameStore = useGameStore.getState();
+                console.log('[GameLayout] Before clearing - duel state:', {
+                    isInDuel: gameStore.isInDuel,
+                    duelOpponent: gameStore.duelOpponent,
+                    duelChallenge: gameStore.duelChallenge
+                });
+                gameStore.forceClearDuelState();
+                console.log('[GameLayout] After clearing - duel state:', {
+                    isInDuel: gameStore.isInDuel,
+                    duelOpponent: gameStore.duelOpponent,
+                    duelChallenge: gameStore.duelChallenge
+                });
+                console.log('[GameLayout] Force cleared all duel state on rejoin');
+
+                // Clear server-side combat state
+                try {
+                    const combatResult = await apiService.clearCombatState(playerId);
+                    console.log('[GameLayout] Cleared server-side combat state:', combatResult.message);
+                    if (combatResult.cleared_duels > 0) {
+                        console.log('[GameLayout] Cleared', combatResult.cleared_duels, 'active duels from server');
+                    }
+                } catch (error) {
+                    console.warn('[GameLayout] Failed to clear server-side combat state:', error);
+                    // Continue - not critical, but force clear client state anyway
+                    gameStore.forceClearDuelState();
+                }
+
                 // Mark initial room as visited on minimap
                 addVisitedCoordinate(roomInfo.room.x, roomInfo.room.y);
 
