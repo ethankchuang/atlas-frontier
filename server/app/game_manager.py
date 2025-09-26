@@ -513,17 +513,23 @@ class GameManager:
                         if key != 'direction' and hasattr(player, key):
                             setattr(player, key, value)
                     
-                    # Handle movement
-                    if 'direction' in player_updates:
-                        self.logger.info(f"[GameManager] Player attempting to move {player_updates['direction']}")
-                        actual_room_id, new_room = await self.handle_room_movement_by_direction(
-                            player, 
-                            room, 
-                            player_updates['direction']
-                        )
-                        # Update current room after movement
-                        player.current_room = actual_room_id
-                        new_room_id = actual_room_id
+                # Handle movement
+                if 'direction' in player_updates:
+                    self.logger.info(f"[GameManager] Player attempting to move {player_updates['direction']}")
+                    
+                    # Clear rejoin immunity when player moves to a different room
+                    if player.rejoin_immunity:
+                        player.rejoin_immunity = False
+                        self.logger.info(f"[GameManager] Cleared rejoin immunity for player {player_id} due to movement")
+                    
+                    actual_room_id, new_room = await self.handle_room_movement_by_direction(
+                        player, 
+                        room, 
+                        player_updates['direction']
+                    )
+                    # Update current room after movement
+                    player.current_room = actual_room_id
+                    new_room_id = actual_room_id
                 
                 # Handle room generation updates
                 if 'room_generation' in updates:

@@ -75,6 +75,8 @@ class Player(BaseModel):
     visited_coordinates: List[str] = Field(default_factory=list)  # ["0,0", "1,0", etc.]
     visited_biomes: Dict[str, str] = Field(default_factory=dict)  # {"0,0": "forest", etc.}
     biome_colors: Dict[str, str] = Field(default_factory=dict)  # {"forest": "#color", etc.}
+    # Rejoin immunity - temporary immunity to aggressive monsters when rejoining
+    rejoin_immunity: bool = False
 
 class GameState(BaseModel):
     world_seed: str

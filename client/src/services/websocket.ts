@@ -305,7 +305,7 @@ class WebSocketService {
                         
                         // Mark room as visited on minimap (if we're in that room)
                         if (data.updates.room && data.updates.room.id === this.roomId) {
-                            store.addVisitedCoordinate(data.updates.room.x, data.updates.room.y);
+                            store.addVisitedCoordinate(data.updates.room.x, data.updates.room.y, data.updates.room.biome);
                         }
                     }
                 }
@@ -322,7 +322,7 @@ class WebSocketService {
                 store.setCurrentRoom(data.updates.room);
                 
                 // Mark room as visited on minimap
-                store.addVisitedCoordinate(data.updates.room.x, data.updates.room.y);
+                store.addVisitedCoordinate(data.updates.room.x, data.updates.room.y, data.updates.room.biome);
             }
 
             if (data.updates.new_room && data.updates.new_room.image_url) {
@@ -908,7 +908,7 @@ class WebSocketService {
             this.isReconnecting = false;
 
             // Mark room as visited on minimap
-            store.addVisitedCoordinate(room.x, room.y);
+            store.addVisitedCoordinate(room.x, room.y, room.biome);
 
             // Sync player list for the room
             if (room.players && room.players.length > 0) {
@@ -969,7 +969,7 @@ class WebSocketService {
             }
 
             // Mark room as visited on minimap
-            store.addVisitedCoordinate(room.x, room.y);
+            store.addVisitedCoordinate(room.x, room.y, room.biome);
 
             // Add room description to chat if this is a new room
             if (this.nextRoomId === room.id) {

@@ -96,23 +96,46 @@ const FullscreenMinimap: React.FC<FullscreenMinimapProps> = ({ onClose }) => {
         const playerX = currentRoom.x;
         const playerY = currentRoom.y;
         
-        // Get all visited coordinates
-        for (const coordKey of visitedCoordinates) {
-            const [x, y] = coordKey.split(',').map(Number);
-            const isPlayerPosition = x === playerX && y === playerY;
-            const biome = visitedBiomes[coordKey]?.toLowerCase();
-            
-            visitedRooms.push({
-                x,
-                y,
-                isPlayerPosition,
-                isVisited: true,
-                biome,
-            });
+        // Debug logging
+        console.log('[FullscreenMinimap] Generating visited rooms:', {
+            visitedCoordinates: Array.from(visitedCoordinates),
+            visitedBiomes,
+            biomeColors
+        });
+        
+        // Create a larger grid around the player (15x15 instead of just visited coordinates)
+        const gridSize = 15;
+        const centerOffset = Math.floor(gridSize / 2);
+        
+        for (let y = 0; y < gridSize; y++) {
+            for (let x = 0; x < gridSize; x++) {
+                const worldX = playerX + (x - centerOffset);
+                const worldY = playerY - (y - centerOffset);
+                const isPlayerPosition = x === centerOffset && y === centerOffset;
+                const coordKey = `${worldX},${worldY}`;
+                const isVisited = visitedCoordinates.has(coordKey);
+                const biome = isVisited ? visitedBiomes[coordKey]?.toLowerCase() : undefined;
+                
+                // Debug logging for visited coordinates
+                if (isVisited) {
+                    console.log(`[FullscreenMinimap] Visited coordinate ${coordKey}:`, {
+                        biome,
+                        biomeColor: biome ? biomeColors[biome] : undefined
+                    });
+                }
+                
+                visitedRooms.push({
+                    x: worldX,
+                    y: worldY,
+                    isPlayerPosition,
+                    isVisited,
+                    biome,
+                });
+            }
         }
         
         return visitedRooms;
-    }, [currentRoom, player, visitedCoordinates, visitedBiomes]);
+    }, [currentRoom, player, visitedCoordinates, visitedBiomes, biomeColors]);
 
     const visitedRooms = useMemo(() => generateVisitedRooms(), [generateVisitedRooms]);
     const visitedCount = visitedCoordinates.size;
@@ -175,7 +198,7 @@ const FullscreenMinimap: React.FC<FullscreenMinimapProps> = ({ onClose }) => {
                             const relativeX = (tile.x - playerX) * 28; // 24px tile + 4px gap
                             const relativeY = (playerY - tile.y) * 28; // Invert Y to fix north/south orientation
                             
-                            if (tile.biome) {
+                            if (tile.isVisited && tile.biome) {
                                 const color = biomeColors[tile.biome] || pastelColorFromString(tile.biome);
                                 return (
                                     <div
@@ -196,7 +219,7 @@ const FullscreenMinimap: React.FC<FullscreenMinimapProps> = ({ onClose }) => {
                                         )}
                                     </div>
                                 );
-                            } else {
+                            } else if (tile.isVisited) {
                                 return (
                                     <div
                                         key={`${tile.x},${tile.y}`}
@@ -214,59 +237,73 @@ const FullscreenMinimap: React.FC<FullscreenMinimapProps> = ({ onClose }) => {
                                         )}
                                     </div>
                                 );
+                            } else {
+                                // Unvisited coordinates - show as dark/empty
+                                return (
+                                    <div
+                                        key={`${tile.x},${tile.y}`}
+                                        className={`w-6 h-6 absolute bg-black border-gray-800 border ${tile.isPlayerPosition ? 'animate-pulse' : ''} hover:scale-110 transition-transform duration-150 ${isDragging ? 'pointer-events-none' : ''}`}
+                                        style={{
+                                            left: `${relativeX}px`,
+                                            top: `${relativeY}px`
+                                        }}
+                                        title={`${tile.x}, ${tile.y}${tile.isPlayerPosition ? ' (You)' : ''} (Unvisited)`}
+                                    >
+                                        {tile.isPlayerPosition && (
+                                            <div className="absolute inset-0 flex items-center justify-center">
+                                                <div className="w-1.5 h-1.5 bg-white rounded-full"></div>
+                                            </div>
+                                        )}
+                                    </div>
+                                );
                             }
                         })}
                     </div>
                 </div>
             </div>
 
-            {/* Bottom legend */}
-            <div className="p-4 bg-black border-t-2 border-green-700">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    {/* Stats */}
-                    <div className="text-green-500 font-mono">
-                        <div className="text-lg mb-2 border-b border-green-700 pb-1">STATISTICS</div>
-                        <div className="space-y-1 text-sm">
-                            <div>Visited Locations: {visitedCount}</div>
-                            <div>Current Position: ({playerX}, {playerY})</div>
-                            <div>Biomes Discovered: {Object.keys(biomeColors).length}</div>
+            {/* Stats and Legend - Separate section at bottom */}
+            <div className="absolute bottom-0 left-0 right-0 bg-black/90 text-white">
+                <div className="p-4">
+                    <div className="grid grid-cols-2 gap-6">
+                        {/* Stats */}
+                        <div>
+                            <h3 className="font-bold text-lg mb-3 text-yellow-400">Exploration Stats</h3>
+                            <div className="text-sm space-y-2">
+                                <div className="flex justify-between">
+                                    <span>Visited Locations:</span>
+                                    <span className="font-mono text-green-400">{visitedCount}</span>
+                                </div>
+                                <div className="flex justify-between">
+                                    <span>Current Position:</span>
+                                    <span className="font-mono text-blue-400">({currentRoom?.x}, {currentRoom?.y})</span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        {/* Biome Legend */}
+                        <div>
+                            <h3 className="font-bold text-lg mb-3 text-yellow-400">Biome Colors</h3>
+                            <div className="text-sm space-y-2">
+                                {Object.entries(biomeColors).length > 0 ? (
+                                    Object.entries(biomeColors).map(([biome, color]) => (
+                                        <div key={biome} className="flex items-center gap-3">
+                                            <div 
+                                                className="w-4 h-4 rounded border-2 border-white" 
+                                                style={{ backgroundColor: color }}
+                                            ></div>
+                                            <span className="capitalize font-medium">{biome.replace('_', ' ')}</span>
+                                        </div>
+                                    ))
+                                ) : (
+                                    <div className="text-gray-400 italic">No biomes discovered yet</div>
+                                )}
+                            </div>
                         </div>
                     </div>
-
-                    {/* Legend */}
-                    <div className="text-green-500 font-mono">
-                        <div className="text-lg mb-2 border-b border-green-700 pb-1">LEGEND</div>
-                        <div className="space-y-2 text-sm">
-                            <div className="flex items-center gap-2">
-                                <div className="w-4 h-4 bg-yellow-500 border border-yellow-300"></div>
-                                <span>Your Position</span>
-                            </div>
-                            <div className="flex items-center gap-2">
-                                <div className="w-4 h-4 bg-green-600 border border-green-500"></div>
-                                <span>Visited Location</span>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    {/* Biome Legend */}
-                    {Object.keys(biomeColors).length > 0 && (
-                        <div className="text-green-500 font-mono">
-                            <div className="text-lg mb-2 border-b border-green-700 pb-1">BIOMES</div>
-                            <div className="grid grid-cols-2 gap-1 text-xs max-h-32 overflow-y-auto">
-                                {Object.entries(biomeColors).map(([biome, color]) => (
-                                    <div key={biome} className="flex items-center gap-1">
-                                        <div 
-                                            className="w-3 h-3 border border-gray-600"
-                                            style={{ background: color }}
-                                        ></div>
-                                        <span className="capitalize">{biome}</span>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-                    )}
                 </div>
             </div>
+
         </div>
     );
 };
