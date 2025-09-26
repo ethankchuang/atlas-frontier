@@ -114,11 +114,29 @@ class MonsterBehaviorManager:
         # LIMIT: Only allow ONE aggressive monster to attack per room entry
         # This prevents overwhelming the player with multiple back-to-back combats
         if aggressive_monsters:
+            # Check if player has rejoin immunity - if so, skip all aggressive monster attacks
+            try:
+                player_data = await game_manager.db.get_player(player_id)
+                if player_data and player_data.get('rejoin_immunity', False):
+                    logger.info(f"[MonsterBehavior] Player {player_id} has rejoin immunity, skipping aggressive monster attacks")
+                    return [msg for msg in messages if msg]  # Return existing messages without adding aggressive monster messages
+            except Exception as e:
+                logger.warning(f"[MonsterBehavior] Error checking player {player_id} rejoin immunity: {str(e)}")
+            
             # Filter out monsters that have already fought this player
+            # Also filter out monsters with rejoin_safe flag (made non-engaging for rejoining players)
             available_monsters = []
             for monster_id, monster_name in aggressive_monsters:
                 if not self._has_monster_fought_player(player_id, monster_id):
-                    available_monsters.append((monster_id, monster_name))
+                    # Check if monster has rejoin_safe flag
+                    try:
+                        monster_data = await game_manager.db.get_monster(monster_id)
+                        if monster_data and not monster_data.get('rejoin_safe', False):
+                            available_monsters.append((monster_id, monster_name))
+                    except Exception as e:
+                        logger.warning(f"[MonsterBehavior] Error checking monster {monster_id} rejoin_safe flag: {str(e)}")
+                        # If we can't check, assume it's safe to engage
+                        available_monsters.append((monster_id, monster_name))
             
             if available_monsters:
                 # Choose the first available aggressive monster to attack
@@ -132,7 +150,7 @@ class MonsterBehaviorManager:
                     other_monsters = [name for _, name in available_monsters[1:]]
                     messages.append(f"⚠️ Other aggressive creatures ({', '.join(other_monsters)}) watch from the shadows, waiting for their turn...")
             else:
-                # All aggressive monsters have already fought this player
+                # All aggressive monsters have already fought this player or are rejoin_safe
                 fought_monsters = [name for _, name in aggressive_monsters]
                 messages.append(f"⚔️ The aggressive creatures ({', '.join(fought_monsters)}) have already fought you and won't attack again unless you choose to fight them.")
         
@@ -382,6 +400,15 @@ class MonsterBehaviorManager:
         print(f"   attempted_direction: {attempted_direction}")
         logger.info(f"[MonsterBehavior] Checking aggressive blocking: player={player_id}, room={room_id}, direction={attempted_direction}")
         
+        # Check if player has rejoin immunity - if so, no monsters can block
+        try:
+            player_data = await game_manager.db.get_player(player_id)
+            if player_data and player_data.get('rejoin_immunity', False):
+                logger.info(f"[MonsterBehavior] Player {player_id} has rejoin immunity, no monsters can block")
+                return None
+        except Exception as e:
+            logger.warning(f"[MonsterBehavior] Error checking player {player_id} rejoin immunity: {str(e)}")
+        
         if room_id not in self.aggressive_monsters:
             logger.info(f"[MonsterBehavior] No aggressive monsters in room {room_id}")
             return None
@@ -455,6 +482,15 @@ class MonsterBehaviorManager:
     ) -> str:
         """Initiate combat with aggressive monster when player tries to perform any action"""
         try:
+            # Check if player has rejoin immunity - if so, don't initiate combat
+            try:
+                player_data = await game_manager.db.get_player(player_id)
+                if player_data and player_data.get('rejoin_immunity', False):
+                    logger.info(f"[MonsterBehavior] Player {player_id} has rejoin immunity, not initiating combat")
+                    return "The aggressive creatures watch you warily but don't attack."
+            except Exception as e:
+                logger.warning(f"[MonsterBehavior] Error checking player {player_id} rejoin immunity: {str(e)}")
+            
             monster_data = await game_manager.db.get_monster(monster_id)
             monster_name = monster_data.get('name', 'Unknown Monster') if monster_data else 'Unknown Monster'
             monster_size = (monster_data or {}).get('size', 'creature')
@@ -462,6 +498,11 @@ class MonsterBehaviorManager:
             brief_desc = ''
             if monster_desc:
                 brief_desc = monster_desc.split('.')[0][:120]
+            
+            # Check if monster has rejoin_safe flag - if so, don't initiate combat
+            if monster_data and monster_data.get('rejoin_safe', False):
+                logger.info(f"[MonsterBehavior] Monster {monster_name} has rejoin_safe flag, not initiating combat")
+                return f"The {monster_name} watches you warily but doesn't attack."
             
             # Import here to avoid circular import
             from .main import initiate_monster_duel

@@ -318,7 +318,8 @@ async def get_room_monsters_description(room_id: str, game_manager: GameManager)
                 aggressiveness = monster_data['aggressiveness']
                 
                 # ONLY show aggressive monsters in this function
-                if aggressiveness == 'aggressive':
+                # Skip monsters that have the rejoin_safe flag (made non-engaging for rejoining players)
+                if aggressiveness == 'aggressive' and not monster_data.get('rejoin_safe', False):
                     name = monster_data['name']
                     size = monster_data['size']
                     
@@ -810,49 +811,34 @@ async def join_game(
             'room': starting_room
         }
     else:
-        # Player already in game, check if they were in combat and lost
+        # Player already in game - return their current state without moving them
+        # No teleportation for any reason - players always stay where they are
+        
+        # Give player temporary immunity to ALL aggressive monsters when rejoining
+        player.rejoin_immunity = True
+        await game_manager.db.set_player(player_id, player.dict())
+        logger.info(f"[Join Game] Player {player_id} granted rejoin immunity to aggressive monsters")
+        
         room_data = await game_manager.db.get_room(player.current_room)
         if room_data:
             room = Room(**room_data)
             
-            # Check if player was in combat with aggressive monsters
-            # If so, move them to a safe location (starting room)
+            # If there are aggressive monsters in the room, make them non-engaging
             if room.monsters:
-                # Check if any monsters are aggressive
-                has_aggressive_monsters = False
                 for monster_id in room.monsters:
                     try:
                         monster_data = await game_manager.db.get_monster(monster_id)
                         if monster_data and monster_data.get('aggressiveness') == 'aggressive':
-                            has_aggressive_monsters = True
-                            break
+                            # Temporarily make the monster non-aggressive for this player's session
+                            # This prevents engagement without moving the player
+                            monster_data['aggressiveness'] = 'neutral'
+                            monster_data['rejoin_safe'] = True  # Flag to indicate this is a rejoin safety measure
+                            await game_manager.db.set_monster(monster_id, monster_data)
+                            logger.info(f"[Join Game] Made aggressive monster {monster_id} non-engaging for rejoining player {player_id}")
                     except Exception as e:
-                        logger.warning(f"[Join Game] Error checking monster {monster_id}: {str(e)}")
-                
-                if has_aggressive_monsters:
-                    logger.info(f"[Join Game] Player {player_id} rejoining in room with aggressive monsters, moving to safe location")
-                    
-                    # Move player to starting room
-                    starting_room = await game_manager.ensure_starting_room()
-                    old_room_id = player.current_room
-                    player.current_room = starting_room.id
-                    
-                    # Update player location
-                    await game_manager.db.set_player(player_id, player.dict())
-                    
-                    # Update room player lists
-                    await game_manager.db.remove_from_room_players(old_room_id, player_id)
-                    await game_manager.db.add_to_room_players(starting_room.id, player_id)
-                    
-                    logger.info(f"[Join Game] Moved player {player_id} from {old_room_id} to {starting_room.id}")
-                    
-                    return {
-                        'message': f'Welcome back, {player.name}! You were moved to safety.',
-                        'player': player,
-                        'room': starting_room
-                    }
+                        logger.warning(f"[Join Game] Error updating monster {monster_id}: {str(e)}")
         
-        # Normal rejoin - return current state
+        # Return current state without moving player
         room = Room(**room_data) if room_data else None
         
         return {
@@ -923,6 +909,8 @@ async def get_player_visited_coordinates(
         )
     
     logger.info(f"[Player Coordinates] Retrieved {len(player.visited_coordinates)} visited coordinates for player {player_id}")
+    logger.info(f"[Player Coordinates] Visited biomes: {player.visited_biomes}")
+    logger.info(f"[Player Coordinates] Biome colors: {player.biome_colors}")
     return {
         "visited_coordinates": player.visited_coordinates,
         "visited_biomes": player.visited_biomes,
@@ -972,14 +960,18 @@ async def mark_coordinate_visited(
     
     if biome:
         player.visited_biomes[coord_key] = biome
+        logger.info(f"[Player Coordinates] Saved biome '{biome}' for coordinate ({x},{y})")
     
     if biome_color and biome:
         player.biome_colors[biome] = biome_color
+        logger.info(f"[Player Coordinates] Saved biome color '{biome_color}' for biome '{biome}'")
     
     # Save updated player data
     await game_manager.db.set_player(player_id, player.dict())
     
     logger.info(f"[Player Coordinates] Marked coordinate ({x},{y}) as visited for player {player_id}")
+    logger.info(f"[Player Coordinates] Current visited_biomes: {player.visited_biomes}")
+    logger.info(f"[Player Coordinates] Current biome_colors: {player.biome_colors}")
     return {"success": True, "message": f"Coordinate ({x},{y}) marked as visited"}
 
 # Clear combat state endpoint (requires auth)
@@ -1038,8 +1030,7 @@ async def clear_combat_state(
         
         # Clear any monster combat history
         try:
-            from .monster_behavior import MonsterBehaviorManager
-            monster_behavior_manager = MonsterBehaviorManager(game_manager.db)
+            from .monster_behavior import monster_behavior_manager
             monster_behavior_manager._clear_player_combat_history(player_id)
             logger.info(f"[Clear Combat] Cleared monster combat history for player {player_id}")
         except Exception as e:
@@ -1398,6 +1389,11 @@ async def process_action_stream(
                                     return
 
                             # Proceed with movement
+                            # Clear rejoin immunity when player moves to a different room
+                            if player.rejoin_immunity:
+                                player.rejoin_immunity = False
+                                logger.info(f"[Stream] Cleared rejoin immunity for player {action_request.player_id} due to movement")
+                            
                             # CRITICAL: Use GameManager's coordinate-based room movement logic to prevent duplicate coordinates
                             actual_room_id, new_room = await game_manager.handle_room_movement_by_direction(
                                 player, room, direction

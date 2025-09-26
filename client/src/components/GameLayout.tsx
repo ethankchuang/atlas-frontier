@@ -104,17 +104,37 @@ const GameLayout: React.FC<GameLayoutProps> = ({ playerId }) => {
                 try {
                     const coordinatesData = await apiService.getPlayerVisitedCoordinates(playerId);
                     console.log('[GameLayout] Loading visited coordinates:', coordinatesData.visited_coordinates.length);
+                    console.log('[GameLayout] Loading visited biomes:', coordinatesData.visited_biomes);
+                    console.log('[GameLayout] Loading biome colors:', coordinatesData.biome_colors);
                     
-                    // Restore visited coordinates to the store
+                    // Restore biome colors FIRST to preserve saved colors
                     const gameStore = useGameStore.getState();
+                    gameStore.setBiomeColors(coordinatesData.biome_colors);
+                    
+                    // Then restore visited coordinates without overriding biome colors
+                    // We need to manually update the store state to avoid the addVisitedCoordinate function
+                    // which might override our saved biome colors
+                    const newVisitedCoordinates = new Set(gameStore.visitedCoordinates);
+                    const newVisitedBiomes = { ...gameStore.visitedBiomes };
+                    
                     coordinatesData.visited_coordinates.forEach(coordKey => {
                         const [x, y] = coordKey.split(',').map(Number);
                         const biome = coordinatesData.visited_biomes[coordKey];
-                        gameStore.addVisitedCoordinate(x, y, biome);
+                        
+                        newVisitedCoordinates.add(coordKey);
+                        if (biome) {
+                            newVisitedBiomes[coordKey] = biome;
+                        }
                     });
                     
-                    // Restore biome colors
-                    gameStore.setBiomeColors(coordinatesData.biome_colors);
+                    // Update the store state directly
+                    useGameStore.setState({
+                        visitedCoordinates: newVisitedCoordinates,
+                        visitedBiomes: newVisitedBiomes
+                    });
+                    
+                    // Force a re-render by logging the final state
+                    console.log('[GameLayout] Final biome colors after loading:', useGameStore.getState().biomeColors);
                     
                     console.log('[GameLayout] Loaded', coordinatesData.visited_coordinates.length, 'visited coordinates for player');
                 } catch (error) {
@@ -151,7 +171,7 @@ const GameLayout: React.FC<GameLayoutProps> = ({ playerId }) => {
                 }
 
                 // Mark initial room as visited on minimap
-                addVisitedCoordinate(roomInfo.room.x, roomInfo.room.y);
+                addVisitedCoordinate(roomInfo.room.x, roomInfo.room.y, roomInfo.room.biome);
 
                 // Add initial room description to chat
                 const atmosphericPresence = (roomInfo as { atmospheric_presence?: string }).atmospheric_presence || '';
@@ -235,7 +255,7 @@ const GameLayout: React.FC<GameLayoutProps> = ({ playerId }) => {
                 upsertItems(roomInfo.items || []);
 
                 // Mark the room as visited on minimap
-                addVisitedCoordinate(roomInfo.room.x, roomInfo.room.y);
+                addVisitedCoordinate(roomInfo.room.x, roomInfo.room.y, roomInfo.room.biome);
 
                 setIsLoading(false);
             } catch (error) {
