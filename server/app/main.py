@@ -885,6 +885,98 @@ async def get_player_inventory(
     logger.info(f"[Player Inventory] Loaded {len(inventory_items)} items for player {player_id}")
     return {"items": inventory_items}
 
+# Drop item from player inventory endpoint (requires auth)
+@app.post("/player/{player_id}/drop-item")
+async def drop_player_item(
+    player_id: str,
+    request: Dict[str, Any],
+    current_user: Dict[str, Any] = Depends(get_current_user),
+    game_manager: GameManager = Depends(get_game_manager)
+):
+    """Drop an item from player's inventory"""
+    # Extract parameters from request body
+    item_id = request.get('item_id')
+    drop_to_room = request.get('drop_to_room', True)
+    
+    if not item_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="item_id is required"
+        )
+    
+    # Get the player and verify ownership
+    player = await game_manager.get_player(player_id)
+    if not player:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Player not found"
+        )
+    
+    # Verify the player belongs to the current user
+    if player.user_id != current_user['id']:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only drop items from your own player's inventory"
+        )
+    
+    # Call the drop_item function
+    result = await game_manager.drop_item(player_id, item_id, drop_to_room)
+    
+    if not result["success"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=result["message"]
+        )
+    
+    logger.info(f"[Drop Item] Player {player_id} dropped item {item_id} (drop_to_room: {drop_to_room})")
+    return result
+
+# Combine items from player inventory endpoint (requires auth)
+@app.post("/player/{player_id}/combine-items")
+async def combine_player_items(
+    player_id: str,
+    request: Dict[str, Any],
+    current_user: Dict[str, Any] = Depends(get_current_user),
+    game_manager: GameManager = Depends(get_game_manager)
+):
+    """Combine multiple items from player's inventory to create a new item"""
+    # Extract parameters from request body
+    item_ids = request.get('item_ids', [])
+    combination_description = request.get('combination_description', '')
+    
+    if not item_ids or len(item_ids) < 2:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="At least 2 items are required for combination"
+        )
+    
+    # Get the player and verify ownership
+    player = await game_manager.get_player(player_id)
+    if not player:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Player not found"
+        )
+    
+    # Verify the player belongs to the current user
+    if player.user_id != current_user['id']:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only combine items from your own player's inventory"
+        )
+    
+    # Call the combine_items function
+    result = await game_manager.combine_items(player_id, item_ids, combination_description)
+    
+    if not result["success"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=result["message"]
+        )
+    
+    logger.info(f"[Combine Items] Player {player_id} combined {len(item_ids)} items")
+    return result
+
 # Get player visited coordinates endpoint (requires auth)
 @app.get("/player/{player_id}/visited-coordinates")
 async def get_player_visited_coordinates(
@@ -1606,23 +1698,62 @@ async def process_action_stream(
                                             "properties": {}
                                         }
                                         
-                                        # Create rarity stars for display
-                                        rarity_stars = "★" * item_data['rarity'] + "☆" * (4 - item_data['rarity'])
-                                        
-                                        # Send WebSocket notification to the player
-                                        from datetime import datetime
-                                        item_message = {
+                                        # Send item obtained notification via WebSocket
+                                        await manager.send_to_player(room.id, action_request.player_id, {
                                             "type": "item_obtained",
                                             "player_id": action_request.player_id,
                                             "item_id": item_id,
                                             "item_name": item_data['name'],
                                             "item_rarity": item_data['rarity'],
-                                            "rarity_stars": rarity_stars,
-                                            "message": f"📦 You obtained: {rarity_stars} {item_data['name']}",
-                                            "timestamp": datetime.utcnow().isoformat()
-                                        }
+                                            "rarity_stars": "★" * item_data['rarity'] + "☆" * (4 - item_data['rarity']),
+                                            "message": f"📦 You obtained: {'★' * item_data['rarity']}{'☆' * (4 - item_data['rarity'])} {item_data['name']}",
+                                            "timestamp": datetime.now().isoformat()
+                                        })
                                         
-                                        await manager.send_personal_message(item_message, action_request.player_id)
+                                        logger.info(f"[Item System] Sent item obtained notification for '{item_data['name']}' to player {action_request.player_id}")
+                                
+                                # Handle item combination from AI
+                                item_combination_info = chunk.get("updates", {}).get("item_combination")
+                                if item_combination_info is not None:
+                                    item_ids = item_combination_info.get("item_ids", [])
+                                    combination_description = item_combination_info.get("combination_description", "")
+                                    
+                                    if item_ids and len(item_ids) >= 2:
+                                        logger.info(f"[Item Combination] AI requested combination of {len(item_ids)} items: {item_ids}")
+                                        
+                                        try:
+                                            # Call the combine_items function
+                                            combination_result = await game_manager.combine_items(
+                                                action_request.player_id, 
+                                                item_ids, 
+                                                combination_description
+                                            )
+                                            
+                                            if combination_result["success"]:
+                                                # Update the chunk with the combination results
+                                                chunk["updates"]["player"] = combination_result["updates"]["player"]
+                                                chunk["updates"]["new_item"] = combination_result["updates"]["new_item"]
+                                                
+                                                # Send item combination notification via WebSocket
+                                                await manager.send_to_player(room.id, action_request.player_id, {
+                                                    "type": "item_obtained",
+                                                    "player_id": action_request.player_id,
+                                                    "item_id": combination_result["updates"]["new_item"]["id"],
+                                                    "item_name": combination_result["updates"]["new_item"]["name"],
+                                                    "item_rarity": combination_result["updates"]["new_item"]["rarity"],
+                                                    "rarity_stars": "★" * combination_result["updates"]["new_item"]["rarity"] + "☆" * (4 - combination_result["updates"]["new_item"]["rarity"]),
+                                                    "message": f"🔨 You crafted: {'★' * combination_result['updates']['new_item']['rarity']}{'☆' * (4 - combination_result['updates']['new_item']['rarity'])} {combination_result['updates']['new_item']['name']}",
+                                                    "timestamp": datetime.now().isoformat()
+                                                })
+                                                
+                                                logger.info(f"[Item Combination] Successfully combined items into '{combination_result['updates']['new_item']['name']}'")
+                                            else:
+                                                logger.warning(f"[Item Combination] Failed to combine items: {combination_result['message']}")
+                                                
+                                        except Exception as e:
+                                            logger.error(f"[Item Combination] Error combining items: {str(e)}")
+                                    else:
+                                        logger.warning(f"[Item Combination] Invalid item combination request: {item_combination_info}")
 
                             except Exception as e:
                                 logger.error(f"[Item Handling] Unexpected error: {str(e)}")
