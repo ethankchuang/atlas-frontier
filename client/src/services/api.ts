@@ -426,6 +426,26 @@ class APIService {
         return this.request<{ items: Item[] }>(`/player/${playerId}/inventory`);
     }
 
+    async dropPlayerItem(playerId: string, itemId: string, dropToRoom: boolean = true): Promise<{ success: boolean; message: string; updates: any }> {
+        return this.request<{ success: boolean; message: string; updates: any }>(`/player/${playerId}/drop-item`, {
+            method: 'POST',
+            body: JSON.stringify({
+                item_id: itemId,
+                drop_to_room: dropToRoom
+            })
+        });
+    }
+
+    async combinePlayerItems(playerId: string, itemIds: string[], combinationDescription: string = ''): Promise<{ success: boolean; message: string; updates: any }> {
+        return this.request<{ success: boolean; message: string; updates: any }>(`/player/${playerId}/combine-items`, {
+            method: 'POST',
+            body: JSON.stringify({
+                item_ids: itemIds,
+                combination_description: combinationDescription
+            })
+        });
+    }
+
     async getPlayerVisitedCoordinates(playerId: string): Promise<{ 
         visited_coordinates: string[], 
         visited_biomes: { [key: string]: string }, 

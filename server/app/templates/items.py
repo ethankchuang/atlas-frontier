@@ -221,6 +221,43 @@ ROOM ITEM AVAILABILITY:
                         naming_guidance = self._get_naming_guidance(selected_style, room_biome)
                         world_context_text += f"\n{naming_guidance}\n"
         
+        # Handle item combination context
+        combination_items = context.get('combination_items', [])
+        combination_description = context.get('combination_description', '')
+        
+        if combination_items and situation_context == 'item_combination':
+            combination_context = f"""
+**ITEM COMBINATION CRAFTING:**
+You are creating a new item by combining {len(combination_items)} existing items:
+
+ITEMS TO COMBINE:
+"""
+            for i, item in enumerate(combination_items, 1):
+                name = item.get('name', 'Unknown Item')
+                description = item.get('description', 'No description')
+                capabilities = item.get('capabilities', [])
+                rarity = item.get('rarity', 1)
+                
+                combination_context += f"{i}. **{name}** (Rarity {rarity}): {description}\n"
+                if capabilities:
+                    combination_context += f"   Capabilities: {', '.join(capabilities)}\n"
+                combination_context += "\n"
+            
+            if combination_description:
+                combination_context += f"PLAYER'S INTENT: {combination_description}\n\n"
+            
+            combination_context += """
+**COMBINATION RULES:**
+- The new item MUST be at least rarity 2 (2-star minimum)
+- The new item should logically combine the properties of the input items
+- Create a new, unique item that makes sense as a combination
+- The name should reflect that it's a crafted/combined item
+- Capabilities should be enhanced or combined from the input items
+- Make it feel like a meaningful upgrade from the individual components
+"""
+            
+            world_context_text += combination_context
+        
         # Add recent items context for variety
         recent_items_context = await self._get_recent_items_context(context)
         

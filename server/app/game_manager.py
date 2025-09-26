@@ -1604,3 +1604,203 @@ class GameManager:
                     })
                 # Don't add anything for undiscovered rooms - just skip them
         return local_map
+
+    async def drop_item(self, player_id: str, item_id: str, drop_to_room: bool = True) -> Dict[str, Any]:
+        """
+        Drop an item from player's inventory.
+        
+        Args:
+            player_id: ID of the player dropping the item
+            item_id: ID of the item to drop
+            drop_to_room: If True, add item to current room. If False, just delete the item.
+                         For 1-star items, always delete regardless of this parameter.
+        
+        Returns:
+            Dict with success status, message, and any updates
+        """
+        try:
+            # Get player and verify they exist
+            player = await self.get_player(player_id)
+            if not player:
+                return {
+                    "success": False,
+                    "message": "Player not found",
+                    "updates": {}
+                }
+            
+            # Check if player has the item
+            logger.info(f"[Drop Item] Player {player_id} inventory: {player.inventory}")
+            logger.info(f"[Drop Item] Looking for item_id: {item_id}")
+            if item_id not in player.inventory:
+                logger.warning(f"[Drop Item] Item {item_id} not found in player {player_id} inventory: {player.inventory}")
+                return {
+                    "success": False,
+                    "message": "You don't have this item in your inventory",
+                    "updates": {}
+                }
+            
+            # Get item data to check rarity
+            item_data = await self.db.get_item(item_id)
+            if not item_data:
+                return {
+                    "success": False,
+                    "message": "Item data not found",
+                    "updates": {}
+                }
+            
+            # Check if it's a 1-star item - always delete these
+            item_rarity = item_data.get('rarity', 1)
+            if item_rarity == 1:
+                drop_to_room = False  # Force deletion for 1-star items
+            
+            # Remove item from player inventory
+            player.inventory.remove(item_id)
+            await self.db.set_player(player_id, player.dict())
+            
+            updates = {
+                "player": player.dict()
+            }
+            
+            if drop_to_room:
+                # Add item to current room
+                room_data = await self.db.get_room(player.current_room)
+                if room_data:
+                    # Convert to Room object to ensure proper structure
+                    from .models import Room
+                    room = Room(**room_data)
+                    room.items.append(item_id)
+                    await self.db.set_room(room.id, room.dict())
+                    updates["room"] = room.dict()
+                    
+                    logger.info(f"[Drop Item] Player {player_id} dropped item '{item_data.get('name', 'Unknown')}' to room {room.id}")
+                    return {
+                        "success": True,
+                        "message": f"You dropped {item_data.get('name', 'the item')} on the ground",
+                        "updates": updates
+                    }
+                else:
+                    logger.error(f"[Drop Item] Could not find room {player.current_room} for player {player_id}")
+                    return {
+                        "success": False,
+                        "message": "Could not find current room",
+                        "updates": updates
+                    }
+            else:
+                # Just delete the item (for 1-star items or when explicitly requested)
+                logger.info(f"[Drop Item] Player {player_id} deleted item '{item_data.get('name', 'Unknown')}' (rarity: {item_rarity})")
+                return {
+                    "success": True,
+                    "message": f"You discarded {item_data.get('name', 'the item')}",
+                "updates": updates
+            }
+                
+        except Exception as e:
+            logger.error(f"[Drop Item] Error dropping item {item_id} for player {player_id}: {str(e)}")
+            return {
+                "success": False,
+                "message": f"Error dropping item: {str(e)}",
+                "updates": {}
+            }
+
+    async def combine_items(self, player_id: str, item_ids: List[str], combination_description: str = "") -> Dict[str, Any]:
+        """
+        Combine multiple items from player's inventory to create a new item.
+        
+        Args:
+            player_id: ID of the player combining items
+            item_ids: List of item IDs to combine
+            combination_description: Optional description of what the player is trying to create
+        
+        Returns:
+            Dict with success status, message, and any updates
+        """
+        try:
+            # Get player and verify they exist
+            player = await self.get_player(player_id)
+            if not player:
+                return {
+                    "success": False,
+                    "message": "Player not found",
+                    "updates": {}
+                }
+            
+            # Validate that player has all the items
+            missing_items = [item_id for item_id in item_ids if item_id not in player.inventory]
+            if missing_items:
+                return {
+                    "success": False,
+                    "message": f"You don't have these items in your inventory: {missing_items}",
+                    "updates": {}
+                }
+            
+            # Get item data for all items
+            items_data = []
+            for item_id in item_ids:
+                item_data = await self.db.get_item(item_id)
+                if not item_data:
+                    return {
+                        "success": False,
+                        "message": f"Item data not found for item {item_id}",
+                        "updates": {}
+                    }
+                items_data.append(item_data)
+            
+            # Generate the combined item using AI
+            from .templates.items import AIItemGenerator
+            item_generator = AIItemGenerator()
+            
+            # Create context for item combination
+            item_context = {
+                'world_seed': 'item_combination',
+                'world_theme': 'fantasy',
+                'room_description': 'crafting',
+                'room_biome': 'workshop',
+                'player_action': f"combine {', '.join([item['name'] for item in items_data])}",
+                'situation_context': 'item_combination',
+                'desired_rarity': 2,  # Combined items are always at least 2-star
+                'combination_items': items_data,
+                'combination_description': combination_description,
+                'database': self.db
+            }
+            
+            # Generate the combined item
+            combined_item_data = await item_generator.generate_item(self.ai_handler, item_context)
+            
+            # Create unique item ID and store in database
+            import uuid
+            combined_item_id = f"item_{str(uuid.uuid4())}"
+            combined_item_data['id'] = combined_item_id
+            await self.db.set_item(combined_item_id, combined_item_data)
+            
+            # Remove original items from inventory
+            for item_id in item_ids:
+                player.inventory.remove(item_id)
+            
+            # Add combined item to inventory
+            player.inventory.append(combined_item_id)
+            await self.db.set_player(player_id, player.dict())
+            
+            updates = {
+                "player": player.dict(),
+                "new_item": {
+                    "id": combined_item_id,
+                    "name": combined_item_data.get('name', 'Combined Item'),
+                    "rarity": combined_item_data.get('rarity', 2),
+                    "description": combined_item_data.get('description', 'A newly crafted item')
+                }
+            }
+            
+            logger.info(f"[Combine Items] Player {player_id} combined {len(item_ids)} items into '{combined_item_data.get('name', 'Unknown')}'")
+            return {
+                "success": True,
+                "message": f"You successfully combined {len(item_ids)} items into {combined_item_data.get('name', 'a new item')}!",
+                "updates": updates
+            }
+                
+        except Exception as e:
+            logger.error(f"[Combine Items] Error combining items {item_ids} for player {player_id}: {str(e)}")
+            return {
+                "success": False,
+                "message": f"Error combining items: {str(e)}",
+                "updates": {}
+            }

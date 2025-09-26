@@ -358,6 +358,12 @@ class AIHandler:
             "  - Do NOT simulate the duel outcome here; the server will initiate combat and handle resolution.",
             "  - Keep the narrative to the immediate pre-fight moment (no long analyses).",
             "",
+            "ITEM COMBINATION POLICY (CRITICAL):",
+            "- If the player clearly intends to craft/combine 2 or more items:",
+            "  - Set updates.item_combination with the item_ids array and optional combination_description.",
+            "  - The server will handle the actual item combination and creation.",
+            "  - Keep the narrative focused on the crafting process and intent.",
+            "",
             "ROOM ITEMS:",
             "- The following items are available in this room:",
         ])
