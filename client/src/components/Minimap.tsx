@@ -50,7 +50,7 @@ const Minimap: React.FC<MinimapProps> = ({ className = '' }) => {
         return grid;
     };
 
-    const grid = useMemo(generateGrid, [playerX, playerY, visitedCoordinates, visitedBiomes, biomeColors, centerOffset, isCoordinateVisited]);
+    const grid = useMemo(generateGrid, [playerX, playerY, visitedBiomes, centerOffset, isCoordinateVisited]);
     const visitedCount = visitedCoordinates.size;
 
     if (!currentRoom || !player) {
