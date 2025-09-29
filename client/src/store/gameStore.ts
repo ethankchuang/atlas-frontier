@@ -81,6 +81,12 @@ interface GameStore {
     setIsMenuOpen: (open: boolean) => void;
     isInventoryOpen: boolean;
     setIsInventoryOpen: (open: boolean) => void;
+    
+    // Tutorial state
+    showTutorial: boolean;
+    setShowTutorial: (show: boolean) => void;
+    hasSeenTutorial: boolean;
+    setHasSeenTutorial: (seen: boolean) => void;
 
     // Item registry for client-side lookup
     itemsById: { [id: string]: Item };
@@ -154,6 +160,10 @@ const useGameStore = create<GameStore>((set, get) => ({
     // Menu/Inventory state
     isMenuOpen: false,
     isInventoryOpen: false,
+    
+    // Tutorial state
+    showTutorial: false,
+    hasSeenTutorial: false,
 
     // Item registry
     itemsById: {},
@@ -178,6 +188,10 @@ const useGameStore = create<GameStore>((set, get) => ({
     // Auth setters
     setUser: (user) => set({ user }),
     setIsAuthenticated: (isAuthenticated) => set({ isAuthenticated }),
+    
+    // Tutorial setters
+    setShowTutorial: (showTutorial) => set({ showTutorial }),
+    setHasSeenTutorial: (hasSeenTutorial) => set({ hasSeenTutorial }),
 
     // Setters  
     setPlayer: (player) => set({ player }),
