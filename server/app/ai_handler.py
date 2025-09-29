@@ -331,6 +331,13 @@ class AIHandler:
         
         prompt_parts.extend([
             "",
+            "BASIC MOVE VALIDATION:",
+            "- If the player attempts an action requiring equipment they don't have, explain why it fails",
+            "- Basic physical actions (punch, kick, dodge, block, etc.) are always valid",
+            "- Equipment-based actions (slash, shoot, cast spells) require appropriate items",
+            "- If unsure about equipment requirements, err on the side of allowing the action",
+            "- Keep validation explanations brief and helpful",
+            "",
             "CRITICAL RULES FOR CONCISE RESPONSES:",
             "1. Keep narrative responses to 2-4 sentences maximum",
             "2. Focus only on the most important details of what happens",
