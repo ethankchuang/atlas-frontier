@@ -30,7 +30,9 @@ from .auth_models import (
     UpdateUsernameRequest,
     AuthResponse,
     UserProfile,
-    RegisterResponse
+    RegisterResponse,
+    GuestConversionRequest,
+    AnonymousGuestRequest
 )
 from .auth_service import AuthService
 from .auth_utils import get_current_user, get_optional_current_user
@@ -75,7 +77,7 @@ app.add_middleware(
 @app.middleware("http")
 async def api_key_middleware(request: Request, call_next):
     # Check API key before processing request
-    await api_key_auth(request)
+    api_key_auth(request)
     response = await call_next(request)
     return response
 
@@ -666,6 +668,171 @@ async def login_user(request: LoginRequest):
     )
     return result
 
+@app.post("/auth/guest")
+async def create_guest_player(
+    request: AnonymousGuestRequest,
+    game_manager: GameManager = Depends(get_game_manager)
+):
+    """Create a guest player for anonymous Supabase user"""
+    try:
+        # Use the anonymous user ID from Supabase
+        anonymous_user_id = request.anonymous_user_id
+        guest_player_id = f"guest_{anonymous_user_id[:8]}"
+        
+        # Get starting room
+        starting_room = await game_manager.ensure_starting_room()
+        
+        # Create guest player with anonymous user ID
+        player = Player(
+            id=guest_player_id,
+            user_id=anonymous_user_id,  # Use the Supabase anonymous user ID
+            name=f"Anonymous_{anonymous_user_id[:8]}",
+            current_room=starting_room.id,
+            inventory=[],
+            quest_progress={},
+            memory_log=[],
+            last_action=None,
+            last_action_text=None
+        )
+        
+        # Save the guest player
+        await game_manager.db.set_player(guest_player_id, player.dict())
+        
+        # Add player to the starting room's player list
+        await game_manager.db.add_to_room_players(starting_room.id, guest_player_id)
+        
+        return {
+            'player': player,
+            'message': 'Anonymous guest player created successfully'
+        }
+    except Exception as e:
+        logger.error(f"Error creating guest player: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to create guest player"
+        )
+
+@app.post("/join/guest/{player_id}")
+async def join_game_as_guest(
+    player_id: str,
+    game_manager: GameManager = Depends(get_game_manager)
+):
+    """Join game as a guest player (no authentication required)"""
+    try:
+        # Verify this is a guest player
+        if not player_id.startswith('guest_'):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="This endpoint is only for guest players"
+            )
+        
+        # Get the player
+        player = await game_manager.get_player(player_id)
+        if not player:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Guest player not found"
+            )
+        
+        # If player doesn't have a current room, place them in starting room
+        if not player.current_room:
+            # Get or create starting room
+            starting_room = await game_manager.ensure_starting_room()
+            
+            # Update player's location
+            player.current_room = starting_room.id
+            await game_manager.db.set_player(player.id, player.dict())
+            
+            # Add player to room's player list
+            await game_manager.db.add_to_room_players(starting_room.id, player.id)
+            
+            logger.info(f"Placed guest player {player.name} in starting room {starting_room.id}")
+            
+            return {
+                'message': f'Welcome to the game, {player.name}!',
+                'player': player,
+                'room': starting_room
+            }
+        else:
+            # Player already in game - return their current state without moving them
+            # Give player temporary immunity to ALL aggressive monsters when rejoining
+            player.rejoin_immunity = True
+            await game_manager.db.set_player(player_id, player.dict())
+            logger.info(f"[Join Game] Guest player {player_id} granted rejoin immunity to aggressive monsters")
+            
+            room_data = await game_manager.db.get_room(player.current_room)
+            if room_data:
+                room = Room(**room_data)
+                
+                # If there are aggressive monsters in the room, make them non-engaging
+                if room.monsters:
+                    for monster_id in room.monsters:
+                        try:
+                            monster_data = await game_manager.db.get_monster(monster_id)
+                            if monster_data and monster_data.get('aggressiveness') == 'aggressive':
+                                # Temporarily make the monster non-aggressive for this player's session
+                                monster_data['aggressiveness'] = 'neutral'
+                                monster_data['rejoin_safe'] = True
+                                await game_manager.db.set_monster(monster_id, monster_data)
+                                logger.info(f"[Join Game] Made aggressive monster {monster_id} non-engaging for rejoining guest player {player_id}")
+                        except Exception as e:
+                            logger.warning(f"[Join Game] Error updating monster {monster_id}: {str(e)}")
+            
+            # Return current state without moving player
+            room = Room(**room_data) if room_data else None
+            
+            return {
+                'message': f'Welcome back, {player.name}!',
+                'player': player,
+                'room': room
+            }
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error joining game as guest {player_id}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to join game as guest"
+        )
+
+@app.post("/auth/guest-to-user")
+async def convert_guest_to_user(
+    request: GuestConversionRequest,
+    game_manager: GameManager = Depends(get_game_manager)
+):
+    """Convert an anonymous guest player to a registered user, preserving player data"""
+    try:
+        # Get the guest player data
+        guest_player_data = await game_manager.db.get_player(request.guest_player_id)
+        
+        if not guest_player_data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Guest player not found"
+            )
+        
+        # Update the player to belong to the new user ID (from Supabase)
+        guest_player_data['user_id'] = request.new_user_id
+        
+        # Save the updated player
+        await game_manager.db.set_player(request.guest_player_id, guest_player_data)
+        
+        return {
+            'user_id': request.new_user_id,
+            'username': request.username,
+            'email': request.email,
+            'guest_converted': True,
+            'message': 'Anonymous guest account converted to registered user successfully'
+        }
+        
+    except Exception as e:
+        logger.error(f"Error converting guest to user: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to convert guest to user"
+        )
+
 @app.get("/players")
 async def get_user_players(
     current_user: Dict[str, Any] = Depends(get_current_user),
@@ -851,7 +1018,7 @@ async def join_game(
 @app.get("/player/{player_id}/inventory")
 async def get_player_inventory(
     player_id: str,
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    current_user: Optional[Dict[str, Any]] = Depends(get_optional_current_user),
     game_manager: GameManager = Depends(get_game_manager)
 ):
     """Get player's inventory items with full item data"""
@@ -863,8 +1030,8 @@ async def get_player_inventory(
             detail="Player not found"
         )
     
-    # Verify the player belongs to the current user
-    if player.user_id != current_user['id']:
+    # Verify the player belongs to the current user (skip for anonymous users)
+    if not current_user or player.user_id != current_user['id']:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You can only access your own player's inventory"
@@ -981,7 +1148,7 @@ async def combine_player_items(
 @app.get("/player/{player_id}/visited-coordinates")
 async def get_player_visited_coordinates(
     player_id: str,
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    current_user: Optional[Dict[str, Any]] = Depends(get_optional_current_user),
     game_manager: GameManager = Depends(get_game_manager)
 ):
     """Get player's visited coordinates and minimap state"""
@@ -993,8 +1160,8 @@ async def get_player_visited_coordinates(
             detail="Player not found"
         )
     
-    # Verify the player belongs to the current user
-    if player.user_id != current_user['id']:
+    # Verify the player belongs to the current user (skip for anonymous users)
+    if not current_user or player.user_id != current_user['id']:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You can only access your own player's data"
@@ -1014,7 +1181,7 @@ async def get_player_visited_coordinates(
 async def mark_coordinate_visited(
     player_id: str,
     coordinate_data: dict,
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    current_user: Optional[Dict[str, Any]] = Depends(get_optional_current_user),
     game_manager: GameManager = Depends(get_game_manager)
 ):
     """Mark a coordinate as visited for a player"""
@@ -1026,8 +1193,8 @@ async def mark_coordinate_visited(
             detail="Player not found"
         )
     
-    # Verify the player belongs to the current user
-    if player.user_id != current_user['id']:
+    # Verify the player belongs to the current user (skip for anonymous users)
+    if not current_user or player.user_id != current_user['id']:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You can only update your own player's data"
@@ -1070,7 +1237,7 @@ async def mark_coordinate_visited(
 @app.post("/player/{player_id}/clear-combat-state")
 async def clear_combat_state(
     player_id: str,
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    current_user: Optional[Dict[str, Any]] = Depends(get_optional_current_user),
     game_manager: GameManager = Depends(get_game_manager)
 ):
     """Clear any active combat state for a player (used when rejoining)"""
@@ -1086,8 +1253,8 @@ async def clear_combat_state(
                 detail="Player not found"
             )
         
-        # Verify the player belongs to the current user
-        if player.user_id != current_user['id']:
+        # Verify the player belongs to the current user (skip for anonymous users)
+        if not current_user or player.user_id != current_user['id']:
             logger.warning(f"[Clear Combat] Player {player_id} does not belong to user {current_user['id']}")
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -1149,7 +1316,7 @@ async def clear_combat_state(
 async def get_player_messages(
     player_id: str,
     limit: int = 10,
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    current_user: Optional[Dict[str, Any]] = Depends(get_optional_current_user),
     game_manager: GameManager = Depends(get_game_manager)
 ):
     """Get recent messages for a specific player"""
@@ -1161,7 +1328,7 @@ async def get_player_messages(
             detail="Player not found"
         )
     
-    if player.user_id != current_user['id']:
+    if not current_user or player.user_id != current_user['id']:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You can only access your own player's messages"
@@ -1184,10 +1351,10 @@ async def get_player_messages(
 @app.get("/player/{player_id}")
 async def get_player_by_id(
     player_id: str,
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    current_user: Optional[Dict[str, Any]] = Depends(get_optional_current_user),
     game_manager: GameManager = Depends(get_game_manager)
 ):
-    """Get a specific player (must belong to current user)"""
+    """Get a specific player (must belong to current user; guests allowed)"""
     player = await game_manager.get_player(player_id)
     if not player:
         raise HTTPException(
@@ -1195,8 +1362,8 @@ async def get_player_by_id(
             detail="Player not found"
         )
     
-    # Verify the player belongs to the current user
-    if player.user_id != current_user['id']:
+    # Verify the player belongs to the current user (skip for anonymous users)
+    if not current_user or player.user_id != current_user['id']:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You can only access your own players"
@@ -1208,12 +1375,12 @@ async def get_player_by_id(
 @app.post("/action/stream")
 async def process_action_stream(
     action_request: ActionRequest,
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    current_user: Optional[Dict[str, Any]] = Depends(get_optional_current_user),
     game_manager: GameManager = Depends(get_game_manager)
 ):
-    # Validate that the user owns this player
+    # Validate that the user owns this player (skip for guest players)
     player = await game_manager.get_player(action_request.player_id)
-    if not player or player.user_id != current_user['id']:
+    if not player or (not current_user or player.user_id != current_user['id']):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You can only perform actions for your own player"

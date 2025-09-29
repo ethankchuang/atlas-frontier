@@ -98,6 +98,20 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
                 detail="Invalid token: missing user ID"
             )
         
+        # Check if this is an anonymous user
+        is_anonymous = payload.get('is_anonymous', False)
+        
+        if is_anonymous:
+            # For anonymous users, return basic info without requiring a profile
+            return {
+                'id': user_id,
+                'username': f"Anonymous_{user_id[:8]}",
+                'email': f"anonymous_{user_id[:8]}@example.com",
+                'is_anonymous': True,
+                'jwt_payload': payload
+            }
+        
+        # For regular users, get profile from database
         client = get_supabase_client()
         result = client.table('user_profiles').select('*').eq('id', user_id).execute()
         
@@ -114,6 +128,7 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
             'id': user_id,
             'username': user_profile['username'],
             'email': user_profile['email'],
+            'is_anonymous': False,
             'jwt_payload': payload
         }
         
@@ -126,7 +141,7 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
             detail="Authentication failed"
         )
 
-async def get_optional_current_user(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)) -> Optional[Dict[str, Any]]:
+async def get_optional_current_user(credentials: Optional[HTTPAuthorizationCredentials] = Depends(HTTPBearer(auto_error=False))) -> Optional[Dict[str, Any]]:
     """
     FastAPI dependency to get the current user if authenticated, None otherwise
     """
@@ -134,6 +149,48 @@ async def get_optional_current_user(credentials: Optional[HTTPAuthorizationCrede
         return None
     
     try:
-        return await get_current_user(credentials)
-    except HTTPException:
+        # Extract token from Bearer scheme
+        token = credentials.credentials
+        
+        # Verify the JWT token
+        payload = verify_jwt_token(token)
+        
+        # Get user profile from database
+        user_id = payload.get('sub')
+        if not user_id:
+            return None
+        
+        # Check if this is an anonymous user
+        is_anonymous = payload.get('is_anonymous', False)
+        
+        if is_anonymous:
+            # For anonymous users, return basic info without requiring a profile
+            return {
+                'id': user_id,
+                'username': f"Anonymous_{user_id[:8]}",
+                'email': f"anonymous_{user_id[:8]}@example.com",
+                'is_anonymous': True,
+                'jwt_payload': payload
+            }
+        
+        # For regular users, get profile from database
+        client = get_supabase_client()
+        result = client.table('user_profiles').select('*').eq('id', user_id).execute()
+        
+        if not result.data or len(result.data) == 0:
+            return None
+        
+        user_profile = result.data[0]
+        
+        # Combine JWT payload with profile data
+        return {
+            'id': user_id,
+            'username': user_profile['username'],
+            'email': user_profile['email'],
+            'is_anonymous': False,
+            'jwt_payload': payload
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting optional current user: {str(e)}")
         return None

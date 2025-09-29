@@ -82,11 +82,14 @@ class Database:
     async def get_player(player_id: str) -> Optional[Dict[str, Any]]:
         """Get player data from Redis"""
         try:
+            logger.debug(f"[Redis] Getting player {player_id}")
             player_data = redis_client.get(f"player:{player_id}")
             if player_data:
                 if isinstance(player_data, bytes):
                     player_data = player_data.decode('utf-8')
+                logger.debug(f"[Redis] Found player {player_id} in Redis")
                 return json.loads(player_data)
+            logger.debug(f"[Redis] Player {player_id} not found in Redis")
             return None
         except Exception as e:
             logger.error(f"Error getting player {player_id}: {str(e)}")
@@ -96,10 +99,12 @@ class Database:
     async def set_player(player_id: str, player_data: Dict[str, Any]) -> bool:
         """Save player data to Redis"""
         try:
-            logger.debug(f"Setting player {player_id} with data: {player_data}")
+            logger.debug(f"[Redis] Setting player {player_id} with data: {player_data}")
             serializable_data = Database._serialize_data(player_data)
-            logger.debug(f"Serialized player data: {serializable_data}")
-            return redis_client.set(f"player:{player_id}", json.dumps(serializable_data))
+            logger.debug(f"[Redis] Serialized player data: {serializable_data}")
+            result = redis_client.set(f"player:{player_id}", json.dumps(serializable_data))
+            logger.debug(f"[Redis] Set player {player_id} result: {result}")
+            return result
         except Exception as e:
             logger.error(f"Error setting player {player_id}: {str(e)}")
             raise
