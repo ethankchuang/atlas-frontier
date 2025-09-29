@@ -461,8 +461,8 @@ async def initiate_monster_duel(player_id: str, monster_id: str, player_action: 
             "is_monster_duel": True,  # Flag for special handling
             "monster_data": monster_data,  # Store monster data for AI move generation
             "history": [],  # Keep last 10 rounds of combat history
-            "player1_vital": 0,
-            "player2_vital": 0,
+            "player1_health": player1_max_vital,  # Start with max health
+            "player2_health": player2_max_vital,  # Start with max health
             "player1_control": 0,
             "player2_control": 0,
             "finishing_window_owner": None
@@ -1277,15 +1277,18 @@ async def clear_combat_state(
         for duel_id in duels_to_remove:
             del duel_pending[duel_id]
         
-        # Check for active duels and end them
-        active_duels = await game_manager.db.get_active_duels_for_player(player_id)
-        cleared_duels = 0
+        # Clear from global duel_moves dictionary
+        global duel_moves
+        cleared_moves = 0
         
-        for duel in active_duels:
-            if duel.get('is_active', False):
-                logger.info(f"[Clear Combat] Ending active duel {duel.get('duel_id')} for player {player_id}")
-                await game_manager.db.end_active_duel(duel.get('duel_id'))
-                cleared_duels += 1
+        for duel_id, moves in duel_moves.items():
+            if player_id in moves:
+                logger.info(f"[Clear Combat] Removing player {player_id} moves from duel {duel_id}")
+                del moves[player_id]
+                cleared_moves += 1
+                # If no moves left, remove the entire duel
+                if not moves:
+                    del duel_moves[duel_id]
         
         # Clear any monster combat history
         try:
@@ -1295,11 +1298,11 @@ async def clear_combat_state(
         except Exception as e:
             logger.warning(f"[Clear Combat] Failed to clear monster combat history: {str(e)}")
         
-        logger.info(f"[Clear Combat] Cleared {cleared_duels} active duels and {cleared_pending_duels} pending duels for player {player_id}")
+        logger.info(f"[Clear Combat] Cleared {cleared_moves} duel moves and {cleared_pending_duels} pending duels for player {player_id}")
         return {
             "success": True, 
-            "message": f"Cleared {cleared_duels} active duels and {cleared_pending_duels} pending duels",
-            "cleared_duels": cleared_duels,
+            "message": f"Cleared {cleared_moves} duel moves and {cleared_pending_duels} pending duels",
+            "cleared_moves": cleared_moves,
             "cleared_pending_duels": cleared_pending_duels
         }
     except HTTPException:
@@ -1412,6 +1415,28 @@ async def process_action_stream(
             if not player_data:
                 yield json.dumps({"error": "Player not found"})
                 return
+
+            # Clear rejoin immunity when player takes an action
+            if player_data.get('rejoin_immunity', False):
+                logger.info(f"[Action Stream] Clearing rejoin immunity for player {action_request.player_id}")
+                player_data['rejoin_immunity'] = False
+                await game_manager.db.set_player(action_request.player_id, player_data)
+                
+                # Also clear rejoin_safe flags from monsters in the room
+                room_data = await game_manager.db.get_room(player_data.get('current_room', ''))
+                if room_data and room_data.get('monsters'):
+                    for monster_id in room_data.get('monsters', []):
+                        try:
+                            monster_data = await game_manager.db.get_monster(monster_id)
+                            if monster_data and monster_data.get('rejoin_safe', False):
+                                monster_data['rejoin_safe'] = False
+                                # Restore original aggressiveness if it was changed
+                                if monster_data.get('aggressiveness') == 'neutral':
+                                    monster_data['aggressiveness'] = 'aggressive'
+                                await game_manager.db.set_monster(monster_id, monster_data)
+                                logger.info(f"[Action Stream] Cleared rejoin_safe flag for monster {monster_id}")
+                        except Exception as e:
+                            logger.warning(f"[Action Stream] Error clearing monster {monster_id} rejoin_safe flag: {str(e)}")
 
             player = Player(**player_data)
             room_data = await game_manager.db.get_room(player.current_room)
@@ -1540,6 +1565,11 @@ async def process_action_stream(
                         player_updates = chunk["updates"]["player"]
                         if "direction" in player_updates:
                             direction = player_updates["direction"]
+                            
+                            # Skip movement processing if direction is None
+                            if direction is None:
+                                logger.info(f"[Stream] Player direction is None, skipping movement processing")
+                                continue
                             
                             logger.info(f"[Stream] Player attempting to move {direction} from {player.current_room}")
                             
@@ -1699,7 +1729,11 @@ async def process_action_stream(
                                         'down': 'up'
                                     }
                                     # The entry direction is the opposite of the movement direction
-                                    entry_direction = opposite_directions.get(direction.lower(), direction)
+                                    # Safety check for None direction
+                                    if direction is not None:
+                                        entry_direction = opposite_directions.get(direction.lower(), direction)
+                                    else:
+                                        entry_direction = "unknown"
                                     
                                     logger.info(f"[MonsterBehavior] Player moved {direction}, entered from {entry_direction}")
                                     logger.info(f"[MonsterBehavior] Calling handle_player_room_entry: player={action_request.player_id}, new_room={new_room_id}, old_room={old_room_id}")
