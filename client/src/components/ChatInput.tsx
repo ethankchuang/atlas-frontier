@@ -17,7 +17,9 @@ const ChatInput: React.FC = () => {
         isInDuel,
         duelOpponent,
         myDuelMove,
+        opponentDuelMove,
         bothMovesSubmitted,
+        currentRound,
         addMessage,
         updateMessage,
         submitDuelMove

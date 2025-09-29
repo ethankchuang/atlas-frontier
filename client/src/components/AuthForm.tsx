@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { RegisterRequest, LoginRequest } from '@/types/auth';
 import apiService from '@/services/api';
 import useGameStore from '@/store/gameStore';
-import { supabase } from '@/lib/supabase';
+import { supabase } from '../lib/supabase';
 
 interface AuthFormProps {
     onSuccess: () => void;
