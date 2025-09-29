@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import apiService from '@/services/api';
 import useGameStore from '@/store/gameStore';
-import { supabase } from '../lib/supabase';
+import { supabase } from '@/lib/supabase';
 
 interface GuestConversionModalProps {
     isOpen: boolean;
@@ -22,7 +22,7 @@ const GuestConversionModal: React.FC<GuestConversionModalProps> = ({ isOpen, onC
     const [usernameAvailable, setUsernameAvailable] = useState<boolean | null>(null);
     const [usernameCheckLoading, setUsernameCheckLoading] = useState(false);
 
-    const { player } = useGameStore();
+    const { player, user } = useGameStore();
 
     // Username validation
     const validateUsername = (username: string): string | null => {
@@ -96,7 +96,7 @@ const GuestConversionModal: React.FC<GuestConversionModalProps> = ({ isOpen, onC
             }
 
             // Update the player with the new user information
-            await apiService.convertGuestToUser({
+            const result = await apiService.convertGuestToUser({
                 email: formData.email,
                 password: formData.password,
                 username: formData.username,
@@ -104,11 +104,9 @@ const GuestConversionModal: React.FC<GuestConversionModalProps> = ({ isOpen, onC
                 new_user_id: updateData.user.id
             });
 
-            // Store the updated session token if available
-            // Note: Supabase auth updateUser may return session data
-            const updateDataWithSession = updateData as Record<string, unknown>;
-            if (updateDataWithSession.session && typeof updateDataWithSession.session === 'object' && 'access_token' in updateDataWithSession.session) {
-                localStorage.setItem('auth_token', (updateDataWithSession.session as { access_token: string }).access_token);
+            // Store the updated session token
+            if (updateData.session?.access_token) {
+                localStorage.setItem('auth_token', updateData.session.access_token);
             }
             
             // Update the user state

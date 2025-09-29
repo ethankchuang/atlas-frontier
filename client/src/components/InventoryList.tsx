@@ -1,7 +1,6 @@
 import React, { useEffect } from 'react';
 import useGameStore from '@/store/gameStore';
 import apiService from '@/services/api';
-import { Player, Room, Item } from '@/types/game';
 
 const InventoryList: React.FC = () => {
     const { player, itemsById, setPlayer, setCurrentRoom, upsertItems } = useGameStore();
@@ -37,12 +36,12 @@ const InventoryList: React.FC = () => {
             if (result.success) {
                 // Update the store with the new player data
                 if (result.updates.player) {
-                    setPlayer(result.updates.player as Player);
+                    setPlayer(result.updates.player);
                 }
                 
                 // Update room data if item was dropped to room
                 if (result.updates.room) {
-                    setCurrentRoom(result.updates.room as Room);
+                    setCurrentRoom(result.updates.room);
                 }
                 
                 console.log(`[Inventory] ${result.message}`);
@@ -64,12 +63,12 @@ const InventoryList: React.FC = () => {
             if (result.success) {
                 // Update the store with the new player data
                 if (result.updates.player) {
-                    setPlayer(result.updates.player as Player);
+                    setPlayer(result.updates.player);
                 }
                 
                 // Load the new item data into the store
                 if (result.updates.new_item) {
-                    upsertItems([result.updates.new_item as Item]);
+                    upsertItems([result.updates.new_item]);
                     console.log(`[Inventory] Loaded new item data:`, result.updates.new_item);
                 }
                 
