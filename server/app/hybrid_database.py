@@ -48,20 +48,43 @@ class HybridDatabase:
     @staticmethod
     async def get_player(player_id: str) -> Optional[Dict[str, Any]]:
         """Get player data from Supabase or Redis fallback"""
+        # For guest players, always use Redis directly
+        if player_id.startswith('guest_'):
+            logger.debug(f"[HybridDatabase] Guest player {player_id}, using Redis directly")
+            result = await RedisDatabase.get_player(player_id)
+            logger.debug(f"[HybridDatabase] Redis returned for {player_id}: {result is not None}")
+            return result
+        
         if HybridDatabase._is_supabase_configured():
             try:
-                return await SupabaseDatabase.get_player(player_id)
+                result = await SupabaseDatabase.get_player(player_id)
+                # If Supabase returns None (e.g., for guest players), fall back to Redis
+                if result is not None:
+                    return result
+                logger.debug(f"[HybridDatabase] Supabase returned None for {player_id}, falling back to Redis")
             except Exception as e:
                 logger.warning(f"[HybridDatabase] Supabase get_player failed, falling back to Redis: {str(e)}")
         
-        return await RedisDatabase.get_player(player_id)
+        logger.debug(f"[HybridDatabase] Falling back to Redis for player {player_id}")
+        result = await RedisDatabase.get_player(player_id)
+        logger.debug(f"[HybridDatabase] Redis returned for {player_id}: {result is not None}")
+        return result
 
     @staticmethod
     async def set_player(player_id: str, player_data: Dict[str, Any]) -> bool:
         """Save player data to Supabase or Redis fallback"""
+        # For guest players, always use Redis directly
+        if player_id.startswith('guest_'):
+            logger.debug(f"[HybridDatabase] Guest player {player_id}, using Redis directly")
+            return await RedisDatabase.set_player(player_id, player_data)
+        
         if HybridDatabase._is_supabase_configured():
             try:
-                return await SupabaseDatabase.set_player(player_id, player_data)
+                result = await SupabaseDatabase.set_player(player_id, player_data)
+                # If Supabase returns False (e.g., for guest players), fall back to Redis
+                if result:
+                    return result
+                logger.debug(f"[HybridDatabase] Supabase returned False for {player_id}, falling back to Redis")
             except Exception as e:
                 logger.warning(f"[HybridDatabase] Supabase set_player failed, falling back to Redis: {str(e)}")
         

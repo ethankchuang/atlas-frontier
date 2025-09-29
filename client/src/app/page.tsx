@@ -54,24 +54,38 @@ export default function Home() {
             setIsLoading(true);
             setError(null);
             
-            // Get user's players
-            const playersData = await apiService.getPlayers();
-            
-            let playerId: string;
-            if (playersData.players.length === 0) {
-                // No players exist, create one
-                const newPlayerData = await apiService.createPlayer(user?.username || 'Player');
-                playerId = newPlayerData.player.id;
-                setPlayer(newPlayerData.player);
+            // Check if this is an anonymous user
+            if (user?.is_anonymous) {
+                // For anonymous users, the player should already be created in AuthForm
+                // We just need to join the game with the existing player
+                if (player) {
+                    const result = await apiService.joinGame(player.id);
+                    setPlayer(result.player);
+                } else {
+                    // This shouldn't happen with the new system, but handle gracefully
+                    setError('Player not found. Please try signing in again.');
+                    return;
+                }
             } else {
-                // Use the first player (for now - later we can add player selection)
-                playerId = playersData.players[0].id;
-                setPlayer(playersData.players[0]);
+                // Get user's players
+                const playersData = await apiService.getPlayers();
+                
+                let playerId: string;
+                if (playersData.players.length === 0) {
+                    // No players exist, create one
+                    const newPlayerData = await apiService.createPlayer(user?.username || 'Player');
+                    playerId = newPlayerData.player.id;
+                    setPlayer(newPlayerData.player);
+                } else {
+                    // Use the first player (for now - later we can add player selection)
+                    playerId = playersData.players[0].id;
+                    setPlayer(playersData.players[0]);
+                }
+                
+                // Join game with the player
+                const result = await apiService.joinGame(playerId);
+                setPlayer(result.player);
             }
-            
-            // Join game with the player
-            const result = await apiService.joinGame(playerId);
-            setPlayer(result.player);
             
         } catch (error) {
             if (error instanceof Error) {
@@ -106,17 +120,24 @@ export default function Home() {
     }
 
     // If authenticated but not in game, show join game screen
-    if (isAuthenticated && user) {
+    if ((isAuthenticated || user?.is_anonymous) && user) {
+        const isAnonymous = user.is_anonymous;
+        
         return (
             <div className="min-h-screen flex items-center justify-center bg-gray-900">
                 <div className="max-w-md w-full p-6 bg-gray-800 rounded-lg shadow-xl">
                     <div className="text-center mb-6">
                         <h1 className="text-3xl font-bold text-white mb-4">
-                            Welcome, {user.username}!
+                            {isAnonymous ? `Welcome, ${user.username}!` : `Welcome, ${user.username}!`}
                         </h1>
                         <p className="text-gray-300">
-                            Ready to begin your adventure?
+                            {isAnonymous ? 'Ready to try the game as a guest?' : 'Ready to begin your adventure?'}
                         </p>
+                        {isAnonymous && (
+                            <p className="text-sm text-yellow-400 mt-2">
+                                Playing as guest - create an account to save your progress
+                            </p>
+                        )}
                     </div>
 
                     {error && (
@@ -129,21 +150,30 @@ export default function Home() {
                         <button
                             onClick={handleJoinGame}
                             disabled={isLoading}
-                            className="w-full py-3 px-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                            className={`w-full py-3 px-4 text-white rounded-lg transition-colors focus:outline-none focus:ring-2 disabled:opacity-50 ${
+                                isGuest 
+                                    ? 'bg-green-600 hover:bg-green-700 focus:ring-green-500' 
+                                    : 'bg-blue-600 hover:bg-blue-700 focus:ring-blue-500'
+                            }`}
                         >
-                            {isLoading ? 'Entering world...' : 'Begin Adventure'}
+                            {isLoading ? 'Entering world...' : isGuest ? 'Start Playing as Guest' : 'Begin Adventure'}
                         </button>
                         
                         <button
                             onClick={handleLogout}
                             className="w-full py-2 px-4 bg-gray-700 text-gray-300 rounded-lg hover:bg-gray-600 transition-colors focus:outline-none focus:ring-2 focus:ring-gray-500"
                         >
-                            Logout
+                            {isGuest ? 'Back to Login' : 'Logout'}
                         </button>
                     </div>
 
                     <div className="mt-6 text-sm text-gray-400 text-center">
                         <p>Explore a dynamic world, interact with AI NPCs, and embark on epic quests.</p>
+                        {isGuest && (
+                            <p className="mt-2 text-yellow-400">
+                                Your progress will be saved temporarily. Create an account to make it permanent.
+                            </p>
+                        )}
                     </div>
                 </div>
             </div>

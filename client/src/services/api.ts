@@ -24,7 +24,7 @@ class APIService {
 
     private async request<T>(
         endpoint: string,
-        options: RequestInit = {}
+        options: RequestInit & { skipAuth?: boolean } = {}
     ): Promise<T> {
         const token = this.getAuthToken();
         const headers: HeadersInit = {
@@ -32,6 +32,20 @@ class APIService {
             ...options.headers,
         };
 
+        // Always send auth header if token exists (including for anonymous users)
+        const gameStore = useGameStore.getState();
+        const isAnonymous = gameStore.user?.is_anonymous || false;
+        
+        // Debug logging
+        console.log('[API] Request debug:', {
+            endpoint,
+            hasToken: !!token,
+            userId: gameStore.user?.id,
+            isAnonymous,
+            skipAuth: options.skipAuth,
+            willSendAuth: !!token
+        });
+        
         // Add auth header if token exists
         if (token) {
             (headers as Record<string, string>)['Authorization'] = `Bearer ${token}`;
@@ -106,6 +120,18 @@ class APIService {
                 'Accept': 'text/event-stream',
             };
 
+            // Check if current user is anonymous - same logic as main request method
+            const isAnonymous = store.user?.is_anonymous || false;
+            
+            // Debug logging for stream requests
+            console.log('[API] Stream request debug:', {
+                endpoint: '/action/stream',
+                hasToken: !!token,
+                userId: store.user?.id,
+                isAnonymous,
+                willSendAuth: !!token
+            });
+            
             // Add auth header if token exists
             if (token) {
                 (headers as Record<string, string>)['Authorization'] = `Bearer ${token}`;
@@ -409,7 +435,9 @@ class APIService {
     }
 
     async joinGame(playerId: string): Promise<{ message: string; player: Player; room: Record<string, unknown> }> {
-        return this.request<{ message: string; player: Player; room: Record<string, unknown> }>(`/join/${playerId}`, {
+        // Use guest endpoint for guest players, regular endpoint for authenticated players
+        const endpoint = playerId.startsWith('guest_') ? `/join/guest/${playerId}` : `/join/${playerId}`;
+        return this.request<{ message: string; player: Player; room: Record<string, unknown> }>(endpoint, {
             method: 'POST',
         });
     }
@@ -477,6 +505,30 @@ class APIService {
 
     isAuthenticated(): boolean {
         return this.getAuthToken() !== null;
+    }
+
+    // ===============================
+    // Guest Mode Methods
+    // ===============================
+
+    async createGuestPlayer(anonymousUserId: string): Promise<{ player: Player; message: string }> {
+        return this.request<{ player: Player; message: string }>('/auth/guest', {
+            method: 'POST',
+            body: JSON.stringify({ anonymous_user_id: anonymousUserId }),
+        });
+    }
+
+    async convertGuestToUser(data: {
+        email: string;
+        password: string;
+        username: string;
+        guest_player_id: string;
+        new_user_id: string;
+    }): Promise<AuthResponse & { guest_converted: boolean; message: string }> {
+        return this.request<AuthResponse & { guest_converted: boolean; message: string }>('/auth/guest-to-user', {
+            method: 'POST',
+            body: JSON.stringify(data),
+        });
     }
 }
 

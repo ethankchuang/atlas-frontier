@@ -4,12 +4,13 @@ import React, { useState, useEffect } from 'react';
 import { RegisterRequest, LoginRequest } from '@/types/auth';
 import apiService from '@/services/api';
 import useGameStore from '@/store/gameStore';
+import { supabase } from '@/lib/supabase';
 
 interface AuthFormProps {
     onSuccess: () => void;
 }
 
-type FormMode = 'login' | 'register';
+type FormMode = 'login' | 'register' | 'guest';
 
 const AuthForm: React.FC<AuthFormProps> = ({ onSuccess }) => {
     const [mode, setMode] = useState<FormMode>('login');
@@ -23,7 +24,7 @@ const AuthForm: React.FC<AuthFormProps> = ({ onSuccess }) => {
     const [usernameAvailable, setUsernameAvailable] = useState<boolean | null>(null);
     const [usernameCheckLoading, setUsernameCheckLoading] = useState(false);
 
-    const { setUser, setIsAuthenticated } = useGameStore();
+    const { setUser, setIsAuthenticated, setPlayer } = useGameStore();
 
     // Username validation
     const validateUsername = (username: string): string | null => {
@@ -101,6 +102,35 @@ const AuthForm: React.FC<AuthFormProps> = ({ onSuccess }) => {
                 setUser(authResponse.user);
                 setIsAuthenticated(true);
                 onSuccess();
+            } else if (mode === 'guest') {
+                // Sign in anonymously with Supabase
+                const { data, error } = await supabase.auth.signInAnonymously();
+                
+                if (error) {
+                    throw new Error(`Anonymous sign-in failed: ${error.message}`);
+                }
+                
+                if (!data.user) {
+                    throw new Error('Anonymous sign-in failed: No user data returned');
+                }
+                
+                // Create a guest player using the anonymous user ID
+                const guestResponse = await apiService.createGuestPlayer(data.user.id);
+                
+                // Store the Supabase session token
+                if (data.session?.access_token) {
+                    localStorage.setItem('auth_token', data.session.access_token);
+                }
+                
+                setUser({
+                    id: data.user.id,
+                    username: guestResponse.player.name,
+                    email: data.user.email || 'anonymous@example.com',
+                    is_anonymous: true
+                });
+                setPlayer(guestResponse.player); // Set the player in the store
+                setIsAuthenticated(true); // Anonymous users are authenticated in Supabase
+                onSuccess();
             } else {
                 const loginData: LoginRequest = {
                     email: formData.email,
@@ -175,7 +205,7 @@ const AuthForm: React.FC<AuthFormProps> = ({ onSuccess }) => {
                 <button
                     type="button"
                     onClick={() => setMode('register')}
-                    className={`flex-1 py-2 px-4 rounded-r-lg font-medium transition-colors ${
+                    className={`flex-1 py-2 px-4 font-medium transition-colors ${
                         mode === 'register' 
                             ? 'bg-blue-600 text-white' 
                             : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
@@ -183,9 +213,31 @@ const AuthForm: React.FC<AuthFormProps> = ({ onSuccess }) => {
                 >
                     Register
                 </button>
+                <button
+                    type="button"
+                    onClick={() => setMode('guest')}
+                    className={`flex-1 py-2 px-4 rounded-r-lg font-medium transition-colors ${
+                        mode === 'guest' 
+                            ? 'bg-green-600 text-white' 
+                            : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                    }`}
+                >
+                    Play as Guest
+                </button>
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-4">
+                {mode === 'guest' && (
+                    <div className="text-center py-4">
+                        <p className="text-gray-300 mb-4">
+                            Play as a guest to try the game without creating an account.
+                        </p>
+                        <p className="text-sm text-gray-400">
+                            You can convert to a full account later to save your progress.
+                        </p>
+                    </div>
+                )}
+                
                 {mode === 'register' && (
                     <div>
                         <label htmlFor="username" className="block text-sm font-medium text-gray-300 mb-2">
@@ -213,38 +265,42 @@ const AuthForm: React.FC<AuthFormProps> = ({ onSuccess }) => {
                     </div>
                 )}
 
-                <div>
-                    <label htmlFor="email" className="block text-sm font-medium text-gray-300 mb-2">
-                        Email
-                    </label>
-                    <input
-                        type="email"
-                        id="email"
-                        name="email"
-                        value={formData.email}
-                        onChange={handleInputChange}
-                        className="w-full px-4 py-2 bg-gray-700 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        placeholder="your.email@example.com"
-                        required
-                    />
-                </div>
+                {(mode === 'login' || mode === 'register') && (
+                    <>
+                        <div>
+                            <label htmlFor="email" className="block text-sm font-medium text-gray-300 mb-2">
+                                Email
+                            </label>
+                            <input
+                                type="email"
+                                id="email"
+                                name="email"
+                                value={formData.email}
+                                onChange={handleInputChange}
+                                className="w-full px-4 py-2 bg-gray-700 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                placeholder="your.email@example.com"
+                                required
+                            />
+                        </div>
 
-                <div>
-                    <label htmlFor="password" className="block text-sm font-medium text-gray-300 mb-2">
-                        Password
-                    </label>
-                    <input
-                        type="password"
-                        id="password"
-                        name="password"
-                        value={formData.password}
-                        onChange={handleInputChange}
-                        className="w-full px-4 py-2 bg-gray-700 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        placeholder="Enter your password..."
-                        required
-                        minLength={8}
-                    />
-                </div>
+                        <div>
+                            <label htmlFor="password" className="block text-sm font-medium text-gray-300 mb-2">
+                                Password
+                            </label>
+                            <input
+                                type="password"
+                                id="password"
+                                name="password"
+                                value={formData.password}
+                                onChange={handleInputChange}
+                                className="w-full px-4 py-2 bg-gray-700 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                placeholder="Enter your password..."
+                                required
+                                minLength={8}
+                            />
+                        </div>
+                    </>
+                )}
 
                 {error && (
                     <div className="p-3 bg-red-600/20 border border-red-500 rounded-lg">
@@ -261,9 +317,15 @@ const AuthForm: React.FC<AuthFormProps> = ({ onSuccess }) => {
                             usernameAvailable === false // block only if explicitly taken
                         ))
                     }
-                    className="w-full py-3 px-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                    className={`w-full py-3 px-4 text-white rounded-lg transition-colors focus:outline-none focus:ring-2 disabled:opacity-50 disabled:cursor-not-allowed ${
+                        mode === 'guest' 
+                            ? 'bg-green-600 hover:bg-green-700 focus:ring-green-500' 
+                            : 'bg-blue-600 hover:bg-blue-700 focus:ring-blue-500'
+                    }`}
                 >
-                    {isLoading ? 'Please wait...' : mode === 'register' ? 'Create Account' : 'Login'}
+                    {isLoading ? 'Please wait...' : 
+                     mode === 'register' ? 'Create Account' : 
+                     mode === 'guest' ? 'Start Playing' : 'Login'}
                 </button>
             </form>
 
@@ -272,6 +334,8 @@ const AuthForm: React.FC<AuthFormProps> = ({ onSuccess }) => {
                 <p className="mt-2">
                     {mode === 'register' 
                         ? 'Create an account to save your progress and begin your adventure.'
+                        : mode === 'guest'
+                        ? 'Play as a guest to try the game without registration.'
                         : 'Login to continue your adventure.'
                     }
                 </p>

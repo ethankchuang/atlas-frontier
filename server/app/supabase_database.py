@@ -62,6 +62,11 @@ class SupabaseDatabase:
     async def get_player(player_id: str) -> Optional[Dict[str, Any]]:
         """Get player data from Supabase"""
         try:
+            # Skip guest players - they should be stored in Redis
+            if player_id.startswith('guest_'):
+                logger.debug(f"Skipping Supabase lookup for guest player: {player_id}")
+                return None
+                
             client = get_supabase_client()
             result = client.table('players').select('data').eq('id', player_id).execute()
             
@@ -86,9 +91,9 @@ class SupabaseDatabase:
                 logger.error(f"Player data missing user_id: {player_data}")
                 return False
             
-            # Skip saving system/dummy players to avoid foreign key constraint issues
-            if user_id == "system" or player_id == "dummy":
-                logger.debug(f"Skipping save for system/dummy player: {player_id}")
+            # Skip saving system/dummy/guest players to avoid foreign key constraint issues
+            if user_id == "system" or player_id == "dummy" or user_id == "guest":
+                logger.debug(f"Skipping save for system/dummy/guest player: {player_id}")
                 return True  # Return success without actually saving
             
             result = client.table('players').upsert({
