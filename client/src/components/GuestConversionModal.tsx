@@ -22,7 +22,7 @@ const GuestConversionModal: React.FC<GuestConversionModalProps> = ({ isOpen, onC
     const [usernameAvailable, setUsernameAvailable] = useState<boolean | null>(null);
     const [usernameCheckLoading, setUsernameCheckLoading] = useState(false);
 
-    const { player, user } = useGameStore();
+    const { player } = useGameStore();
 
     // Username validation
     const validateUsername = (username: string): string | null => {
@@ -95,8 +95,11 @@ const GuestConversionModal: React.FC<GuestConversionModalProps> = ({ isOpen, onC
                 throw new Error('Failed to update user: No user data returned');
             }
 
+            // Get the new session token
+            const { data: sessionData } = await supabase.auth.getSession();
+
             // Update the player with the new user information
-            const result = await apiService.convertGuestToUser({
+            await apiService.convertGuestToUser({
                 email: formData.email,
                 password: formData.password,
                 username: formData.username,
@@ -105,8 +108,8 @@ const GuestConversionModal: React.FC<GuestConversionModalProps> = ({ isOpen, onC
             });
 
             // Store the updated session token
-            if (updateData.session?.access_token) {
-                localStorage.setItem('auth_token', updateData.session.access_token);
+            if (sessionData.session?.access_token) {
+                localStorage.setItem('auth_token', sessionData.session.access_token);
             }
             
             // Update the user state

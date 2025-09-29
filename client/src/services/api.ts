@@ -1,4 +1,4 @@
-import { ActionRequest, ActionResponse, ChatMessage, GameState, NPCInteraction, Player, RoomInfo } from '@/types/game';
+import { ActionRequest, ActionResponse, ChatMessage, GameState, Item, NPCInteraction, Player, RoomInfo } from '@/types/game';
 import { AuthResponse, RegisterRequest, LoginRequest, RegisterResponse, User, UsernameAvailability } from '@/types/auth';
 import useGameStore from '@/store/gameStore';
 
@@ -454,8 +454,8 @@ class APIService {
         return this.request<{ items: Item[] }>(`/player/${playerId}/inventory`);
     }
 
-    async dropPlayerItem(playerId: string, itemId: string, dropToRoom: boolean = true): Promise<{ success: boolean; message: string; updates: any }> {
-        return this.request<{ success: boolean; message: string; updates: any }>(`/player/${playerId}/drop-item`, {
+    async dropPlayerItem(playerId: string, itemId: string, dropToRoom: boolean = true): Promise<{ success: boolean; message: string; updates: Record<string, unknown> }> {
+        return this.request<{ success: boolean; message: string; updates: Record<string, unknown> }>(`/player/${playerId}/drop-item`, {
             method: 'POST',
             body: JSON.stringify({
                 item_id: itemId,
@@ -464,8 +464,8 @@ class APIService {
         });
     }
 
-    async combinePlayerItems(playerId: string, itemIds: string[], combinationDescription: string = ''): Promise<{ success: boolean; message: string; updates: any }> {
-        return this.request<{ success: boolean; message: string; updates: any }>(`/player/${playerId}/combine-items`, {
+    async combinePlayerItems(playerId: string, itemIds: string[], combinationDescription: string = ''): Promise<{ success: boolean; message: string; updates: Record<string, unknown> }> {
+        return this.request<{ success: boolean; message: string; updates: Record<string, unknown> }>(`/player/${playerId}/combine-items`, {
             method: 'POST',
             body: JSON.stringify({
                 item_ids: itemIds,

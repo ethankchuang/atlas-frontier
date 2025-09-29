@@ -134,7 +134,7 @@ const PauseMenu: React.FC = () => {
                                     <h3 className="text-xl text-blue-300 font-bold mb-2">💬 Social Features</h3>
                                     <ul className="space-y-1 text-sm">
                                         <li>• Chat with other players in the same room</li>
-                                        <li>• Challenge other players to duels by clicking their name in the "also here" list on the top left</li>
+                                        <li>• Challenge other players to duels by clicking their name in the &quot;also here&quot; list on the top left</li>
                                         <li>• Create an account to save your progress</li>
                                         <li>• Guest accounts reset when you leave</li>
                                     </ul>

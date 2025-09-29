@@ -118,7 +118,6 @@ const GameLayout: React.FC<GameLayoutProps> = ({ playerId }) => {
                     const newVisitedBiomes = { ...gameStore.visitedBiomes };
                     
                     coordinatesData.visited_coordinates.forEach(coordKey => {
-                        const [x, y] = coordKey.split(',').map(Number);
                         const biome = coordinatesData.visited_biomes[coordKey];
                         
                         newVisitedCoordinates.add(coordKey);
@@ -266,7 +265,8 @@ const GameLayout: React.FC<GameLayoutProps> = ({ playerId }) => {
         };
 
         updateRoomData();
-    }, [currentRoom?.id, player?.id, addVisitedCoordinate, setCurrentRoom, setError, setIsLoading, setNPCs, setPlayersInRoom, upsertItems]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [currentRoom?.id, player?.id]);
 
     // Escape key to toggle pause menu
     useEffect(() => {
