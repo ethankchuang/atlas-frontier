@@ -151,25 +151,25 @@ export default function Home() {
                             onClick={handleJoinGame}
                             disabled={isLoading}
                             className={`w-full py-3 px-4 text-white rounded-lg transition-colors focus:outline-none focus:ring-2 disabled:opacity-50 ${
-                                isAnonymous 
+                                isGuest 
                                     ? 'bg-green-600 hover:bg-green-700 focus:ring-green-500' 
                                     : 'bg-blue-600 hover:bg-blue-700 focus:ring-blue-500'
                             }`}
                         >
-                            {isLoading ? 'Entering world...' : isAnonymous ? 'Start Playing as Guest' : 'Begin Adventure'}
+                            {isLoading ? 'Entering world...' : isGuest ? 'Start Playing as Guest' : 'Begin Adventure'}
                         </button>
                         
                         <button
                             onClick={handleLogout}
                             className="w-full py-2 px-4 bg-gray-700 text-gray-300 rounded-lg hover:bg-gray-600 transition-colors focus:outline-none focus:ring-2 focus:ring-gray-500"
                         >
-                            {isAnonymous ? 'Back to Login' : 'Logout'}
+                            {isGuest ? 'Back to Login' : 'Logout'}
                         </button>
                     </div>
 
                     <div className="mt-6 text-sm text-gray-400 text-center">
                         <p>Explore a dynamic world, interact with AI NPCs, and embark on epic quests.</p>
-                        {isAnonymous && (
+                        {isGuest && (
                             <p className="mt-2 text-yellow-400">
                                 Your progress will be saved temporarily. Create an account to make it permanent.
                             </p>

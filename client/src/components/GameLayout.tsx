@@ -7,7 +7,6 @@ import Minimap from './Minimap';
 import FullscreenMinimap from './FullscreenMinimap';
 import PlayersInRoom from './PlayersInRoom';
 import DuelChallengePopup from './DuelChallengePopup';
-import TutorialPopup from './TutorialPopup';
 import apiService from '@/services/api';
 import websocketService from '@/services/websocket';
 import { ChatMessage, Room } from '@/types/game';
@@ -40,12 +39,7 @@ const GameLayout: React.FC<GameLayoutProps> = ({ playerId }) => {
         player2Control,
         duelOpponent,
         player1MaxVital,
-        player2MaxVital,
-        showTutorial,
-        setShowTutorial,
-        hasSeenTutorial,
-        setHasSeenTutorial,
-        user
+        player2MaxVital
     } = useGameStore();
     const p1Max = player1MaxVital ?? 6;
     const p2Max = player2MaxVital ?? 6;
@@ -124,6 +118,7 @@ const GameLayout: React.FC<GameLayoutProps> = ({ playerId }) => {
                     const newVisitedBiomes = { ...gameStore.visitedBiomes };
                     
                     coordinatesData.visited_coordinates.forEach(coordKey => {
+                        const [x, y] = coordKey.split(',').map(Number);
                         const biome = coordinatesData.visited_biomes[coordKey];
                         
                         newVisitedCoordinates.add(coordKey);
@@ -207,22 +202,6 @@ const GameLayout: React.FC<GameLayoutProps> = ({ playerId }) => {
                 websocketService.connect(joinData.player.current_room, joinData.player.id);
 
                 setIsLoading(false);
-                
-                // Show tutorial for first-time users and guests
-                // Check localStorage for tutorial status
-                const tutorialSeen = localStorage.getItem('tutorial_seen') === 'true';
-                const shouldShowTutorial = !tutorialSeen && !hasSeenTutorial && (
-                    user?.is_anonymous || // Guest users
-                    !user // No user (shouldn't happen but safety check)
-                );
-                
-                if (shouldShowTutorial) {
-                    console.log('[GameLayout] Showing tutorial for first-time user/guest');
-                    // Small delay to ensure the game is fully loaded before showing tutorial
-                    setTimeout(() => {
-                        setShowTutorial(true);
-                    }, 1000);
-                }
             } catch (error) {
                 console.error('[GameLayout] Failed to initialize game:', error);
                 setError('Failed to initialize game. Please try again.');
@@ -239,7 +218,7 @@ const GameLayout: React.FC<GameLayoutProps> = ({ playerId }) => {
             console.log('[GameLayout] Cleaning up WebSocket connection');
             websocketService.disconnect();
         };
-    }, [playerId, addVisitedCoordinate, setCurrentRoom, setError, setGameState, setIsLoading, setNPCs, setPlayer, setPlayersInRoom, upsertItems, hasSeenTutorial, setShowTutorial, user]);
+    }, [playerId, addVisitedCoordinate, setCurrentRoom, setError, setGameState, setIsLoading, setNPCs, setPlayer, setPlayersInRoom, upsertItems]);
 
     // Update room data when current room ID changes (but not on every room object change)
     useEffect(() => {
@@ -287,7 +266,7 @@ const GameLayout: React.FC<GameLayoutProps> = ({ playerId }) => {
         };
 
         updateRoomData();
-    }, [currentRoom, player, addVisitedCoordinate, setCurrentRoom, setError, setIsLoading, setNPCs, setPlayersInRoom, upsertItems]);
+    }, [currentRoom?.id, player?.id, addVisitedCoordinate, setCurrentRoom, setError, setIsLoading, setNPCs, setPlayersInRoom, upsertItems]);
 
     // Escape key to toggle pause menu
     useEffect(() => {
@@ -410,16 +389,6 @@ const GameLayout: React.FC<GameLayoutProps> = ({ playerId }) => {
 
             {/* Pause Menu Overlay */}
             <PauseMenu />
-            
-            {/* Tutorial Popup */}
-            <TutorialPopup 
-                isOpen={showTutorial}
-                onClose={() => {
-                    setShowTutorial(false);
-                    setHasSeenTutorial(true);
-                    localStorage.setItem('tutorial_seen', 'true');
-                }}
-            />
         </div>
     );
 };

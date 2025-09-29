@@ -4,7 +4,7 @@ import InventoryList from './InventoryList';
 import GuestConversionModal from './GuestConversionModal';
 
 const PauseMenu: React.FC = () => {
-    const { isMenuOpen, setIsMenuOpen, player, user, setShowTutorial } = useGameStore();
+    const { isMenuOpen, setIsMenuOpen, player, user } = useGameStore();
     const [view, setView] = useState<'root' | 'inventory' | 'tutorial'>('root');
     const [showGuestConversion, setShowGuestConversion] = useState(false);
 
@@ -41,12 +41,9 @@ const PauseMenu: React.FC = () => {
                                 </button>
                                 <button
                                     className="w-full py-3 bg-blue-900/40 hover:bg-blue-800/50 border border-blue-700 rounded text-blue-200 text-2xl font-mono transition-colors"
-                                    onClick={() => {
-                                        setIsMenuOpen(false);
-                                        setShowTutorial(true);
-                                    }}
+                                    onClick={() => setView('tutorial')}
                                 >
-                                    Show Tutorial
+                                    Tutorial
                                 </button>
                                 <button
                                     className={`w-full py-3 border rounded text-2xl font-mono transition-colors ${
@@ -119,7 +116,7 @@ const PauseMenu: React.FC = () => {
                                         <li>• Explore within each room, discovering items and other creatures</li>
                                         <li>• Use the minimap to track your progress</li>
                                         <li>• Some areas may contain dangerous monsters</li>
-                                        <li>• To avoid aggressive monsters, return to the room you came from</li>
+                                        <li>• To avoid agressive monsters, return to the room you came from</li>
                                     </ul>
                                 </div>
 
@@ -137,7 +134,7 @@ const PauseMenu: React.FC = () => {
                                     <h3 className="text-xl text-blue-300 font-bold mb-2">💬 Social Features</h3>
                                     <ul className="space-y-1 text-sm">
                                         <li>• Chat with other players in the same room</li>
-                                        <li>• Challenge other players to duels by clicking their name in the &quot;also here&quot; list on the top left</li>
+                                        <li>• Challenge other players to duels by clicking their name in the "also here" list on the top left</li>
                                         <li>• Create an account to save your progress</li>
                                         <li>• Guest accounts reset when you leave</li>
                                     </ul>
