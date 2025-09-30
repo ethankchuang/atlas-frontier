@@ -105,15 +105,18 @@ class APIService {
         onFinal: (response: ActionResponse) => void,
         onError: (error: string) => void
     ): Promise<void> {
+        const requestStart = performance.now();
+        console.log(`⏱️ [CLIENT TIMING] Action request starting: "${action.action.substring(0, 50)}..."`);
+
         try {
             const store = useGameStore.getState();
-            
+
             // Check if this is a movement action
             const isMovement = /(north|south|east|west|up|down|move)/i.test(action.action);
-            
+
             // Don't set movement loading state here - we'll determine it based on backend response
             // The loading spinner should only show when the room is actually being generated
-            
+
             const token = this.getAuthToken();
             const headers: HeadersInit = {
                 'Content-Type': 'application/json',
@@ -122,7 +125,7 @@ class APIService {
 
             // Check if current user is anonymous - same logic as main request method
             const isAnonymous = store.user?.is_anonymous || false;
-            
+
             // Debug logging for stream requests
             console.log('[API] Stream request debug:', {
                 endpoint: '/action/stream',
@@ -131,11 +134,14 @@ class APIService {
                 isAnonymous,
                 willSendAuth: !!token
             });
-            
+
             // Add auth header if token exists
             if (token) {
                 (headers as Record<string, string>)['Authorization'] = `Bearer ${token}`;
             }
+
+            const fetchStart = performance.now();
+            console.log(`⏱️ [CLIENT TIMING] Preparation complete: ${(fetchStart - requestStart).toFixed(2)}ms`);
 
             // For streaming, we need to make a direct call but through our proxy
             const response = await fetch('/api/game/action/stream', {
@@ -143,6 +149,9 @@ class APIService {
                 headers,
                 body: JSON.stringify(action),
             });
+
+            const responseReceived = performance.now();
+            console.log(`⏱️ [CLIENT TIMING] Response received: ${(responseReceived - fetchStart).toFixed(2)}ms`);
 
             if (!response.ok) {
                 const errorText = await response.text();
@@ -191,10 +200,17 @@ class APIService {
 
             const decoder = new TextDecoder();
             let buffer = '';
+            let firstChunkTime: number | null = null;
+            let chunkCount = 0;
 
             while (true) {
                 const { done, value } = await reader.read();
                 if (done) break;
+
+                if (firstChunkTime === null) {
+                    firstChunkTime = performance.now();
+                    console.log(`⏱️ [CLIENT TIMING] First data chunk received: ${(firstChunkTime - responseReceived).toFixed(2)}ms`);
+                }
 
                 buffer += decoder.decode(value, { stream: true });
                 const lines = buffer.split('\n');
@@ -212,6 +228,8 @@ class APIService {
                             console.error('[API] Failed to parse stream data:', dataStr, error);
                             continue;
                         }
+
+                        chunkCount++;
 
                         if (data.error) {
                             console.error('[API] Stream error:', data.error);
@@ -254,12 +272,19 @@ class APIService {
                             return;
                         }
                         if (data.type === 'chunk') {
+                            if (chunkCount === 1) {
+                                console.log(`⏱️ [CLIENT TIMING] First content chunk: ${(performance.now() - requestStart).toFixed(2)}ms from request start`);
+                            }
                             onChunk(data.content);
                         } else if (data.type === 'final') {
+                            const finalTime = performance.now();
+                            console.log(`⏱️ [CLIENT TIMING] Final response received: ${(finalTime - requestStart).toFixed(2)}ms total`);
+                            console.log(`⏱️ [CLIENT TIMING] Total chunks processed: ${chunkCount}`);
+
                             // Guard against malformed updates by ensuring object shape
                             if (data.updates && typeof data.updates !== 'object') {
                                 console.warn('[API] Malformed updates payload; prompting retry');
-                                onError('That didn’t go through. Please try again.');
+                                onError('That didn\'t go through. Please try again.');
                                 return;
                             }
                             console.log('[API] Final stream data:', data);
