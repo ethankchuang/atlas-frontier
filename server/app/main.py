@@ -1381,6 +1381,10 @@ async def process_action_stream(
     current_user: Optional[Dict[str, Any]] = Depends(get_optional_current_user),
     game_manager: GameManager = Depends(get_game_manager)
 ):
+    import time
+    request_start = time.time()
+    logger.info(f"⏱️ [TIMING] Action request received: {action_request.action[:50]}...")
+
     # Validate that the user owns this player (skip for guest players)
     player = await game_manager.get_player(action_request.player_id)
     if not player or (not current_user or player.user_id != current_user['id']):
@@ -1388,9 +1392,12 @@ async def process_action_stream(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You can only perform actions for your own player"
         )
-    
+
+    logger.info(f"⏱️ [TIMING] Player validation: {(time.time() - request_start)*1000:.2f}ms")
+
     async def event_generator():
         try:
+            generator_start = time.time()
             # Check if player is in a duel - but also check if the duel is actually active
             for duel_id, duel_info in duel_pending.items():
                 if (action_request.player_id == duel_info['player1_id'] or 
@@ -1411,7 +1418,9 @@ async def process_action_stream(
                         del duel_pending[duel_id]
 
             # Get initial state
+            db_start = time.time()
             player_data = await game_manager.db.get_player(action_request.player_id)
+            logger.info(f"⏱️ [TIMING] Get player data: {(time.time() - db_start)*1000:.2f}ms")
             if not player_data:
                 yield json.dumps({"error": "Player not found"})
                 return
@@ -1439,13 +1448,19 @@ async def process_action_stream(
                             logger.warning(f"[Action Stream] Error clearing monster {monster_id} rejoin_safe flag: {str(e)}")
 
             player = Player(**player_data)
+
+            db_start = time.time()
             room_data = await game_manager.db.get_room(player.current_room)
+            logger.info(f"⏱️ [TIMING] Get room data: {(time.time() - db_start)*1000:.2f}ms")
             if not room_data:
                 yield json.dumps({"error": "Room not found"})
                 return
 
             room = Room(**room_data)
+
+            db_start = time.time()
             game_state_data = await game_manager.db.get_game_state()
+            logger.info(f"⏱️ [TIMING] Get game state: {(time.time() - db_start)*1000:.2f}ms")
             game_state = GameState(**game_state_data)
 
             # Store the player's action as a message
@@ -1468,25 +1483,31 @@ async def process_action_stream(
                 logger.error(f"[Stream] Traceback: {traceback.format_exc()}")
 
             # Get NPCs in the room
+            db_start = time.time()
             npcs = []
             for npc_id in room.npcs:
                 npc_data = await game_manager.db.get_npc(npc_id)
                 if npc_data:
                     npcs.append(NPC(**npc_data))
-            
+            logger.info(f"⏱️ [TIMING] Get {len(npcs)} NPCs: {(time.time() - db_start)*1000:.2f}ms")
+
             # Get monster details for AI context
+            db_start = time.time()
             monsters = []
             for monster_id in room.monsters:
                 monster_data = await game_manager.db.get_monster(monster_id)
                 if monster_data:
                     monsters.append(monster_data)
+            logger.info(f"⏱️ [TIMING] Get {len(monsters)} monsters: {(time.time() - db_start)*1000:.2f}ms")
 
             # Fetch last 10 chat messages for this room (newest-first)
+            db_start = time.time()
             try:
                 recent_chat = await game_manager.db.get_chat_history(room_id=room.id, limit=10)
             except Exception as e:
                 logger.warning(f"[Stream] Failed to fetch recent chat for room {room.id}: {str(e)}")
                 recent_chat = []
+            logger.info(f"⏱️ [TIMING] Get chat history: {(time.time() - db_start)*1000:.2f}ms")
 
             # Check rate limit before processing action
             is_allowed, rate_limit_info = await game_manager.rate_limiter.check_rate_limit(
@@ -1519,11 +1540,14 @@ async def process_action_stream(
             
             # All actions go through AI processing for rich narrative responses
             logger.info(f"[Stream] Processing action with AI: {action_request.action}")
-            
+            logger.info(f"⏱️ [TIMING] Data loading complete: {(time.time() - generator_start)*1000:.2f}ms")
+
             # AI will determine item discovery and rewards based on context using the unified system
-            
+
             # Use AI processing for all actions (including movement)
             logger.info(f"[Stream] AI context includes {len(monsters)} monsters: {[m.get('name', 'Unknown') for m in monsters]}")
+            ai_start = time.time()
+            first_chunk_time = None
             async for chunk in game_manager.ai_handler.stream_action(
                 action=action_request.action,
                 player=player,
@@ -1533,6 +1557,10 @@ async def process_action_stream(
                 monsters=monsters,
                 chat_history=recent_chat
             ):
+                if first_chunk_time is None:
+                    first_chunk_time = time.time()
+                    logger.info(f"⏱️ [TIMING] First AI chunk received: {(first_chunk_time - ai_start)*1000:.2f}ms")
+
                 if isinstance(chunk, dict):
                     # Ensure chunk has the expected structure
                     if "updates" not in chunk:
@@ -1564,14 +1592,16 @@ async def process_action_stream(
                     if "player" in chunk["updates"]:
                         player_updates = chunk["updates"]["player"]
                         if "direction" in player_updates:
+                            movement_start = time.time()
                             direction = player_updates["direction"]
-                            
+
                             # Skip movement processing if direction is None
                             if direction is None:
                                 logger.info(f"[Stream] Player direction is None, skipping movement processing")
                                 continue
-                            
+
                             logger.info(f"[Stream] Player attempting to move {direction} from {player.current_room}")
+                            logger.info(f"⏱️ [TIMING] Starting movement processing")
                             
                             # Structured movement blocking: compute retreat and check monsters
                             room_data_current = await game_manager.db.get_room(player.current_room)
@@ -1682,40 +1712,49 @@ async def process_action_stream(
                             if player.rejoin_immunity:
                                 player.rejoin_immunity = False
                                 logger.info(f"[Stream] Cleared rejoin immunity for player {action_request.player_id} due to movement")
-                            
+
+                            logger.info(f"⏱️ [TIMING] Monster blocking checks: {(time.time() - movement_start)*1000:.2f}ms")
+
                             # CRITICAL: Use GameManager's coordinate-based room movement logic to prevent duplicate coordinates
+                            room_gen_start = time.time()
                             actual_room_id, new_room = await game_manager.handle_room_movement_by_direction(
                                 player, room, direction
                             )
-                            
+                            logger.info(f"⏱️ [TIMING] Room generation/retrieval: {(time.time() - room_gen_start)*1000:.2f}ms")
+
                             # Update player's destination to the actual room ID
                             player_updates["current_room"] = actual_room_id
                             new_room_id = actual_room_id
-                            
+
                             logger.info(f"[Stream] Player moving to room: {new_room_id}")
-                            
+
                             # Room movement is now handled entirely by GameManager
                             # Remove the direction from updates since it's been processed
                             del player_updates["direction"]
-                            
+
                             # CRITICAL: Update player data in database BEFORE broadcasting
+                            db_update_start = time.time()
                             updated_player = Player(**{**player.dict(), **player_updates})
                             await game_manager.db.set_player(action_request.player_id, updated_player.dict())
-                            
+                            logger.info(f"⏱️ [TIMING] Update player in DB: {(time.time() - db_update_start)*1000:.2f}ms")
+
                             # CRITICAL: Update room player lists in database
+                            db_update_start = time.time()
                             old_room_id = player.current_room
                             await game_manager.db.remove_from_room_players(old_room_id, action_request.player_id)
                             await game_manager.db.add_to_room_players(new_room_id, action_request.player_id)
+                            logger.info(f"⏱️ [TIMING] Update room player lists: {(time.time() - db_update_start)*1000:.2f}ms")
                             logger.info(f"[Stream] Updated room player lists: removed from {old_room_id}, added to {new_room_id}")
-                            
+
                             # Clear combat history when player leaves a room
                             try:
                                 monster_behavior_manager._clear_player_combat_history(action_request.player_id)
                             except Exception as e:
                                 logger.error(f"[Stream] Error clearing combat history: {str(e)}")
-                            
+
                             # Handle monster behaviors when entering new room
                             try:
+                                behavior_start = time.time()
                                 new_room_data = await game_manager.db.get_room(new_room_id)
                                 if new_room_data:
                                     # Get the direction the player came FROM (opposite of where they're going)
@@ -1734,16 +1773,17 @@ async def process_action_stream(
                                         entry_direction = opposite_directions.get(direction.lower(), direction)
                                     else:
                                         entry_direction = "unknown"
-                                    
+
                                     logger.info(f"[MonsterBehavior] Player moved {direction}, entered from {entry_direction}")
                                     logger.info(f"[MonsterBehavior] Calling handle_player_room_entry: player={action_request.player_id}, new_room={new_room_id}, old_room={old_room_id}")
-                                    
+
                                     behavior_messages = await monster_behavior_manager.handle_player_room_entry(
                                         action_request.player_id, new_room_id, old_room_id, entry_direction, new_room_data, game_manager
                                     )
-                                    
+
+                                    logger.info(f"⏱️ [TIMING] Monster behavior handling: {(time.time() - behavior_start)*1000:.2f}ms")
                                     logger.info(f"[MonsterBehavior] handle_player_room_entry completed, player_last_room now: {monster_behavior_manager.player_last_room}")
-                                    
+
                                     # Send behavior messages to player if any
                                     for behavior_message in behavior_messages:
                                         await manager.send_to_player(new_room_id, action_request.player_id, {
@@ -1751,26 +1791,28 @@ async def process_action_stream(
                                             "message": behavior_message,
                                             "timestamp": datetime.now().isoformat()
                                         })
-                                    
+
                                     # Aggressive monster descriptions are now included in atmospheric_presence via room info
-                            
+
                             except Exception as e:
                                 logger.error(f"[Stream] Error handling monster behaviors: {str(e)}")
-                            
+
                             # CRITICAL: Handle presence updates for room movement
                             # Notify old room that player is leaving BEFORE they disconnect
+                            broadcast_start = time.time()
                             if manager.active_connections.get(old_room_id):
                                 await manager.broadcast_to_room(
                                     room_id=old_room_id,
                                     message={
-                                        "type": "presence", 
-                                        "player_id": action_request.player_id, 
+                                        "type": "presence",
+                                        "player_id": action_request.player_id,
                                         "status": "left"
                                     },
                                     exclude_player=action_request.player_id
                                 )
+                                logger.info(f"⏱️ [TIMING] Broadcast presence update: {(time.time() - broadcast_start)*1000:.2f}ms")
                                 logger.info(f"[Stream] Sent 'left' presence to room {old_room_id} for player {action_request.player_id}")
-                            
+
                             # The client will handle disconnecting from old room and connecting to new room
                             # We don't need to manually move WebSocket connections since they're tied to room endpoints
 
@@ -2088,13 +2130,16 @@ async def process_action_stream(
                             if not narrative_response:
                                 logger.warning(f"[Stream] No narrative response found in chunk: {chunk}")
                                 narrative_response = "You perform the action."
-                            
+
                             final_content = narrative_response + (f"\n\n{additional_content}" if additional_content else "")
+                            final_response_time = time.time()
+                            logger.info(f"⏱️ [TIMING] About to send final response to client: {(final_response_time - request_start)*1000:.2f}ms from request start")
                             yield json.dumps({
                                 "type": "final",
                                 "content": final_content,
                                 "updates": chunk.get("updates", {})
                             })
+                            logger.info(f"⏱️ [TIMING] Final response sent to client")
                         except Exception as e:
                             logger.error(f"[Stream] Error generating final response: {str(e)}")
                             # Fallback response to prevent freezing

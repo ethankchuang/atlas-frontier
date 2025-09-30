@@ -9,6 +9,7 @@ import logging
 from .logger import setup_logging
 import replicate
 import os
+from .image_storage import upload_image_to_supabase
 
 # Configure logging
 setup_logging()
@@ -72,19 +73,51 @@ class AIHandler:
             raise
 
     @staticmethod
-    async def generate_room_image(prompt: str) -> str:
-        """Generate an image for a room using the configured provider"""
+    async def generate_room_image(prompt: str, room_id: Optional[str] = None) -> str:
+        """Generate an image for a room using the configured provider and upload to Supabase"""
         if not settings.IMAGE_GENERATION_ENABLED:
             logger.info("[Image Generation] Image generation is disabled")
             return ""
 
+        import time
+        img_gen_start = time.time()
         try:
             logger.info(f"[Image Generation] Generating image with prompt: {prompt}")
+            logger.info(f"⏱️ [TIMING] Starting image generation...")
 
+            # Generate the image (returns temporary URL)
+            gen_start = time.time()
             if settings.IMAGE_PROVIDER == "replicate":
-                return await AIHandler._generate_image_replicate(prompt)
+                temp_url = await AIHandler._generate_image_replicate(prompt)
             else:
-                return await AIHandler._generate_image_openai(prompt)
+                temp_url = await AIHandler._generate_image_openai(prompt)
+            logger.info(f"⏱️ [TIMING] Image generation API: {(time.time() - gen_start)*1000:.2f}ms")
+
+            if not temp_url:
+                logger.warning("[Image Generation] No image URL returned from provider")
+                return ""
+
+            # Upload to Supabase Storage if room_id is provided
+            if room_id:
+                logger.info(f"[Image Generation] Uploading image to Supabase for room {room_id}")
+                upload_start = time.time()
+                supabase_url = await upload_image_to_supabase(temp_url, room_id)
+                logger.info(f"⏱️ [TIMING] Image upload to Supabase: {(time.time() - upload_start)*1000:.2f}ms")
+
+                if supabase_url:
+                    total_time = time.time() - img_gen_start
+                    logger.info(f"[Image Generation] Successfully stored image in Supabase: {supabase_url}")
+                    logger.info(f"⏱️ [TIMING] Total image generation + upload: {total_time*1000:.2f}ms")
+                    return supabase_url
+                else:
+                    logger.warning(f"[Image Generation] Failed to upload to Supabase, falling back to temporary URL")
+                    return temp_url
+            else:
+                # No room_id provided, return temporary URL
+                total_time = time.time() - img_gen_start
+                logger.info("[Image Generation] No room_id provided, returning temporary URL")
+                logger.info(f"⏱️ [TIMING] Total image generation: {total_time*1000:.2f}ms")
+                return temp_url
 
         except Exception as e:
             logger.error(f"[Image Generation] Error generating image: {str(e)}")
@@ -490,7 +523,10 @@ class AIHandler:
         prompt = "\n".join(prompt_parts)
 
         logger.debug(f"[Stream Action] Sending prompt to OpenAI: {prompt}")
+        import time
+        ai_request_start = time.time()
         try:
+            logger.info(f"⏱️ [TIMING] AI request starting...")
             stream = await client.chat.completions.create(
                 model="gpt-4.1-nano-2025-04-14",
                 messages=[
@@ -506,8 +542,12 @@ class AIHandler:
             narrative_complete = False
             chunk_count = 0
             max_chunks = 1000  # Prevent infinite loops
+            first_token_time = None
 
             async for chunk in stream:
+                if first_token_time is None:
+                    first_token_time = time.time()
+                    logger.info(f"⏱️ [TIMING] First AI token received: {(first_token_time - ai_request_start)*1000:.2f}ms")
                 chunk_count += 1
                 if chunk_count > max_chunks:
                     logger.warning(f"[Stream] Too many chunks received ({chunk_count}), breaking to prevent infinite loop")
@@ -537,17 +577,20 @@ class AIHandler:
                         if isinstance(parsed, dict) and "response" in parsed:
                             # Replace response with the already streamed narrative
                             parsed["response"] = narrative.strip()
-                            
+
                             # Set the type field for the main.py message storage logic
                             parsed["type"] = "final"
-                            
+
+                            total_ai_time = time.time() - ai_request_start
+                            logger.info(f"⏱️ [TIMING] Complete AI response received: {total_ai_time*1000:.2f}ms (TTFT: {(first_token_time - ai_request_start)*1000:.2f}ms)")
+
                             # Debug: Log the AI response to see if item_award is included
                             logger.info(f"[AI Response] Full AI response: {parsed}")
                             if "updates" in parsed and "item_award" in parsed["updates"]:
                                 logger.info(f"[AI Response] Item award found: {parsed['updates']['item_award']}")
                             else:
                                 logger.warning(f"[AI Response] No item_award found in AI response!")
-                            
+
                             yield parsed
                             break
                     except json.JSONDecodeError as e:
