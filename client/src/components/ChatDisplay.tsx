@@ -62,7 +62,10 @@ const ChatDisplay: React.FC = () => {
 
                 return (
                     <div className="mb-3 text-cyan-400 font-mono text-xl">
-                        <span className={message.isStreaming ? 'animate-pulse' : ''}>{'>'}</span> {message.message}
+                        <span className={message.isStreaming ? 'animate-pulse' : ''}>{'>'}</span>{' '}
+                        <span className={message.isStreaming && message.message === '▮' ? 'animate-blink' : ''}>
+                            {message.message}
+                        </span>
                     </div>
                 );
 
