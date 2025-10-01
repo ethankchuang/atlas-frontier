@@ -114,8 +114,16 @@ class APIService {
             // Check if this is a movement action
             const isMovement = /(north|south|east|west|up|down|move)/i.test(action.action);
 
-            // Don't set movement loading state here - we'll determine it based on backend response
-            // The loading spinner should only show when the room is actually being generated
+            // Track when user attempts movement for visual feedback
+            if (isMovement) {
+                const currentRoomId = store.currentRoom?.id;
+                store.setIsAttemptingMovement(true);
+                store.setShowMovementAnimation(true);
+                store.setMovementFailed(false);
+
+                // Store current room ID to detect if movement failed
+                (window as any).__attemptedMovementFromRoom = currentRoomId;
+            }
 
             const token = this.getAuthToken();
             const headers: HeadersInit = {
@@ -286,10 +294,64 @@ class APIService {
                                 console.log(`⏱️ [CLIENT TIMING] Content chunk ${chunkCount}: ${(performance.now() - requestStart).toFixed(2)}ms from request start`);
                             }
                             onChunk(data.content);
+                        } else if (data.type === 'room_update') {
+                            // OPTIMIZATION: Handle room updates immediately for instant UI updates
+                            const roomUpdateTime = performance.now();
+                            console.log(`⏱️ [CLIENT TIMING] Room update received: ${(roomUpdateTime - requestStart).toFixed(2)}ms from request start`);
+
+                            // Process room updates immediately
+                            if (data.updates) {
+                                // Handle player updates (position, inventory, etc.)
+                                if (data.updates.player && store.player) {
+                                    const updatedPlayer = { ...store.player, ...data.updates.player };
+                                    store.setPlayer(updatedPlayer);
+                                    console.log('[API] Room update: Updated player state', updatedPlayer);
+                                }
+
+                                // Handle room changes
+                                if (data.updates.room) {
+                                    const oldRoomId = (window as any).__attemptedMovementFromRoom;
+                                    const newRoomId = data.updates.room.id;
+
+                                    // Check if movement succeeded or failed
+                                    if (oldRoomId && newRoomId === oldRoomId) {
+                                        // Movement failed - still in same room
+                                        console.log('[API] Movement failed - still in same room');
+                                        store.setMovementFailed(true);
+                                        store.setIsAttemptingMovement(false);
+                                        store.setShowMovementAnimation(false);
+
+                                        // Clear failed state after animation
+                                        setTimeout(() => {
+                                            store.setMovementFailed(false);
+                                        }, 600);
+                                    } else if (oldRoomId) {
+                                        // Movement succeeded - new room
+                                        console.log('[API] Movement succeeded - new room');
+                                        store.setIsAttemptingMovement(false);
+                                        store.setShowMovementAnimation(false);
+                                        store.setMovementFailed(false);
+                                    }
+
+                                    store.setCurrentRoom(data.updates.room);
+                                    console.log('[API] Room update: Updated room', data.updates.room);
+                                }
+
+                                // Handle inventory updates
+                                if (data.updates.inventory) {
+                                    console.log('[API] Room update: Updated inventory', data.updates.inventory);
+                                }
+                            }
+
+                            console.log(`⏱️ [CLIENT TIMING] Room update processed: ${(performance.now() - roomUpdateTime).toFixed(2)}ms`);
                         } else if (data.type === 'final') {
                             const finalTime = performance.now();
                             console.log(`⏱️ [CLIENT TIMING] Final response received: ${(finalTime - requestStart).toFixed(2)}ms total`);
                             console.log(`⏱️ [CLIENT TIMING] Total chunks processed: ${chunkCount}`);
+
+                            // Clear movement animation states
+                            store.setIsAttemptingMovement(false);
+                            store.setShowMovementAnimation(false);
                             
                             // Enhanced timing breakdown
                             const totalTime = finalTime - requestStart;

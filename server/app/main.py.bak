@@ -1578,11 +1578,16 @@ async def process_action_stream(
                         logger.warning(f"[Stream] Chunk missing 'updates' field: {chunk}")
                         chunk["updates"] = {}
 
-                    # OPTIMIZATION: Handle room_data chunks - skip for now, we'll send after movement processing
+                    # OPTIMIZATION: Handle room_data chunks - send immediately for instant UI updates
                     if chunk.get("type") == "room_data":
-                        logger.info(f"⏱️ [TIMING] Room data chunk received at {(time.time() - request_start)*1000:.2f}ms - will process after movement")
-                        # Don't send yet - movement logic needs to run first to get correct room ID
-                        # Continue to process the final chunk which will handle everything
+                        logger.info(f"⏱️ [TIMING] Room data chunk received, sending to client immediately at {(time.time() - request_start)*1000:.2f}ms")
+                        yield json.dumps({
+                            "type": "room_update",
+                            "updates": chunk.get("updates", {}),
+                            "response": chunk.get("response", "")
+                        })
+                        logger.info(f"⏱️ [TIMING] Room update sent to client")
+                        # Continue processing - don't return, we still need to handle the final chunk
                         continue
 
                     # Store the AI response as a message
@@ -1623,40 +1628,79 @@ async def process_action_stream(
                                 # Structured movement blocking: compute retreat and check monsters
                                 room_data_current = await game_manager.db.get_room(player.current_room)
                                 connections_raw = room_data_current.get('connections', {}) if room_data_current else {}
-                                # Normalize connection keys to lowercase strings (handle Enum keys)
-                                connections = {}
-                                try:
-                                    for k, v in connections_raw.items():
-                                        key = getattr(k, 'value', k)
-                                        if isinstance(key, str):
-                                            connections[key.lower()] = v
-                                except Exception:
-                                    connections = {str(k).lower(): v for k, v in connections_raw.items()}
-                                last_room = monster_behavior_manager.player_last_room.get(action_request.player_id)
-                                target_room = connections.get(direction.lower())
-                                is_retreat = (last_room is not None and target_room == last_room)
-                                
-                                print(f"\n🚨 [Movement] Retreat check:")
-                                print(f"   player: {action_request.player_id}")
-                                print(f"   last_room: {last_room}")
-                                print(f"   target_room: {target_room}")
-                                print(f"   is_retreat: {is_retreat}")
-                                print(f"   All player_last_room entries: {monster_behavior_manager.player_last_room}")
-                                logger.info(f"[Movement] Retreat check: player={action_request.player_id}, last_room={last_room}, target_room={target_room}, is_retreat={is_retreat}")
-                                logger.info(f"[Movement] All player_last_room entries: {monster_behavior_manager.player_last_room}")
+                            # Normalize connection keys to lowercase strings (handle Enum keys)
+                            connections = {}
+                            try:
+                                for k, v in connections_raw.items():
+                                    key = getattr(k, 'value', k)
+                                    if isinstance(key, str):
+                                        connections[key.lower()] = v
+                            except Exception:
+                                connections = {str(k).lower(): v for k, v in connections_raw.items()}
+                            last_room = monster_behavior_manager.player_last_room.get(action_request.player_id)
+                            target_room = connections.get(direction.lower())
+                            is_retreat = (last_room is not None and target_room == last_room)
+                            
+                            print(f"\n🚨 [Movement] Retreat check:")
+                            print(f"   player: {action_request.player_id}")
+                            print(f"   last_room: {last_room}")
+                            print(f"   target_room: {target_room}")
+                            print(f"   is_retreat: {is_retreat}")
+                            print(f"   All player_last_room entries: {monster_behavior_manager.player_last_room}")
+                            logger.info(f"[Movement] Retreat check: player={action_request.player_id}, last_room={last_room}, target_room={target_room}, is_retreat={is_retreat}")
+                            logger.info(f"[Movement] All player_last_room entries: {monster_behavior_manager.player_last_room}")
 
-                                # Aggressive blocking (allows retreat internally)
-                                aggressive_block = None
-                                if not is_retreat:
-                                    logger.info(f"[Movement] Not a retreat - checking aggressive monster blocking")
-                                    aggressive_block = await monster_behavior_manager.check_aggressive_monster_blocking(
-                                        action_request.player_id, player.current_room, direction, game_manager
-                                    )
-                                else:
-                                    logger.info(f"[Movement] Retreat detected - skipping aggressive monster blocking")
-                                if aggressive_block:
-                                    monster_id, _ = aggressive_block
-                                    combat_message = await monster_behavior_manager.handle_aggressive_combat_initiation(
+                            # Aggressive blocking (allows retreat internally)
+                            aggressive_block = None
+                            if not is_retreat:
+                                logger.info(f"[Movement] Not a retreat - checking aggressive monster blocking")
+                                aggressive_block = await monster_behavior_manager.check_aggressive_monster_blocking(
+                                    action_request.player_id, player.current_room, direction, game_manager
+                                )
+                            else:
+                                logger.info(f"[Movement] Retreat detected - skipping aggressive monster blocking")
+                            if aggressive_block:
+                                monster_id, _ = aggressive_block
+                                combat_message = await monster_behavior_manager.handle_aggressive_combat_initiation(
+                                    action_request.player_id, monster_id, player.current_room, direction, game_manager
+                                )
+                                try:
+                                    monster_data = await game_manager.db.get_monster(monster_id)
+                                except Exception:
+                                    monster_data = None
+                                monster_name = (monster_data or {}).get('name', 'Unknown Monster')
+                                try:
+                                    player1_max_vital = 6
+                                    player2_max_vital = await get_monster_max_vital(monster_data or {})
+                                except Exception:
+                                    player1_max_vital = 6
+                                    player2_max_vital = 6
+                                yield json.dumps({
+                                    "type": "final",
+                                    "content": combat_message,
+                                    "updates": {
+                                        "duel": {
+                                            "is_monster_duel": True,
+                                            "opponent_id": monster_id,
+                                            "opponent_name": monster_name,
+                                            "player1_max_vital": player1_max_vital,
+                                            "player2_max_vital": player2_max_vital
+                                        }
+                                    }
+                                })
+                                return
+
+                            # Territorial blocking (skip on retreat)
+                            territorial_block = None
+                            if not is_retreat:
+                                territorial_block = await monster_behavior_manager.check_territorial_blocking(
+                                    action_request.player_id, player.current_room, direction, game_manager
+                                )
+                            else:
+                                logger.info(f"[Movement] Retreat detected - skipping territorial monster blocking")
+                            if territorial_block:
+                                    monster_id, _ = territorial_block
+                                    combat_message = await monster_behavior_manager.handle_territorial_combat_initiation(
                                         action_request.player_id, monster_id, player.current_room, direction, game_manager
                                     )
                                     try:
@@ -1685,21 +1729,318 @@ async def process_action_stream(
                                     })
                                     return
 
-                                # Territorial blocking (skip on retreat)
-                                territorial_block = None
-                                if not is_retreat:
-                                    territorial_block = await monster_behavior_manager.check_territorial_blocking(
-                                        action_request.player_id, player.current_room, direction, game_manager
+                            # Proceed with movement
+                            # Clear rejoin immunity when player moves to a different room
+                            if player.rejoin_immunity:
+                                player.rejoin_immunity = False
+                                logger.info(f"[Stream] Cleared rejoin immunity for player {action_request.player_id} due to movement")
+
+                            logger.info(f"⏱️ [TIMING] Monster blocking checks: {(time.time() - movement_start)*1000:.2f}ms")
+
+                            # CRITICAL: Use GameManager's coordinate-based room movement logic to prevent duplicate coordinates
+                            room_gen_start = time.time()
+                            actual_room_id, new_room = await game_manager.handle_room_movement_by_direction(
+                                player, room, direction
+                            )
+                            logger.info(f"⏱️ [TIMING] Room generation/retrieval: {(time.time() - room_gen_start)*1000:.2f}ms")
+
+                            # Update player's destination to the actual room ID
+                            player_updates["current_room"] = actual_room_id
+                            new_room_id = actual_room_id
+
+                            logger.info(f"[Stream] Player moving to room: {new_room_id}")
+
+                            # Room movement is now handled entirely by GameManager
+                            # Remove the direction from updates since it's been processed
+                            del player_updates["direction"]
+
+                            # CRITICAL: Update player data in database BEFORE broadcasting
+                            db_update_start = time.time()
+                            updated_player = Player(**{**player.dict(), **player_updates})
+                            await game_manager.db.set_player(action_request.player_id, updated_player.dict())
+                            logger.info(f"⏱️ [TIMING] Update player in DB: {(time.time() - db_update_start)*1000:.2f}ms")
+
+                            # CRITICAL: Update room player lists in database
+                            db_update_start = time.time()
+                            old_room_id = player.current_room
+                            await game_manager.db.remove_from_room_players(old_room_id, action_request.player_id)
+                            await game_manager.db.add_to_room_players(new_room_id, action_request.player_id)
+                            logger.info(f"⏱️ [TIMING] Update room player lists: {(time.time() - db_update_start)*1000:.2f}ms")
+                            logger.info(f"[Stream] Updated room player lists: removed from {old_room_id}, added to {new_room_id}")
+
+                            # Clear combat history when player leaves a room
+                            try:
+                                monster_behavior_manager._clear_player_combat_history(action_request.player_id)
+                            except Exception as e:
+                                logger.error(f"[Stream] Error clearing combat history: {str(e)}")
+
+                            # Handle monster behaviors when entering new room
+                            try:
+                                behavior_start = time.time()
+                                new_room_data = await game_manager.db.get_room(new_room_id)
+                                if new_room_data:
+                                    # Get the direction the player came FROM (opposite of where they're going)
+                                    # If player moves WEST, they entered from EAST
+                                    opposite_directions = {
+                                        'north': 'south',
+                                        'south': 'north',
+                                        'east': 'west',
+                                        'west': 'east',
+                                        'up': 'down',
+                                        'down': 'up'
+                                    }
+                                    # The entry direction is the opposite of the movement direction
+                                    # Safety check for None direction
+                                    if direction is not None:
+                                        entry_direction = opposite_directions.get(direction.lower(), direction)
+                                    else:
+                                        entry_direction = "unknown"
+
+                                    logger.info(f"[MonsterBehavior] Player moved {direction}, entered from {entry_direction}")
+                                    logger.info(f"[MonsterBehavior] Calling handle_player_room_entry: player={action_request.player_id}, new_room={new_room_id}, old_room={old_room_id}")
+
+                                    behavior_messages = await monster_behavior_manager.handle_player_room_entry(
+                                        action_request.player_id, new_room_id, old_room_id, entry_direction, new_room_data, game_manager
                                     )
-                                else:
-                                    logger.info(f"[Movement] Retreat detected - skipping territorial monster blocking")
-                                if territorial_block:
-                                        monster_id, _ = territorial_block
-                                        combat_message = await monster_behavior_manager.handle_territorial_combat_initiation(
-                                            action_request.player_id, monster_id, player.current_room, direction, game_manager
+
+                                    logger.info(f"⏱️ [TIMING] Monster behavior handling: {(time.time() - behavior_start)*1000:.2f}ms")
+                                    logger.info(f"[MonsterBehavior] handle_player_room_entry completed, player_last_room now: {monster_behavior_manager.player_last_room}")
+
+                                    # Send behavior messages to player if any
+                                    for behavior_message in behavior_messages:
+                                        await manager.send_to_player(new_room_id, action_request.player_id, {
+                                            "type": "system_message",
+                                            "message": behavior_message,
+                                            "timestamp": datetime.now().isoformat()
+                                        })
+
+                                    # Aggressive monster descriptions are now included in atmospheric_presence via room info
+
+                            except Exception as e:
+                                logger.error(f"[Stream] Error handling monster behaviors: {str(e)}")
+
+                            # CRITICAL: Handle presence updates for room movement
+                            # Notify old room that player is leaving BEFORE they disconnect
+                            broadcast_start = time.time()
+                            if manager.active_connections.get(old_room_id):
+                                await manager.broadcast_to_room(
+                                    room_id=old_room_id,
+                                    message={
+                                        "type": "presence",
+                                        "player_id": action_request.player_id,
+                                        "status": "left"
+                                    },
+                                    exclude_player=action_request.player_id
+                                )
+                                logger.info(f"⏱️ [TIMING] Broadcast presence update: {(time.time() - broadcast_start)*1000:.2f}ms")
+                                logger.info(f"[Stream] Sent 'left' presence to room {old_room_id} for player {action_request.player_id}")
+
+                            # The client will handle disconnecting from old room and connecting to new room
+                            # We don't need to manually move WebSocket connections since they're tied to room endpoints
+
+                    # Check if this is a rate limit error
+                    if chunk.get("updates", {}).get("error") == "rate_limit_exceeded":
+                        # Yield rate limit error
+                        yield json.dumps({
+                            "type": "error",
+                            "error": "rate_limit_exceeded",
+                            "message": chunk["updates"]["message"],
+                            "rate_limit_info": chunk["updates"]["rate_limit_info"]
+                        })
+                    else:
+                        # Non-movement actions: aggressive monsters attack on any action (retreat handled in movement logic)
+                        is_movement = ("player" in chunk.get("updates", {}) and "direction" in chunk["updates"].get("player", {}))
+                        additional_content = ""
+                        
+                        # Also check if this was a movement action by looking at the original action
+                        is_movement_action = action_request.action.lower().startswith(("move ", "go ", "walk ", "run ", "head "))
+                        
+                        logger.info(f"[Stream] Action analysis: is_movement={is_movement}, is_movement_action={is_movement_action}, action='{action_request.action}'")
+
+                        if not is_movement and not is_movement_action:
+                            logger.info(f"[Stream] Non-movement action detected - checking aggressive monster blocking")
+                            
+                            # Handle item awarding from AI (unified system) - MOVED HERE FOR NON-MOVEMENT ACTIONS
+                            try:
+                                # Check for unified item_award system
+                                item_award_info = chunk.get("updates", {}).get("item_award")
+                                if item_award_info is not None:
+                                    award_type = item_award_info.get("type")
+                                    awarded_item_name = item_award_info.get("item_name")
+                                    rarity = item_award_info.get("rarity", 1)
+
+                                    # Ensure updates scaffolding exists
+                                    if "updates" not in chunk or not isinstance(chunk["updates"], dict):
+                                        chunk["updates"] = {}
+                                    if "player" not in chunk["updates"] or not isinstance(chunk["updates"].get("player"), dict):
+                                        chunk["updates"]["player"] = {}
+
+                                    logger.info(f"[Item System] Processing item award: type={award_type}, name={awarded_item_name}, rarity={rarity}")
+
+                                    # Process unified item award system
+                                    item_id = None
+                                    item_data = None
+                                    
+                                    if award_type == "room_item" and awarded_item_name:
+                                        # Award specific room item
+                                        logger.info(f"[Item System] AI awarded room item: {awarded_item_name}")
+                                        
+                                        if room.items:
+                                            # Find the matching room item
+                                            item_found = False
+                                            for room_item_id in room.items[:]:
+                                                if item_found:
+                                                    break
+                                                try:
+                                                    room_item_data = await game_manager.db.get_item(room_item_id)
+                                                    if room_item_data and room_item_data['name'] == awarded_item_name:
+                                                        # Award this specific room item
+                                                        item_id = room_item_id
+                                                        item_data = room_item_data
+                                                        
+                                                        # Remove from room
+                                                        room.items.remove(room_item_id)
+                                                        await game_manager.db.set_room(room.id, room.dict())
+                                                        
+                                                        # Add to player inventory
+                                                        player.inventory.append(item_id)
+                                                        await game_manager.db.set_player(action_request.player_id, player.dict())
+                                                        
+                                                        logger.info(f"[Item System] AI awarded room item '{item_data['name']}' to player {action_request.player_id}")
+                                                        item_found = True
+                                                        break
+                                                except Exception as e:
+                                                    logger.warning(f"[Item System] Failed to check room item {room_item_id}: {str(e)}")
+                                    
+                                    elif award_type == "generate_item":
+                                        # Generate new item
+                                        logger.info(f"[Item System] AI requested generated item with rarity: {rarity}")
+                                        
+                                        try:
+                                            from .templates.items import AIItemGenerator
+                                            item_generator = AIItemGenerator()
+                                            
+                                            item_context = {
+                                                'world_seed': game_state.world_seed,
+                                                'world_theme': 'fantasy',
+                                                'main_quest': game_state.main_quest_summary,
+                                                'room_description': room.description,
+                                                'room_biome': room.biome or 'unknown',
+                                                'player_action': action_request.action,
+                                                'situation_context': 'basic_environmental_item',
+                                                'desired_rarity': rarity,
+                                                'database': game_manager.db  # Pass database for recent items context
+                                            }
+                                            
+                                            # Generate item
+                                            item_data = await item_generator.generate_item(game_manager.ai_handler, item_context)
+                                            
+                                            # Create unique item ID and store in database
+                                            import uuid
+                                            item_id = f"item_{str(uuid.uuid4())}"
+                                            item_data['id'] = item_id
+                                            await game_manager.db.set_item(item_id, item_data)
+                                            
+                                            # Add to player inventory
+                                            player.inventory.append(item_id)
+                                            await game_manager.db.set_player(action_request.player_id, player.dict())
+                                            
+                                            logger.info(f"[Item System] Generated item '{item_data['name']}' (rarity {rarity}) for player {action_request.player_id}")
+                                            
+                                        except Exception as e:
+                                            logger.error(f"[Item System] Failed to generate item: {str(e)}")
+                                    
+                                    # Send item notifications if an item was awarded
+                                    if item_id and item_data:
+                                        # Update response to include item information
+                                        chunk["updates"]["player"]["inventory"] = player.inventory
+                                        chunk["updates"]["new_item"] = {
+                                            "id": item_id,
+                                            "name": item_data['name'],
+                                            "description": item_data['description'],
+                                            "rarity": item_data['rarity'],
+                                            "capabilities": item_data['capabilities'],
+                                            "properties": {}
+                                        }
+                                        
+                                        # Send item obtained notification via WebSocket
+                                        await manager.send_to_player(room.id, action_request.player_id, {
+                                            "type": "item_obtained",
+                                            "player_id": action_request.player_id,
+                                            "item_id": item_id,
+                                            "item_name": item_data['name'],
+                                            "item_rarity": item_data['rarity'],
+                                            "rarity_stars": "★" * item_data['rarity'] + "☆" * (4 - item_data['rarity']),
+                                            "message": f"📦 You obtained: {'★' * item_data['rarity']}{'☆' * (4 - item_data['rarity'])} {item_data['name']}",
+                                            "timestamp": datetime.now().isoformat()
+                                        })
+                                        
+                                        logger.info(f"[Item System] Sent item obtained notification for '{item_data['name']}' to player {action_request.player_id}")
+                                
+                                # Handle item combination from AI
+                                item_combination_info = chunk.get("updates", {}).get("item_combination")
+                                if item_combination_info is not None:
+                                    item_ids = item_combination_info.get("item_ids", [])
+                                    combination_description = item_combination_info.get("combination_description", "")
+                                    
+                                    if item_ids and len(item_ids) >= 2:
+                                        logger.info(f"[Item Combination] AI requested combination of {len(item_ids)} items: {item_ids}")
+                                        
+                                        try:
+                                            # Call the combine_items function
+                                            combination_result = await game_manager.combine_items(
+                                                action_request.player_id, 
+                                                item_ids, 
+                                                combination_description
+                                            )
+                                            
+                                            if combination_result["success"]:
+                                                # Update the chunk with the combination results
+                                                chunk["updates"]["player"] = combination_result["updates"]["player"]
+                                                chunk["updates"]["new_item"] = combination_result["updates"]["new_item"]
+                                                
+                                                # Send item combination notification via WebSocket
+                                                await manager.send_to_player(room.id, action_request.player_id, {
+                                                    "type": "item_obtained",
+                                                    "player_id": action_request.player_id,
+                                                    "item_id": combination_result["updates"]["new_item"]["id"],
+                                                    "item_name": combination_result["updates"]["new_item"]["name"],
+                                                    "item_rarity": combination_result["updates"]["new_item"]["rarity"],
+                                                    "rarity_stars": "★" * combination_result["updates"]["new_item"]["rarity"] + "☆" * (4 - combination_result["updates"]["new_item"]["rarity"]),
+                                                    "message": f"🔨 You crafted: {'★' * combination_result['updates']['new_item']['rarity']}{'☆' * (4 - combination_result['updates']['new_item']['rarity'])} {combination_result['updates']['new_item']['name']}",
+                                                    "timestamp": datetime.now().isoformat()
+                                                })
+                                                
+                                                logger.info(f"[Item Combination] Successfully combined items into '{combination_result['updates']['new_item']['name']}'")
+                                            else:
+                                                logger.warning(f"[Item Combination] Failed to combine items: {combination_result['message']}")
+                                                
+                                        except Exception as e:
+                                            logger.error(f"[Item Combination] Error combining items: {str(e)}")
+                                    else:
+                                        logger.warning(f"[Item Combination] Invalid item combination request: {item_combination_info}")
+
+                            except Exception as e:
+                                logger.error(f"[Item Handling] Unexpected error: {str(e)}")
+
+                            # Handle explicit combat intent signaled by AI
+                            combat_intent = chunk.get("updates", {}).get("combat")
+                            if combat_intent is not None:
+                                try:
+                                    # Resolve target monster
+                                    player_room_data = await game_manager.db.get_room(player.current_room)
+                                    room_monsters = player_room_data.get("monsters", []) if player_room_data else []
+                                    target_monster_id = None
+                                    if isinstance(combat_intent, dict):
+                                        target_monster_id = combat_intent.get("monster_id")
+                                    if not target_monster_id and len(room_monsters) == 1:
+                                        target_monster_id = room_monsters[0]
+                                    if target_monster_id:
+                                        combat_message = await monster_behavior_manager.handle_aggressive_combat_initiation(
+                                            action_request.player_id, target_monster_id, player.current_room, "any_action", game_manager
                                         )
                                         try:
-                                            monster_data = await game_manager.db.get_monster(monster_id)
+                                            monster_data = await game_manager.db.get_monster(target_monster_id)
                                         except Exception:
                                             monster_data = None
                                         monster_name = (monster_data or {}).get('name', 'Unknown Monster')
@@ -1715,7 +2056,7 @@ async def process_action_stream(
                                             "updates": {
                                                 "duel": {
                                                     "is_monster_duel": True,
-                                                    "opponent_id": monster_id,
+                                                    "opponent_id": target_monster_id,
                                                     "opponent_name": monster_name,
                                                     "player1_max_vital": player1_max_vital,
                                                     "player2_max_vital": player2_max_vital
@@ -1723,442 +2064,86 @@ async def process_action_stream(
                                             }
                                         })
                                         return
+                                except Exception as e:
+                                    logger.error(f"[Stream] Error initiating combat from AI intent: {str(e)}")
 
-                                # Proceed with movement
-                                # Clear rejoin immunity when player moves to a different room
-                                if player.rejoin_immunity:
-                                    player.rejoin_immunity = False
-                                    logger.info(f"[Stream] Cleared rejoin immunity for player {action_request.player_id} due to movement")
+                            # If the AI indicates a monster interaction (talking), handle it before generic aggressive check
+                            interaction = chunk.get("updates", {}).get("monster_interaction")
+                            if interaction:
+                                # Resolve monster target
+                                target_monster_id = interaction.get("monster_id") if isinstance(interaction, dict) else None
+                                player_room_data = await game_manager.db.get_room(player.current_room)
+                                room_monsters = player_room_data.get("monsters", []) if player_room_data else []
+                                if not target_monster_id and len(room_monsters) == 1:
+                                    target_monster_id = room_monsters[0]
 
-                                logger.info(f"⏱️ [TIMING] Monster blocking checks: {(time.time() - movement_start)*1000:.2f}ms")
+                                # If a target is found, check aggressiveness
+                                if target_monster_id:
+                                    monster_data = await game_manager.db.get_monster(target_monster_id)
+                                    if monster_data and monster_data.get("is_alive", True):
+                                        if monster_data.get("aggressiveness") == "aggressive":
+                                            # Aggressive: initiate combat immediately on any action
+                                            aggressive_block = await monster_behavior_manager.check_aggressive_monster_blocking(
+                                                action_request.player_id, player.current_room, "any_action", game_manager
+                                            )
+                                            if aggressive_block:
+                                                monster_id, _ = aggressive_block
+                                                combat_message = await monster_behavior_manager.handle_aggressive_combat_initiation(
+                                                    action_request.player_id, monster_id, player.current_room, "any_action", game_manager
+                                                )
+                                                yield json.dumps({
+                                                    "type": "final",
+                                                    "content": combat_message,
+                                                    "updates": {}
+                                                })
+                                                return
+                                        else:
+                                            # Non-aggressive: produce dialogue based on intelligence via AI
+                                            player_message = interaction.get("message", "") if isinstance(interaction, dict) else ""
+                                            reply = await monster_behavior_manager.generate_monster_dialogue(
+                                                target_monster_id, player_message, player.current_room, game_manager
+                                            )
+                                            if reply:
+                                                additional_content = reply
 
-                                # CRITICAL: Use GameManager's coordinate-based room movement logic to prevent duplicate coordinates
-                                room_gen_start = time.time()
-                                actual_room_id, new_room = await game_manager.handle_room_movement_by_direction(
-                                    player, room, direction
+                            # If no resolvable target, fall through to aggressive any_action check
+                            aggressive_block = await monster_behavior_manager.check_aggressive_monster_blocking(
+                                action_request.player_id, player.current_room, "any_action", game_manager
+                            )
+                            if aggressive_block:
+                                monster_id, _ = aggressive_block
+                                combat_message = await monster_behavior_manager.handle_aggressive_combat_initiation(
+                                    action_request.player_id, monster_id, player.current_room, "any_action", game_manager
                                 )
-                                logger.info(f"⏱️ [TIMING] Room generation/retrieval: {(time.time() - room_gen_start)*1000:.2f}ms")
-
-                                # Update player's destination to the actual room ID
-                                player_updates["current_room"] = actual_room_id
-                                new_room_id = actual_room_id
-
-                                logger.info(f"[Stream] Player moving to room: {new_room_id}")
-
-                                # Room movement is now handled entirely by GameManager
-                                # Remove the direction from updates since it's been processed
-                                del player_updates["direction"]
-
-                                # OPTIMIZATION: Send room_update immediately with new room data
-                                logger.info(f"⏱️ [TIMING] Fetching room data for immediate room_update at {(time.time() - request_start)*1000:.2f}ms")
                                 try:
-                                    room_fetch_start = time.time()
-                                    new_room_data = await game_manager.db.get_room(new_room_id)
-                                    logger.info(f"⏱️ [TIMING] Room data fetched in {(time.time() - room_fetch_start)*1000:.2f}ms")
-
-                                    # Send room_update with complete room data
-                                    room_update_payload = {
-                                        "type": "room_update",
-                                        "updates": {
-                                            "player": {**player_updates, "current_room": new_room_id},
-                                            "room": new_room_data
+                                    monster_data = await game_manager.db.get_monster(monster_id)
+                                except Exception:
+                                    monster_data = None
+                                monster_name = (monster_data or {}).get('name', 'Unknown Monster')
+                                try:
+                                    player1_max_vital = 6
+                                    player2_max_vital = await get_monster_max_vital(monster_data or {})
+                                except Exception:
+                                    player1_max_vital = 6
+                                    player2_max_vital = 6
+                                yield json.dumps({
+                                    "type": "final",
+                                    "content": combat_message,
+                                    "updates": {
+                                        "duel": {
+                                            "is_monster_duel": True,
+                                            "opponent_id": monster_id,
+                                            "opponent_name": monster_name,
+                                            "player1_max_vital": player1_max_vital,
+                                            "player2_max_vital": player2_max_vital
                                         }
                                     }
-                                    yield json.dumps(room_update_payload)
-                                    logger.info(f"⏱️ [TIMING] Sent room_update to client at {(time.time() - request_start)*1000:.2f}ms")
-                                except Exception as e:
-                                    logger.error(f"[Stream] Error sending room_update: {str(e)}")
-
-                                # CRITICAL: Update player data in database BEFORE broadcasting
-                                db_update_start = time.time()
-                                updated_player = Player(**{**player.dict(), **player_updates})
-                                await game_manager.db.set_player(action_request.player_id, updated_player.dict())
-                                logger.info(f"⏱️ [TIMING] Update player in DB: {(time.time() - db_update_start)*1000:.2f}ms")
-
-                                # CRITICAL: Update room player lists in database
-                                db_update_start = time.time()
-                                old_room_id = player.current_room
-                                await game_manager.db.remove_from_room_players(old_room_id, action_request.player_id)
-                                await game_manager.db.add_to_room_players(new_room_id, action_request.player_id)
-                                logger.info(f"⏱️ [TIMING] Update room player lists: {(time.time() - db_update_start)*1000:.2f}ms")
-                                logger.info(f"[Stream] Updated room player lists: removed from {old_room_id}, added to {new_room_id}")
-
-                                # Clear combat history when player leaves a room
-                                try:
-                                    monster_behavior_manager._clear_player_combat_history(action_request.player_id)
-                                except Exception as e:
-                                    logger.error(f"[Stream] Error clearing combat history: {str(e)}")
-
-                                # Handle monster behaviors when entering new room
-                                try:
-                                    behavior_start = time.time()
-                                    new_room_data = await game_manager.db.get_room(new_room_id)
-                                    if new_room_data:
-                                        # Get the direction the player came FROM (opposite of where they're going)
-                                        # If player moves WEST, they entered from EAST
-                                        opposite_directions = {
-                                            'north': 'south',
-                                            'south': 'north',
-                                            'east': 'west',
-                                            'west': 'east',
-                                            'up': 'down',
-                                            'down': 'up'
-                                        }
-                                        # The entry direction is the opposite of the movement direction
-                                        # Safety check for None direction
-                                        if direction is not None:
-                                            entry_direction = opposite_directions.get(direction.lower(), direction)
-                                        else:
-                                            entry_direction = "unknown"
-
-                                        logger.info(f"[MonsterBehavior] Player moved {direction}, entered from {entry_direction}")
-                                        logger.info(f"[MonsterBehavior] Calling handle_player_room_entry: player={action_request.player_id}, new_room={new_room_id}, old_room={old_room_id}")
-
-                                        behavior_messages = await monster_behavior_manager.handle_player_room_entry(
-                                            action_request.player_id, new_room_id, old_room_id, entry_direction, new_room_data, game_manager
-                                        )
-
-                                        logger.info(f"⏱️ [TIMING] Monster behavior handling: {(time.time() - behavior_start)*1000:.2f}ms")
-                                        logger.info(f"[MonsterBehavior] handle_player_room_entry completed, player_last_room now: {monster_behavior_manager.player_last_room}")
-
-                                        # Send behavior messages to player if any
-                                        for behavior_message in behavior_messages:
-                                            await manager.send_to_player(new_room_id, action_request.player_id, {
-                                                "type": "system_message",
-                                                "message": behavior_message,
-                                                "timestamp": datetime.now().isoformat()
-                                            })
-
-                                        # Aggressive monster descriptions are now included in atmospheric_presence via room info
-
-                                except Exception as e:
-                                    logger.error(f"[Stream] Error handling monster behaviors: {str(e)}")
-
-                                # CRITICAL: Handle presence updates for room movement
-                                # Notify old room that player is leaving BEFORE they disconnect
-                                broadcast_start = time.time()
-                                if manager.active_connections.get(old_room_id):
-                                    await manager.broadcast_to_room(
-                                        room_id=old_room_id,
-                                        message={
-                                            "type": "presence",
-                                            "player_id": action_request.player_id,
-                                            "status": "left"
-                                        },
-                                        exclude_player=action_request.player_id
-                                    )
-                                    logger.info(f"⏱️ [TIMING] Broadcast presence update: {(time.time() - broadcast_start)*1000:.2f}ms")
-                                    logger.info(f"[Stream] Sent 'left' presence to room {old_room_id} for player {action_request.player_id}")
-
-                                # The client will handle disconnecting from old room and connecting to new room
-                                # We don't need to manually move WebSocket connections since they're tied to room endpoints
-
-                    # Check if this is a rate limit error
-                    if chunk.get("updates", {}).get("error") == "rate_limit_exceeded":
-                        # Yield rate limit error
-                        yield json.dumps({
-                                "type": "error",
-                                "error": "rate_limit_exceeded",
-                                "message": chunk["updates"]["message"],
-                                "rate_limit_info": chunk["updates"]["rate_limit_info"]
-                        })
-                    else:
-                        # Non-movement actions: aggressive monsters attack on any action (retreat handled in movement logic)
-                        is_movement = ("player" in chunk.get("updates", {}) and "direction" in chunk["updates"].get("player", {}))
-                        additional_content = ""
-                        
-                        # Also check if this was a movement action by looking at the original action
-                        is_movement_action = action_request.action.lower().startswith(("move ", "go ", "walk ", "run ", "head "))
-                        
-                        logger.info(f"[Stream] Action analysis: is_movement={is_movement}, is_movement_action={is_movement_action}, action='{action_request.action}'")
-
-                        if not is_movement and not is_movement_action:
-                                logger.info(f"[Stream] Non-movement action detected - checking aggressive monster blocking")
-                                
-                                # Handle item awarding from AI (unified system) - MOVED HERE FOR NON-MOVEMENT ACTIONS
-                                try:
-                                    # Check for unified item_award system
-                                    item_award_info = chunk.get("updates", {}).get("item_award")
-                                    if item_award_info is not None:
-                                        award_type = item_award_info.get("type")
-                                        awarded_item_name = item_award_info.get("item_name")
-                                        rarity = item_award_info.get("rarity", 1)
-
-                                        # Ensure updates scaffolding exists
-                                        if "updates" not in chunk or not isinstance(chunk["updates"], dict):
-                                            chunk["updates"] = {}
-                                        if "player" not in chunk["updates"] or not isinstance(chunk["updates"].get("player"), dict):
-                                            chunk["updates"]["player"] = {}
-
-                                        logger.info(f"[Item System] Processing item award: type={award_type}, name={awarded_item_name}, rarity={rarity}")
-
-                                        # Process unified item award system
-                                        item_id = None
-                                        item_data = None
-                                        
-                                        if award_type == "room_item" and awarded_item_name:
-                                            # Award specific room item
-                                            logger.info(f"[Item System] AI awarded room item: {awarded_item_name}")
-                                            
-                                            if room.items:
-                                                # Find the matching room item
-                                                item_found = False
-                                                for room_item_id in room.items[:]:
-                                                    if item_found:
-                                                        break
-                                                    try:
-                                                        room_item_data = await game_manager.db.get_item(room_item_id)
-                                                        if room_item_data and room_item_data['name'] == awarded_item_name:
-                                                            # Award this specific room item
-                                                            item_id = room_item_id
-                                                            item_data = room_item_data
-                                                            
-                                                            # Remove from room
-                                                            room.items.remove(room_item_id)
-                                                            await game_manager.db.set_room(room.id, room.dict())
-                                                            
-                                                            # Add to player inventory
-                                                            player.inventory.append(item_id)
-                                                            await game_manager.db.set_player(action_request.player_id, player.dict())
-                                                            
-                                                            logger.info(f"[Item System] AI awarded room item '{item_data['name']}' to player {action_request.player_id}")
-                                                            item_found = True
-                                                            break
-                                                    except Exception as e:
-                                                        logger.warning(f"[Item System] Failed to check room item {room_item_id}: {str(e)}")
-                                        
-                                        elif award_type == "generate_item":
-                                            # Generate new item
-                                            logger.info(f"[Item System] AI requested generated item with rarity: {rarity}")
-                                            
-                                            try:
-                                                from .templates.items import AIItemGenerator
-                                                item_generator = AIItemGenerator()
-                                                
-                                                item_context = {
-                                                    'world_seed': game_state.world_seed,
-                                                    'world_theme': 'fantasy',
-                                                    'main_quest': game_state.main_quest_summary,
-                                                    'room_description': room.description,
-                                                    'room_biome': room.biome or 'unknown',
-                                                    'player_action': action_request.action,
-                                                    'situation_context': 'basic_environmental_item',
-                                                    'desired_rarity': rarity,
-                                                    'database': game_manager.db  # Pass database for recent items context
-                                                }
-                                                
-                                                # Generate item
-                                                item_data = await item_generator.generate_item(game_manager.ai_handler, item_context)
-                                                
-                                                # Create unique item ID and store in database
-                                                import uuid
-                                                item_id = f"item_{str(uuid.uuid4())}"
-                                                item_data['id'] = item_id
-                                                await game_manager.db.set_item(item_id, item_data)
-                                                
-                                                # Add to player inventory
-                                                player.inventory.append(item_id)
-                                                await game_manager.db.set_player(action_request.player_id, player.dict())
-                                                
-                                                logger.info(f"[Item System] Generated item '{item_data['name']}' (rarity {rarity}) for player {action_request.player_id}")
-                                                
-                                            except Exception as e:
-                                                logger.error(f"[Item System] Failed to generate item: {str(e)}")
-                                        
-                                        # Send item notifications if an item was awarded
-                                        if item_id and item_data:
-                                            # Update response to include item information
-                                            chunk["updates"]["player"]["inventory"] = player.inventory
-                                            chunk["updates"]["new_item"] = {
-                                                "id": item_id,
-                                                "name": item_data['name'],
-                                                "description": item_data['description'],
-                                                "rarity": item_data['rarity'],
-                                                "capabilities": item_data['capabilities'],
-                                                "properties": {}
-                                            }
-                                            
-                                            # Send item obtained notification via WebSocket
-                                            await manager.send_to_player(room.id, action_request.player_id, {
-                                                "type": "item_obtained",
-                                                "player_id": action_request.player_id,
-                                                "item_id": item_id,
-                                                "item_name": item_data['name'],
-                                                "item_rarity": item_data['rarity'],
-                                                "rarity_stars": "★" * item_data['rarity'] + "☆" * (4 - item_data['rarity']),
-                                                "message": f"📦 You obtained: {'★' * item_data['rarity']}{'☆' * (4 - item_data['rarity'])} {item_data['name']}",
-                                                "timestamp": datetime.now().isoformat()
-                                            })
-                                            
-                                            logger.info(f"[Item System] Sent item obtained notification for '{item_data['name']}' to player {action_request.player_id}")
-                                    
-                                    # Handle item combination from AI
-                                    item_combination_info = chunk.get("updates", {}).get("item_combination")
-                                    if item_combination_info is not None:
-                                        item_ids = item_combination_info.get("item_ids", [])
-                                        combination_description = item_combination_info.get("combination_description", "")
-                                        
-                                        if item_ids and len(item_ids) >= 2:
-                                            logger.info(f"[Item Combination] AI requested combination of {len(item_ids)} items: {item_ids}")
-                                            
-                                            try:
-                                                # Call the combine_items function
-                                                combination_result = await game_manager.combine_items(
-                                                    action_request.player_id, 
-                                                    item_ids, 
-                                                    combination_description
-                                                )
-                                                
-                                                if combination_result["success"]:
-                                                    # Update the chunk with the combination results
-                                                    chunk["updates"]["player"] = combination_result["updates"]["player"]
-                                                    chunk["updates"]["new_item"] = combination_result["updates"]["new_item"]
-                                                    
-                                                    # Send item combination notification via WebSocket
-                                                    await manager.send_to_player(room.id, action_request.player_id, {
-                                                        "type": "item_obtained",
-                                                        "player_id": action_request.player_id,
-                                                        "item_id": combination_result["updates"]["new_item"]["id"],
-                                                        "item_name": combination_result["updates"]["new_item"]["name"],
-                                                        "item_rarity": combination_result["updates"]["new_item"]["rarity"],
-                                                        "rarity_stars": "★" * combination_result["updates"]["new_item"]["rarity"] + "☆" * (4 - combination_result["updates"]["new_item"]["rarity"]),
-                                                        "message": f"🔨 You crafted: {'★' * combination_result['updates']['new_item']['rarity']}{'☆' * (4 - combination_result['updates']['new_item']['rarity'])} {combination_result['updates']['new_item']['name']}",
-                                                        "timestamp": datetime.now().isoformat()
-                                                    })
-                                                    
-                                                    logger.info(f"[Item Combination] Successfully combined items into '{combination_result['updates']['new_item']['name']}'")
-                                                else:
-                                                    logger.warning(f"[Item Combination] Failed to combine items: {combination_result['message']}")
-                                                    
-                                            except Exception as e:
-                                                logger.error(f"[Item Combination] Error combining items: {str(e)}")
-                                        else:
-                                            logger.warning(f"[Item Combination] Invalid item combination request: {item_combination_info}")
-
-                                except Exception as e:
-                                    logger.error(f"[Item Handling] Unexpected error: {str(e)}")
-
-                                # Handle explicit combat intent signaled by AI
-                                combat_intent = chunk.get("updates", {}).get("combat")
-                                if combat_intent is not None:
-                                    try:
-                                        # Resolve target monster
-                                        player_room_data = await game_manager.db.get_room(player.current_room)
-                                        room_monsters = player_room_data.get("monsters", []) if player_room_data else []
-                                        target_monster_id = None
-                                        if isinstance(combat_intent, dict):
-                                            target_monster_id = combat_intent.get("monster_id")
-                                        if not target_monster_id and len(room_monsters) == 1:
-                                            target_monster_id = room_monsters[0]
-                                        if target_monster_id:
-                                            combat_message = await monster_behavior_manager.handle_aggressive_combat_initiation(
-                                                action_request.player_id, target_monster_id, player.current_room, "any_action", game_manager
-                                            )
-                                            try:
-                                                monster_data = await game_manager.db.get_monster(target_monster_id)
-                                            except Exception:
-                                                monster_data = None
-                                            monster_name = (monster_data or {}).get('name', 'Unknown Monster')
-                                            try:
-                                                player1_max_vital = 6
-                                                player2_max_vital = await get_monster_max_vital(monster_data or {})
-                                            except Exception:
-                                                player1_max_vital = 6
-                                                player2_max_vital = 6
-                                            yield json.dumps({
-                                                "type": "final",
-                                                "content": combat_message,
-                                                "updates": {
-                                                    "duel": {
-                                                        "is_monster_duel": True,
-                                                        "opponent_id": target_monster_id,
-                                                        "opponent_name": monster_name,
-                                                        "player1_max_vital": player1_max_vital,
-                                                        "player2_max_vital": player2_max_vital
-                                                    }
-                                                }
-                                            })
-                                            return
-                                    except Exception as e:
-                                        logger.error(f"[Stream] Error initiating combat from AI intent: {str(e)}")
-
-                                # If the AI indicates a monster interaction (talking), handle it before generic aggressive check
-                                interaction = chunk.get("updates", {}).get("monster_interaction")
-                                if interaction:
-                                    # Resolve monster target
-                                    target_monster_id = interaction.get("monster_id") if isinstance(interaction, dict) else None
-                                    player_room_data = await game_manager.db.get_room(player.current_room)
-                                    room_monsters = player_room_data.get("monsters", []) if player_room_data else []
-                                    if not target_monster_id and len(room_monsters) == 1:
-                                        target_monster_id = room_monsters[0]
-
-                                    # If a target is found, check aggressiveness
-                                    if target_monster_id:
-                                        monster_data = await game_manager.db.get_monster(target_monster_id)
-                                        if monster_data and monster_data.get("is_alive", True):
-                                            if monster_data.get("aggressiveness") == "aggressive":
-                                                # Aggressive: initiate combat immediately on any action
-                                                aggressive_block = await monster_behavior_manager.check_aggressive_monster_blocking(
-                                                    action_request.player_id, player.current_room, "any_action", game_manager
-                                                )
-                                                if aggressive_block:
-                                                    monster_id, _ = aggressive_block
-                                                    combat_message = await monster_behavior_manager.handle_aggressive_combat_initiation(
-                                                        action_request.player_id, monster_id, player.current_room, "any_action", game_manager
-                                                    )
-                                                    yield json.dumps({
-                                                        "type": "final",
-                                                        "content": combat_message,
-                                                        "updates": {}
-                                                    })
-                                                    return
-                                            else:
-                                                # Non-aggressive: produce dialogue based on intelligence via AI
-                                                player_message = interaction.get("message", "") if isinstance(interaction, dict) else ""
-                                                reply = await monster_behavior_manager.generate_monster_dialogue(
-                                                    target_monster_id, player_message, player.current_room, game_manager
-                                                )
-                                                if reply:
-                                                    additional_content = reply
-
-                                # If no resolvable target, fall through to aggressive any_action check
-                                aggressive_block = await monster_behavior_manager.check_aggressive_monster_blocking(
-                                    action_request.player_id, player.current_room, "any_action", game_manager
-                                )
-                                if aggressive_block:
-                                    monster_id, _ = aggressive_block
-                                    combat_message = await monster_behavior_manager.handle_aggressive_combat_initiation(
-                                        action_request.player_id, monster_id, player.current_room, "any_action", game_manager
-                                    )
-                                    try:
-                                        monster_data = await game_manager.db.get_monster(monster_id)
-                                    except Exception:
-                                        monster_data = None
-                                    monster_name = (monster_data or {}).get('name', 'Unknown Monster')
-                                    try:
-                                        player1_max_vital = 6
-                                        player2_max_vital = await get_monster_max_vital(monster_data or {})
-                                    except Exception:
-                                        player1_max_vital = 6
-                                        player2_max_vital = 6
-                                    yield json.dumps({
-                                        "type": "final",
-                                        "content": combat_message,
-                                        "updates": {
-                                            "duel": {
-                                                "is_monster_duel": True,
-                                                "opponent_id": monster_id,
-                                                "opponent_name": monster_name,
-                                                "player1_max_vital": player1_max_vital,
-                                                "player2_max_vital": player2_max_vital
-                                            }
-                                        }
-                                    })
-                                    return
+                                })
+                                return
                         else:
-                                logger.info(f"[Stream] Movement action detected - skipping aggressive monster blocking (retreat logic already handled)")
+                            logger.info(f"[Stream] Movement action detected - skipping aggressive monster blocking (retreat logic already handled)")
 
-                                # Fallback monster auto-reply disabled: only respond when AI explicitly sets updates.monster_interaction earlier
+                            # Fallback monster auto-reply disabled: only respond when AI explicitly sets updates.monster_interaction earlier
 
                         # NOW yield the final response with updated player data (default path)
                         try:

@@ -604,6 +604,17 @@ class AIHandler:
                             else:
                                 logger.warning(f"[AI Response] No item_award found in AI response!")
 
+                            # OPTIMIZATION: Yield room data immediately for instant UI updates
+                            # This allows the client to update the room/image before background tasks complete
+                            room_data_payload = {
+                                "type": "room_data",
+                                "updates": parsed.get("updates", {}),
+                                "response": parsed["response"]
+                            }
+                            logger.info(f"⏱️ [TIMING] Yielding room_data for immediate UI update")
+                            yield room_data_payload
+
+                            # Then yield the final response for background processing
                             yield parsed
                             break
                     except json.JSONDecodeError as e:

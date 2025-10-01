@@ -63,7 +63,15 @@ interface GameStore {
     // Movement loading state
     isMovementLoading: boolean;
     setIsMovementLoading: (loading: boolean) => void;
-    
+
+    // Movement animation states
+    isAttemptingMovement: boolean;
+    setIsAttemptingMovement: (attempting: boolean) => void;
+    showMovementAnimation: boolean;
+    setShowMovementAnimation: (show: boolean) => void;
+    movementFailed: boolean;
+    setMovementFailed: (failed: boolean) => void;
+
     // Room generation loading state (for rooms that aren't preloaded yet)
     isRoomGenerating: boolean;
     setIsRoomGenerating: (generating: boolean) => void;
@@ -147,6 +155,9 @@ const useGameStore = create<GameStore>((set, get) => ({
     isConnected: false,
     isLoading: false,
     isMovementLoading: false,
+    isAttemptingMovement: false,
+    showMovementAnimation: false,
+    movementFailed: false,
     isRoomGenerating: false,
     error: null,
     isMinimapFullscreen: false,
@@ -249,6 +260,9 @@ const useGameStore = create<GameStore>((set, get) => ({
     setIsConnected: (connected) => set({ isConnected: connected }),
     setIsLoading: (loading) => set({ isLoading: loading }),
     setIsMovementLoading: (loading) => set({ isMovementLoading: loading }),
+    setIsAttemptingMovement: (attempting) => set({ isAttemptingMovement: attempting }),
+    setShowMovementAnimation: (show) => set({ showMovementAnimation: show }),
+    setMovementFailed: (failed) => set({ movementFailed: failed }),
     setIsRoomGenerating: (generating) => set({ isRoomGenerating: generating }),
     setError: (error) => set({ error }),
     setIsMinimapFullscreen: (fullscreen) => set({ isMinimapFullscreen: fullscreen }),

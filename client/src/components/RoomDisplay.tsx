@@ -5,19 +5,20 @@ import useGameStore from '@/store/gameStore';
 const MAX_RETRIES = 3;
 
 const RoomDisplay: React.FC = () => {
-    const { currentRoom } = useGameStore();
+    const { currentRoom, isAttemptingMovement, showMovementAnimation, movementFailed, isRoomGenerating } = useGameStore();
     const [imageError, setImageError] = useState(false);
     const [retryCount, setRetryCount] = useState(0);
     const [isImageLoading, setIsImageLoading] = useState(true);
-    const { isRoomGenerating } = useGameStore();
 
     // Reset error state when room changes
     useEffect(() => {
+        const imageStartTime = performance.now();
         console.log('[RoomDisplay] Room changed, resetting image state:', {
             roomId: currentRoom?.id,
             imageUrl: currentRoom?.image_url,
             imageStatus: currentRoom?.image_status
         });
+        console.log(`⏱️ [IMAGE TIMING] Starting to load image for room ${currentRoom?.id}`);
         setImageError(false);
         setRetryCount(0);
         setIsImageLoading(true);
@@ -52,7 +53,49 @@ const RoomDisplay: React.FC = () => {
     return (
         <div className="w-full h-full bg-black">
             {/* Room Image */}
-            <div className="relative w-full h-full overflow-hidden bg-black">
+            <div className={`relative w-full h-full overflow-hidden bg-black ${
+                showMovementAnimation ? 'movement-attempting' : ''
+            } ${movementFailed ? 'movement-failed' : ''} ${
+                isAttemptingMovement && !showMovementAnimation ? 'opacity-80' : ''
+            }`}>
+                {/* Movement attempting overlay - only show after first text chunk */}
+                {showMovementAnimation && !movementFailed && (
+                    <div className="absolute inset-0 pointer-events-none z-30">
+                        {/* Pulsing border */}
+                        <div className="absolute inset-0 border-4 border-amber-500 movement-overlay"></div>
+
+                        {/* Center spinner */}
+                        <div className="absolute inset-0 flex items-center justify-center">
+                            <div className="relative">
+                                {/* Outer ring */}
+                                <div className="w-24 h-24 border-4 border-amber-500/30 rounded-full"></div>
+                                {/* Spinning arc */}
+                                <div className="absolute inset-0 border-4 border-transparent border-t-amber-500 rounded-full movement-spinner"></div>
+                            </div>
+                        </div>
+
+                        {/* Corner indicators */}
+                        <div className="absolute top-4 left-4 w-8 h-8 border-l-4 border-t-4 border-amber-500 movement-overlay"></div>
+                        <div className="absolute top-4 right-4 w-8 h-8 border-r-4 border-t-4 border-amber-500 movement-overlay"></div>
+                        <div className="absolute bottom-4 left-4 w-8 h-8 border-l-4 border-b-4 border-amber-500 movement-overlay"></div>
+                        <div className="absolute bottom-4 right-4 w-8 h-8 border-r-4 border-b-4 border-amber-500 movement-overlay"></div>
+
+                        {/* Scanning line effect */}
+                        <div className="absolute inset-0 overflow-hidden">
+                            <div className="absolute inset-x-0 h-1 bg-gradient-to-r from-transparent via-amber-500 to-transparent movement-overlay"
+                                 style={{ top: '50%', transform: 'translateY(-50%)' }}></div>
+                        </div>
+                    </div>
+                )}
+
+                {/* Movement failed overlay */}
+                {movementFailed && (
+                    <div className="absolute inset-0 pointer-events-none z-30">
+                        <div className="absolute inset-0 border-4 border-red-500 opacity-50"></div>
+                        <div className="absolute inset-0 bg-red-500 opacity-10"></div>
+                    </div>
+                )}
+
                 {(isImageLoading || isRoomGenerating) && (
                     <div className="absolute inset-0 flex items-center justify-center bg-black">
                         <div className="flex flex-col items-center justify-center">
