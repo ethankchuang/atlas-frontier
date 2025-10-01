@@ -178,12 +178,12 @@ const ChatInput: React.FC = () => {
                 streamMessageIdRef.current = `stream-${Date.now()}`;
                 console.log('[ChatInput] Processing action:', trimmedInput);
 
-                // Add initial streaming message
+                // Add initial streaming message with animated cursor
                 const streamingMessage: ChatMessage = {
                     id: streamMessageIdRef.current,
                     player_id: player.id,
                     room_id: currentRoom.id,
-                    message: '',
+                    message: '▮',  // Blinking cursor block
                     message_type: 'system',
                     timestamp: new Date().toISOString(),
                     isStreaming: true
@@ -202,7 +202,8 @@ const ChatInput: React.FC = () => {
                         if (streamMessageIdRef.current) {
                             updateMessage(streamMessageIdRef.current, (prev) => ({
                                 ...prev,
-                                message: prev.message + chunk
+                                // Replace cursor on first chunk, then append
+                                message: prev.message === '▮' ? chunk : prev.message + chunk
                             }));
                         }
                     },

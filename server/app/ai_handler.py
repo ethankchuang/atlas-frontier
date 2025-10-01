@@ -546,7 +546,7 @@ class AIHandler:
 
             # Buffering to reduce number of yields and transport overhead
             text_buffer = ""
-            buffer_size = 30  # Send chunks of ~30 characters for good balance of responsiveness and performance
+            buffer_size = 5  # Send chunks of ~5 characters for maximum responsiveness
 
             async for chunk in stream:
                 if first_token_time is None:
