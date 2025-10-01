@@ -78,12 +78,21 @@ async def upload_image_to_supabase(
             file=image_data,
             file_options={
                 "content-type": content_type,
-                "upsert": "true"  # Overwrite if exists
+                "upsert": "true",  # Overwrite if exists
+                "cacheControl": "no-cache"  # Prevent server-side caching
             }
         )
 
-        # Get the public URL
+        # Get the public URL with cache-busting parameter
         public_url = supabase.storage.from_(STORAGE_BUCKET).get_public_url(file_path)
+        
+        # Add cache-busting parameter to prevent client caching issues
+        import time
+        cache_buster = int(time.time())
+        if '?' in public_url:
+            public_url += f"&v={cache_buster}"
+        else:
+            public_url += f"?v={cache_buster}"
 
         logger.info(f"[Image Storage] Successfully uploaded image to Supabase: {public_url}")
         return public_url

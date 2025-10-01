@@ -1548,6 +1548,8 @@ async def process_action_stream(
             logger.info(f"[Stream] AI context includes {len(monsters)} monsters: {[m.get('name', 'Unknown') for m in monsters]}")
             ai_start = time.time()
             first_chunk_time = None
+            chunk_count = 0
+            last_chunk_time = None
             async for chunk in game_manager.ai_handler.stream_action(
                 action=action_request.action,
                 player=player,
@@ -1557,9 +1559,18 @@ async def process_action_stream(
                 monsters=monsters,
                 chat_history=recent_chat
             ):
+                chunk_start = time.time()
+                chunk_count += 1
+                
                 if first_chunk_time is None:
                     first_chunk_time = time.time()
                     logger.info(f"⏱️ [TIMING] First AI chunk received: {(first_chunk_time - ai_start)*1000:.2f}ms")
+                else:
+                    if last_chunk_time:
+                        time_since_last = (chunk_start - last_chunk_time) * 1000
+                        logger.info(f"⏱️ [TIMING] Time between chunks {chunk_count-1} and {chunk_count}: {time_since_last:.2f}ms")
+                
+                last_chunk_time = chunk_start
 
                 if isinstance(chunk, dict):
                     # Ensure chunk has the expected structure
@@ -2150,10 +2161,14 @@ async def process_action_stream(
                             })
                 else:
                     # This is a text chunk
+                    before_yield = time.time()
+                    logger.info(f"⏱️ [TIMING] About to yield text chunk {chunk_count} at {(before_yield - request_start)*1000:.2f}ms")
                     yield json.dumps({
                         "type": "chunk",
                         "content": chunk
                     })
+                    after_yield = time.time()
+                    logger.info(f"⏱️ [TIMING] Chunk {chunk_count} yielded, took {(after_yield - before_yield)*1000:.2f}ms")
 
         except Exception as e:
             logger.error(f"[Stream] Critical error in event generator: {str(e)}")

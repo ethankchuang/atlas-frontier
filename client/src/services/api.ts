@@ -202,14 +202,22 @@ class APIService {
             let buffer = '';
             let firstChunkTime: number | null = null;
             let chunkCount = 0;
+            let lastChunkTime: number | null = null;
+            let totalWaitingTime = 0;
 
             while (true) {
                 const { done, value } = await reader.read();
+                const chunkReceived = performance.now();
+                
                 if (done) break;
 
                 if (firstChunkTime === null) {
-                    firstChunkTime = performance.now();
+                    firstChunkTime = chunkReceived;
                     console.log(`⏱️ [CLIENT TIMING] First data chunk received: ${(firstChunkTime - responseReceived).toFixed(2)}ms`);
+                } else if (lastChunkTime) {
+                    const timeBetweenChunks = chunkReceived - lastChunkTime;
+                    totalWaitingTime += timeBetweenChunks;
+                    console.log(`⏱️ [CLIENT TIMING] Time between chunks: ${timeBetweenChunks.toFixed(2)}ms (total waiting: ${totalWaitingTime.toFixed(2)}ms)`);
                 }
 
                 buffer += decoder.decode(value, { stream: true });
@@ -240,7 +248,7 @@ class APIService {
                             }
                             
                             // Graceful user-facing message
-                            onError('That didn’t go through. Please try again.');
+                            onError("That didn't go through. Please try again.");
                             
                             if (typeof data.error === 'string' && data.error.includes('Room not found')) {
                                 const player = store.player;
@@ -274,17 +282,32 @@ class APIService {
                         if (data.type === 'chunk') {
                             if (chunkCount === 1) {
                                 console.log(`⏱️ [CLIENT TIMING] First content chunk: ${(performance.now() - requestStart).toFixed(2)}ms from request start`);
+                            } else {
+                                console.log(`⏱️ [CLIENT TIMING] Content chunk ${chunkCount}: ${(performance.now() - requestStart).toFixed(2)}ms from request start`);
                             }
                             onChunk(data.content);
                         } else if (data.type === 'final') {
                             const finalTime = performance.now();
                             console.log(`⏱️ [CLIENT TIMING] Final response received: ${(finalTime - requestStart).toFixed(2)}ms total`);
                             console.log(`⏱️ [CLIENT TIMING] Total chunks processed: ${chunkCount}`);
+                            
+                            // Enhanced timing breakdown
+                            const totalTime = finalTime - requestStart;
+                            const timeToFirstChunk = firstChunkTime - requestStart;
+                            const timeFromFirstToFinal = finalTime - firstChunkTime;
+                            
+                            console.log(`⏱️ [CLIENT TIMING] === DETAILED BREAKDOWN ===`);
+                            console.log(`⏱️ [CLIENT TIMING] Time to first chunk: ${timeToFirstChunk.toFixed(2)}ms`);
+                            console.log(`⏱️ [CLIENT TIMING] Time from first chunk to final: ${timeFromFirstToFinal.toFixed(2)}ms`);
+                            console.log(`⏱️ [CLIENT TIMING] Total waiting time between chunks: ${totalWaitingTime.toFixed(2)}ms`);
+                            console.log(`⏱️ [CLIENT TIMING] Total processing time: ${(totalTime - totalWaitingTime).toFixed(2)}ms`);
+                            console.log(`⏱️ [CLIENT TIMING] Average time per chunk: ${(timeFromFirstToFinal / chunkCount).toFixed(2)}ms`);
+                            console.log(`⏱️ [CLIENT TIMING] ================================`);
 
                             // Guard against malformed updates by ensuring object shape
                             if (data.updates && typeof data.updates !== 'object') {
                                 console.warn('[API] Malformed updates payload; prompting retry');
-                                onError('That didn\'t go through. Please try again.');
+                                onError("That didn't go through. Please try again.");
                                 return;
                             }
                             console.log('[API] Final stream data:', data);
@@ -338,6 +361,9 @@ class APIService {
                         }
                     }
                 }
+                
+                // Update lastChunkTime for next iteration
+                lastChunkTime = chunkReceived;
             }
                     } catch (error) {
                 console.error('[API] Stream error:', error);
@@ -349,7 +375,7 @@ class APIService {
                     store.setIsMovementLoading(false);
                 }
                 
-                onError('That didn’t go through. Please try again.');
+                onError("That didn't go through. Please try again.");
             }
     }
 
