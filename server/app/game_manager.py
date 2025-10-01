@@ -275,6 +275,50 @@ class GameManager:
         
         return monster_ids
 
+    def _build_room_generation_context(
+        self,
+        current_room: Room = None,
+        direction: str = None,
+        action: str = None,
+        biome: str = None,
+        biome_description: str = None,
+        monster_count: int = 0,
+        is_starting_room: bool = False,
+        is_preload: bool = False,
+        discovering_new_area: bool = True
+    ) -> Dict[str, Any]:
+        """Build unified context for room generation"""
+        context = {
+            "discovering_new_area": discovering_new_area,
+            "monster_count": monster_count
+        }
+        
+        # Add biome information if available
+        if biome:
+            context["biome"] = biome
+        if biome_description:
+            context["biome_description"] = biome_description
+        
+        # Add room context if available
+        if current_room:
+            context["previous_room"] = current_room.dict()
+        
+        # Add movement context
+        if direction:
+            context["direction"] = direction
+        
+        # Add action context
+        if action:
+            context["action"] = action
+        
+        # Add generation type flags
+        if is_starting_room:
+            context["is_starting_room"] = True
+        if is_preload:
+            context["is_preload"] = True
+        
+        return context
+
     async def ensure_starting_room(self) -> Room:
         """Ensure the starting room exists"""
         start_time = time.time()
@@ -347,14 +391,13 @@ class GameManager:
         import random
         monster_count = random.choice([0, 0, 1, 1, 2, 3])  # Same weighting as monster generation
         
-        title, description, image_prompt = await self.ai_handler.generate_room_description(
-            context={
-                "is_starting_room": True,
-                "biome": starting_biome,
-                "biome_description": starting_biome_desc,
-                "monster_count": monster_count
-            }
+        context = self._build_room_generation_context(
+            biome=starting_biome,
+            biome_description=starting_biome_desc,
+            monster_count=monster_count,
+            is_starting_room=True
         )
+        title, description, image_prompt = await self.ai_handler.generate_room_description(context=context)
         content_time = time.time() - content_start
         logger.info(f"[Performance] Starting room content generation took {content_time:.2f}s with biome: {starting_biome}")
 
@@ -370,6 +413,7 @@ class GameManager:
             description=description,
             biome=starting_biome,
             image_url="",  # No image yet
+            image_prompt=image_prompt,  # Include image prompt
             players=players_in_room,
             monster_count=monster_count,  # Pass monster count to room creation
             mark_discovered=True  # Starting room is always discovered
@@ -1106,18 +1150,15 @@ class GameManager:
                     
                     # Generate room description with biome context
                     content_start = time.time()
-                    title, description, image_prompt = await self.ai_handler.generate_room_description(
-                        context={
-                            "previous_room": current_room.dict(),
-                            "direction": direction,
-                            "player": player.dict(),
-                            "biome": biome,
-                            "biome_description": biome_desc,
-                            "discovering_new_area": True,
-                            "is_preload": True,
-                            "monster_count": monster_count
-                        }
+                    context = self._build_room_generation_context(
+                        current_room=current_room,
+                        direction=direction,
+                        biome=biome,
+                        biome_description=biome_desc,
+                        monster_count=monster_count,
+                        is_preload=True
                     )
+                    title, description, image_prompt = await self.ai_handler.generate_room_description(context=context)
                     content_time = time.time() - content_start
                     logger.info(f"[Performance] Room content generation took {content_time:.2f}s for {room_id}")
                     
@@ -1130,6 +1171,7 @@ class GameManager:
                         description=description,
                         biome=biome,  # Include biome in room creation
                         image_url="",  # No image yet
+                        image_prompt=image_prompt,  # Include image prompt
                         players=[],  # No players in preloaded room
                         monster_count=monster_count,  # Pass monster count to room creation
                         mark_discovered=True
@@ -1189,15 +1231,36 @@ class GameManager:
         try:
             logger.info(f"[Room Generation] Starting background room generation for {room_id}")
             
+            # Get biome information for the room
+            room_data = await self.db.get_room(room_id)
+            biome = None
+            biome_desc = None
+            monster_count = 0
+            
+            if room_data:
+                if 'biome' in room_data:
+                    biome = room_data['biome']
+                    # Try to get biome description from saved biomes
+                    try:
+                        biome_data = await self.db.get_biome_by_name(biome)
+                        if biome_data:
+                            biome_desc = biome_data.get('description')
+                    except:
+                        pass
+                
+                # Get existing monster count from room data
+                if 'monsters' in room_data:
+                    monster_count = len(room_data['monsters'])
+            
             # Generate the detailed room description
-            title, description, image_prompt = await self.ai_handler.generate_room_description(
-                context={
-                    "previous_room": current_room.dict(),
-                    "direction": direction,
-                    "player": player.dict(),
-                    "discovering_new_area": True  # Hint to AI that this is exploration
-                }
+            context = self._build_room_generation_context(
+                current_room=current_room,
+                direction=direction,
+                biome=biome,
+                biome_description=biome_desc,
+                monster_count=monster_count
             )
+            title, description, image_prompt = await self.ai_handler.generate_room_description(context=context)
             
             # Update the room with the new details
             room_data = await self.db.get_room(room_id)
@@ -1229,15 +1292,36 @@ class GameManager:
         try:
             logger.info(f"[Room Generation] Starting background room generation for {room_id} (from action)")
             
+            # Get biome information for the room
+            room_data = await self.db.get_room(room_id)
+            biome = None
+            biome_desc = None
+            monster_count = 0
+            
+            if room_data:
+                if 'biome' in room_data:
+                    biome = room_data['biome']
+                    # Try to get biome description from saved biomes
+                    try:
+                        biome_data = await self.db.get_biome_by_name(biome)
+                        if biome_data:
+                            biome_desc = biome_data.get('description')
+                    except:
+                        pass
+                
+                # Get existing monster count from room data
+                if 'monsters' in room_data:
+                    monster_count = len(room_data['monsters'])
+            
             # Generate the detailed room description
-            title, description, image_prompt = await self.ai_handler.generate_room_description(
-                context={
-                    "previous_room": current_room.dict(),
-                    "action": action,
-                    "player": player.dict(),
-                    "discovering_new_area": True  # Hint to AI that this is exploration
-                }
+            context = self._build_room_generation_context(
+                current_room=current_room,
+                action=action,
+                biome=biome,
+                biome_description=biome_desc,
+                monster_count=monster_count
             )
+            title, description, image_prompt = await self.ai_handler.generate_room_description(context=context)
             
             # Update the room with the new details
             room_data = await self.db.get_room(room_id)

@@ -31,17 +31,17 @@ class AIHandler:
         json_template = '''
 {
     "title": "A short, evocative title",
-    "description": "A concise, atmospheric description (1-2 sentences max)",
-    "image_prompt": "A detailed prompt for image generation"
+    "description": "A concise, creative, atmospheric description with randomly generated elements that fit the biome. (1-2 sentences max)",
+    "image_prompt": "A detailed prompt for image generation of this new room based on the context, surrounding rooms, biome, monsters, etc. It's important that it generally fits in with the biome. Be creative. (3-4 sentences)"
 }
 '''
         # Check if monsters will be present in the room
         monsters_info = ""
         monster_count = context.get("monster_count", 0)
         if monster_count > 0:
-            monsters_info = f"\nMonsters: {monster_count} creatures will inhabit this area"
+            monsters_info = f"\nMonsters: {monster_count} creatures will inhabit this area. Show them as exactly {monster_count} hidden shadowy creatures."
         
-        prompt = f"""Generate a concise room description for a medieval fantasy MUD game.
+        prompt = f"""Generate a concise room description and detailed image prompt for a medieval fantasy MUD game.
         Context: {json.dumps(context)}
         Style: {style}
         {monsters_info}
@@ -57,7 +57,7 @@ class AIHandler:
             response = await client.chat.completions.create(
                 model="gpt-4.1-nano-2025-04-14",
                 messages=[
-                    {"role": "system", "content": "You are a concise writer for a medieval fantasy MUD game. Always return clean JSON without comments. Keep descriptions to 1-2 sentences maximum. Focus only on essential details and remove all fluff. Avoid modern, sci-fi, or futuristic elements."},
+                    {"role": "system", "content": "You are a concise writer for a medieval fantasy MUD game. Always return clean JSON without comments. Focus only on essential details and remove all fluff. Avoid modern, sci-fi, or futuristic elements."},
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0.7
@@ -139,7 +139,7 @@ class AIHandler:
                 os.environ["REPLICATE_API_TOKEN"] = settings.REPLICATE_API_TOKEN
                 
                 # Enhanced prompt for better medieval fantasy game images
-                enhanced_prompt = f"A detailed, atmospheric medieval fantasy game scene, cinematic lighting, high quality, medieval architecture, armor, swords, bows: {prompt}"
+                enhanced_prompt = f"A detailed, atmospheric medieval fantasy game backdrop, cinematic lighting, high quality, medieval architecture: {prompt}"
                 
                 logger.info(f"[Replicate] Using model: {settings.REPLICATE_MODEL}")
                 logger.info(f"[Replicate] Image dimensions: {settings.REPLICATE_IMAGE_WIDTH}x{settings.REPLICATE_IMAGE_HEIGHT}")
@@ -544,6 +544,10 @@ class AIHandler:
             max_chunks = 1000  # Prevent infinite loops
             first_token_time = None
 
+            # Buffering to reduce number of yields and transport overhead
+            text_buffer = ""
+            buffer_size = 30  # Send chunks of ~30 characters for good balance of responsiveness and performance
+
             async for chunk in stream:
                 if first_token_time is None:
                     first_token_time = time.time()
@@ -559,6 +563,10 @@ class AIHandler:
                     # Check if we've hit the JSON part (after two newlines)
                     if not narrative_complete and "\n\n{" in buffer:
                         narrative_complete = True
+                        # Flush any remaining text buffer before switching to JSON mode
+                        if text_buffer:
+                            yield text_buffer
+                            text_buffer = ""
                         # Split at the JSON start - don't yield the narrative since it was already streamed
                         parts = buffer.split("\n\n{", 1)
                         if len(parts) == 2:
@@ -566,9 +574,14 @@ class AIHandler:
                             # Don't yield narrative here - it was already streamed character by character
                             buffer = "{" + parts[1]
                     elif not narrative_complete:
-                        # Still in narrative part, yield the content
+                        # Still in narrative part, buffer the content
                         narrative += content
-                        yield content
+                        text_buffer += content
+
+                        # Only yield when buffer reaches threshold
+                        if len(text_buffer) >= buffer_size:
+                            yield text_buffer
+                            text_buffer = ""
 
                     # Try to parse as JSON to see if it's complete
                     try:

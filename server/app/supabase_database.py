@@ -601,7 +601,80 @@ class SupabaseDatabase:
                 except Exception as e:
                     logger.error(f"Error clearing table {table}: {str(e)}")
             
+            # Clear room images from Supabase Storage
+            await SupabaseDatabase._clear_storage_bucket(client, "room-images")
+            
             logger.info("Supabase game data cleared (user_profiles preserved)")
         except Exception as e:
             logger.error(f"Error resetting world: {str(e)}")
             raise
+
+    @staticmethod
+    async def _clear_storage_bucket(client, bucket_name: str) -> None:
+        """Clear all files from a Supabase Storage bucket"""
+        try:
+            logger.info(f"Clearing storage bucket: {bucket_name}")
+            
+            # List all files in the bucket recursively, including subdirectories
+            all_files = []
+            
+            try:
+                # List files recursively (this gets all files in all subdirectories)
+                result = client.storage.from_(bucket_name).list('', {
+                    'limit': 1000,
+                    'sortBy': {'column': 'name', 'order': 'asc'}
+                })
+                
+                if result and len(result) > 0:
+                    all_files.extend(result)
+                    logger.info(f"Found {len(all_files)} items in bucket {bucket_name}")
+                else:
+                    logger.info(f"Bucket {bucket_name} is already empty")
+                    return
+                    
+            except Exception as e:
+                logger.error(f"Error listing files in bucket {bucket_name}: {str(e)}")
+                return
+            
+            # Delete files individually (more reliable than batch deletion)
+            total_deleted = 0
+            
+            for file_info in all_files:
+                try:
+                    file_path = file_info['name']
+                    
+                    # Check if this is a folder (directories don't have metadata)
+                    if file_info.get('metadata') is None and file_info.get('id') is None:
+                        # This is a folder, list its contents and delete them
+                        logger.info(f"Found folder: {file_path}, clearing its contents...")
+                        
+                        # List files in the folder
+                        folder_files = client.storage.from_(bucket_name).list(file_path)
+                        if folder_files and len(folder_files) > 0:
+                            for folder_file in folder_files:
+                                folder_file_path = f"{file_path}/{folder_file['name']}"
+                                delete_result = client.storage.from_(bucket_name).remove([folder_file_path])
+                                
+                                if delete_result:
+                                    total_deleted += 1
+                                    logger.debug(f"Deleted file: {folder_file_path}")
+                                else:
+                                    logger.warning(f"Failed to delete file: {folder_file_path}")
+                    else:
+                        # This is a regular file
+                        delete_result = client.storage.from_(bucket_name).remove([file_path])
+                        
+                        if delete_result:
+                            total_deleted += 1
+                            logger.debug(f"Deleted file: {file_path}")
+                        else:
+                            logger.warning(f"Failed to delete file: {file_path}")
+                        
+                except Exception as e:
+                    logger.error(f"Error deleting item {file_info.get('name', 'unknown')}: {str(e)}")
+            
+            logger.info(f"Successfully cleared {total_deleted} files from bucket {bucket_name}")
+            
+        except Exception as e:
+            logger.error(f"Error clearing storage bucket {bucket_name}: {str(e)}")
+            # Don't raise - storage clearing is not critical for world reset
