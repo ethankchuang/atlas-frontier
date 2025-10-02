@@ -74,7 +74,7 @@ html, body {
   }
 
   .movement-attempting {
-    animation: movement-pulse 1.5s ease-in-out infinite;
+    animation: movement-pulse 4s ease-in-out infinite;
   }
 
   .movement-failed {
@@ -127,11 +127,14 @@ html, body {
 }
 
 @keyframes movement-pulse {
-  0%, 100% {
-    filter: blur(2px) brightness(0.6);
+  0% {
+    filter: blur(0px) brightness(1);
   }
   50% {
-    filter: blur(1px) brightness(0.6);
+    filter: blur(8px) brightness(0.6);
+  }
+  100% {
+    filter: blur(0px) brightness(1);
   }
 }
 
