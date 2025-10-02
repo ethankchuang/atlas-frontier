@@ -64,16 +64,6 @@ const RoomDisplay: React.FC = () => {
                         {/* Pulsing border */}
                         <div className="absolute inset-0 border-4 border-amber-500 movement-overlay"></div>
 
-                        {/* Center spinner */}
-                        <div className="absolute inset-0 flex items-center justify-center">
-                            <div className="relative">
-                                {/* Outer ring */}
-                                <div className="w-24 h-24 border-4 border-amber-500/30 rounded-full"></div>
-                                {/* Spinning arc */}
-                                <div className="absolute inset-0 border-4 border-transparent border-t-amber-500 rounded-full movement-spinner"></div>
-                            </div>
-                        </div>
-
                         {/* Corner indicators */}
                         <div className="absolute top-4 left-4 w-8 h-8 border-l-4 border-t-4 border-amber-500 movement-overlay"></div>
                         <div className="absolute top-4 right-4 w-8 h-8 border-r-4 border-t-4 border-amber-500 movement-overlay"></div>

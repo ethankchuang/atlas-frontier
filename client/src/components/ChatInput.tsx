@@ -5,12 +5,17 @@ import websocketService from '@/services/websocket';
 import { ChatMessage, Player } from '@/types/game';
 import { PaperAirplaneIcon, FaceSmileIcon } from '@heroicons/react/24/solid';
 
+// ASCII spinner frames like Claude Code
+const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+
 const ChatInput: React.FC = () => {
     const [input, setInput] = useState('');
     const [isEmote, setIsEmote] = useState(false);
     const [isStreaming, setIsStreaming] = useState(false);
+    const [spinnerFrame, setSpinnerFrame] = useState(0);
     const streamMessageIdRef = useRef<string | null>(null);
     const inputRef = useRef<HTMLInputElement>(null);
+    const spinnerIntervalRef = useRef<NodeJS.Timeout | null>(null);
     const {
         player,
         currentRoom,
@@ -29,6 +34,40 @@ const ChatInput: React.FC = () => {
         // Focus input on mount
         inputRef.current?.focus();
     }, []);
+
+    // Animate spinner when streaming
+    useEffect(() => {
+        if (isStreaming && streamMessageIdRef.current) {
+            spinnerIntervalRef.current = setInterval(() => {
+                setSpinnerFrame((prev) => (prev + 1) % SPINNER_FRAMES.length);
+            }, 80); // Update every 80ms for smooth animation
+        } else {
+            if (spinnerIntervalRef.current) {
+                clearInterval(spinnerIntervalRef.current);
+                spinnerIntervalRef.current = null;
+            }
+            setSpinnerFrame(0);
+        }
+
+        return () => {
+            if (spinnerIntervalRef.current) {
+                clearInterval(spinnerIntervalRef.current);
+            }
+        };
+    }, [isStreaming]);
+
+    // Update the spinner message when frame changes
+    useEffect(() => {
+        if (isStreaming && streamMessageIdRef.current) {
+            updateMessage(streamMessageIdRef.current, (msg) => {
+                // Only update if the message is still just a spinner frame
+                if (SPINNER_FRAMES.includes(msg.message)) {
+                    return { ...msg, message: SPINNER_FRAMES[spinnerFrame] };
+                }
+                return msg;
+            });
+        }
+    }, [spinnerFrame, isStreaming, updateMessage]);
 
     // Clear input when duel move is submitted or when duel ends
     useEffect(() => {
@@ -178,12 +217,12 @@ const ChatInput: React.FC = () => {
                 streamMessageIdRef.current = `stream-${Date.now()}`;
                 console.log('[ChatInput] Processing action:', trimmedInput);
 
-                // Add initial streaming message with animated cursor
+                // Add initial streaming message with ASCII spinner
                 const streamingMessage: ChatMessage = {
                     id: streamMessageIdRef.current,
                     player_id: player.id,
                     room_id: currentRoom.id,
-                    message: '▮',  // Blinking cursor block
+                    message: SPINNER_FRAMES[0],  // Start with first spinner frame
                     message_type: 'system',
                     timestamp: new Date().toISOString(),
                     isStreaming: true
@@ -202,8 +241,8 @@ const ChatInput: React.FC = () => {
                         if (streamMessageIdRef.current) {
                             updateMessage(streamMessageIdRef.current, (prev) => ({
                                 ...prev,
-                                // Replace cursor on first chunk, then append
-                                message: prev.message === '▮' ? chunk : prev.message + chunk
+                                // Replace spinner on first chunk, then append
+                                message: SPINNER_FRAMES.includes(prev.message) ? chunk : prev.message + chunk
                             }));
                         }
                     },
