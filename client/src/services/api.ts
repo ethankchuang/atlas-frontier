@@ -122,7 +122,9 @@ class APIService {
                 store.setMovementFailed(false);
 
                 // Store current room ID to detect if movement failed
-                (window as any).__attemptedMovementFromRoom = currentRoomId;
+                if (currentRoomId) {
+                    (window as unknown as Record<string, string>).__attemptedMovementFromRoom = currentRoomId;
+                }
             }
 
             const token = this.getAuthToken();
@@ -310,7 +312,7 @@ class APIService {
 
                                 // Handle room changes
                                 if (data.updates.room) {
-                                    const oldRoomId = (window as any).__attemptedMovementFromRoom;
+                                    const oldRoomId = (window as unknown as Record<string, string>).__attemptedMovementFromRoom;
                                     const newRoomId = data.updates.room.id;
 
                                     // Check if movement succeeded or failed

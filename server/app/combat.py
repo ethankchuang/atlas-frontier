@@ -515,11 +515,58 @@ async def send_duel_results(
             # Record combat history to prevent re-aggression
             try:
                 from .monster_behavior import monster_behavior_manager
-                # If a monster won, record that it has fought the player
+                # If a monster won, record that it has fought the player AND teleport player to spawn
                 if winner_id and isinstance(winner_id, str) and winner_id.startswith("monster_"):
-                    player_id = player1_id if winner_id == player2_id else player2_id
-                    monster_behavior_manager._record_monster_combat(player_id, winner_id)
-                    logger.info(f"[Combat] Recorded monster victory: {winner_id} defeated {player_id}")
+                    defeated_player_id = player1_id if winner_id == player2_id else player2_id
+                    monster_behavior_manager._record_monster_combat(defeated_player_id, winner_id)
+                    logger.info(f"[Combat] Recorded monster victory: {winner_id} defeated {defeated_player_id}")
+
+                    # Teleport defeated player to spawn (0,0)
+                    try:
+                        defeated_player_data = await game_manager.db.get_player(defeated_player_id)
+                        if defeated_player_data:
+                            old_room_id = defeated_player_data.get('current_room')
+                            spawn_room_id = 'room_0_0'  # Spawn location
+
+                            # Update player's room
+                            defeated_player_data['current_room'] = spawn_room_id
+                            await game_manager.db.set_player(defeated_player_id, defeated_player_data)
+                            logger.info(f"[Combat] Teleported defeated player {defeated_player_id} from {old_room_id} to spawn {spawn_room_id}")
+
+                            # Get spawn room data
+                            spawn_room_data = await game_manager.db.get_room(spawn_room_id)
+                            if spawn_room_data:
+                                from .models import Room
+                                spawn_room = Room(**spawn_room_data)
+                                spawn_room.players = await game_manager.db.get_room_players(spawn_room_id)
+                                spawn_room_dict = spawn_room.dict()
+                                for key, value in spawn_room_dict.items():
+                                    if isinstance(value, bytes):
+                                        spawn_room_dict[key] = value.decode('utf-8')
+
+                                # Send defeat message and teleport to player
+                                await manager.send_to_player(old_room_id, defeated_player_id, {
+                                    "type": "player_death",
+                                    "message": "💀 You have been defeated! You wake up back at spawn...",
+                                    "new_room": spawn_room_dict,
+                                    "timestamp": datetime.now().isoformat()
+                                })
+
+                                # Broadcast to old room that player left
+                                await manager.broadcast_to_room(old_room_id, {
+                                    "type": "presence",
+                                    "player_id": defeated_player_id,
+                                    "status": "left"
+                                }, exclude_player=defeated_player_id)
+
+                                # Broadcast to spawn room that player arrived
+                                await manager.broadcast_to_room(spawn_room_id, {
+                                    "type": "presence",
+                                    "player_id": defeated_player_id,
+                                    "status": "joined"
+                                }, exclude_player=defeated_player_id)
+                    except Exception as e:
+                        logger.error(f"[Combat] Error teleporting defeated player to spawn: {str(e)}")
             except Exception as e:
                 logger.error(f"[Combat] Error recording monster combat history: {str(e)}")
             

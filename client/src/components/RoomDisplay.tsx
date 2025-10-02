@@ -12,7 +12,6 @@ const RoomDisplay: React.FC = () => {
 
     // Reset error state when room changes
     useEffect(() => {
-        const imageStartTime = performance.now();
         console.log('[RoomDisplay] Room changed, resetting image state:', {
             roomId: currentRoom?.id,
             imageUrl: currentRoom?.image_url,
