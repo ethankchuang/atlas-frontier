@@ -1450,10 +1450,17 @@ async def process_action_stream(
             player = Player(**player_data)
 
             db_start = time.time()
-            room_data = await game_manager.db.get_room(player.current_room)
-            logger.info(f"⏱️ [TIMING] Get room data: {(time.time() - db_start)*1000:.2f}ms")
-            if not room_data:
-                yield json.dumps({"error": "Room not found"})
+            logger.info(f"[Stream] Looking for room: {player.current_room}")
+            try:
+                room_data = await game_manager.db.get_room(player.current_room)
+                logger.info(f"⏱️ [TIMING] Get room data: {(time.time() - db_start)*1000:.2f}ms")
+                if not room_data:
+                    logger.error(f"[Stream] Room not found: {player.current_room}")
+                    yield json.dumps({"error": "Room not found"})
+                    return
+            except Exception as e:
+                logger.error(f"[Stream] Error getting room {player.current_room}: {str(e)}")
+                yield json.dumps({"error": f"Database error: {str(e)}"})
                 return
 
             room = Room(**room_data)
