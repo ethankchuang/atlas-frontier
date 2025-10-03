@@ -197,6 +197,9 @@ class WebSocketService {
                 case 'player_update':
                     this.handlePlayerUpdate(data.player);
                     break;
+                case 'player_death':
+                    this.handlePlayerDeath(data);
+                    break;
                 default:
                     console.log('[WebSocket] Unknown message type:', type);
             }
@@ -1170,6 +1173,31 @@ class WebSocketService {
         };
 
         this.socket.send(JSON.stringify(duelCancel));
+    }
+
+    private handlePlayerDeath(data: { message: string; new_room: Room; timestamp: string }) {
+        console.log('[WebSocket] Handling player death:', data);
+        
+        // Add death message to chat
+        const deathMessage: ChatMessage = {
+            player_id: 'system',
+            room_id: this.roomId || '',
+            message: data.message,
+            message_type: 'system',
+            timestamp: data.timestamp
+        };
+        useGameStore.getState().addMessage(deathMessage);
+        
+        // Update player's current room to the spawn room
+        if (data.new_room) {
+            const store = useGameStore.getState();
+            store.setCurrentRoom(data.new_room);
+            console.log('[WebSocket] Player teleported to spawn room:', data.new_room.id);
+            
+            // Disconnect from current room and reconnect to spawn room
+            this.disconnect();
+            this.connect(data.new_room.id, this.playerId!);
+        }
     }
 
 

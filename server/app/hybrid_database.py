@@ -25,14 +25,69 @@ class HybridDatabase:
     
     @staticmethod
     async def get_room(room_id: str) -> Optional[Dict[str, Any]]:
-        """Get room data from Supabase or Redis fallback"""
-        if HybridDatabase._is_supabase_configured():
-            try:
-                return await SupabaseDatabase.get_room(room_id)
-            except Exception as e:
-                logger.warning(f"[HybridDatabase] Supabase get_room failed, falling back to Redis: {str(e)}")
+        """Get room data from Supabase or Redis fallback with retry logic"""
+        logger.info(f"[HybridDatabase] Getting room {room_id}")
         
-        return await RedisDatabase.get_room(room_id)
+        # Try both databases and return the first result found
+        supabase_result = None
+        redis_result = None
+        
+        # Try Supabase first if configured
+        if HybridDatabase._is_supabase_configured():
+            logger.info(f"[HybridDatabase] Supabase is configured, trying Supabase first")
+            try:
+                supabase_result = await SupabaseDatabase.get_room(room_id)
+                if supabase_result:
+                    logger.info(f"[HybridDatabase] Found room {room_id} in Supabase")
+                    # Try to sync to Redis if not already there
+                    try:
+                        await RedisDatabase.set_room(room_id, supabase_result)
+                        logger.info(f"[HybridDatabase] Synced room {room_id} from Supabase to Redis")
+                    except Exception as e:
+                        logger.warning(f"[HybridDatabase] Failed to sync room {room_id} to Redis: {str(e)}")
+                    return supabase_result
+                else:
+                    logger.warning(f"[HybridDatabase] Room {room_id} not found in Supabase")
+            except Exception as e:
+                logger.warning(f"[HybridDatabase] Supabase get_room failed: {str(e)}")
+        else:
+            logger.info(f"[HybridDatabase] Supabase not configured")
+        
+        # Try Redis
+        try:
+            redis_result = await RedisDatabase.get_room(room_id)
+            if redis_result:
+                logger.info(f"[HybridDatabase] Found room {room_id} in Redis")
+                # Try to sync to Supabase if configured and not already there
+                if HybridDatabase._is_supabase_configured():
+                    try:
+                        await SupabaseDatabase.set_room(room_id, redis_result)
+                        logger.info(f"[HybridDatabase] Synced room {room_id} from Redis to Supabase")
+                    except Exception as e:
+                        logger.warning(f"[HybridDatabase] Failed to sync room {room_id} to Supabase: {str(e)}")
+                return redis_result
+            else:
+                logger.warning(f"[HybridDatabase] Room {room_id} not found in Redis")
+        except Exception as e:
+            logger.warning(f"[HybridDatabase] Redis get_room failed: {str(e)}")
+        
+        # If neither database has the room, try one more time with a small delay
+        logger.warning(f"[HybridDatabase] Room {room_id} not found in any database, retrying...")
+        import asyncio
+        await asyncio.sleep(0.1)  # Small delay to allow for potential race conditions
+        
+        # Try Redis one more time (most likely to have the data)
+        try:
+            redis_result = await RedisDatabase.get_room(room_id)
+            if redis_result:
+                logger.info(f"[HybridDatabase] Found room {room_id} in Redis on retry")
+                return redis_result
+        except Exception as e:
+            logger.warning(f"[HybridDatabase] Redis retry failed: {str(e)}")
+        
+        # If still not found, log the issue
+        logger.error(f"[HybridDatabase] Room {room_id} not found in any database after retry")
+        return None
 
     @staticmethod
     async def set_room(room_id: str, room_data: Dict[str, Any]) -> bool:

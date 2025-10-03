@@ -526,11 +526,16 @@ async def send_duel_results(
                         defeated_player_data = await game_manager.db.get_player(defeated_player_id)
                         if defeated_player_data:
                             old_room_id = defeated_player_data.get('current_room')
-                            spawn_room_id = 'room_0_0'  # Spawn location
+                            spawn_room_id = 'room_start'  # Spawn location (starting room)
 
                             # Update player's room
                             defeated_player_data['current_room'] = spawn_room_id
                             await game_manager.db.set_player(defeated_player_id, defeated_player_data)
+                            
+                            # Update room player lists
+                            await game_manager.db.remove_from_room_players(old_room_id, defeated_player_id)
+                            await game_manager.db.add_to_room_players(spawn_room_id, defeated_player_id)
+                            
                             logger.info(f"[Combat] Teleported defeated player {defeated_player_id} from {old_room_id} to spawn {spawn_room_id}")
 
                             # Get spawn room data
@@ -740,13 +745,30 @@ async def analyze_duel_moves(duel_id: str, game_manager: GameManager):
                 duel_info['player1_health'] = p1_health
             duel_info['finishing_window_owner'] = None
         
-        # Use AI's combat end determination, but override if health reaches 0
+        # Use AI's combat end determination, but override if health reaches 0 or control reaches 5
         combat_ends = combat_outcome.get('combat_ends', False)
         if p1_health <= 0 or p2_health <= 0:
             combat_ends = True
             logger.info(f"[analyze_duel_moves] Combat ends due to health: P1={p1_health}, P2={p2_health}")
+        elif p1_control >= 5 or p2_control >= 5:
+            # When control reaches 5, the combatant with 5 control should automatically win
+            if p1_control >= 5 and p2_control < 5:
+                # Player 1 has finishing window - they win
+                p2_health = 0
+                duel_info['player2_health'] = p2_health
+                combat_ends = True
+                logger.info(f"[analyze_duel_moves] Combat ends due to P1 finishing window: P1 control={p1_control}, P2 health set to 0")
+            elif p2_control >= 5 and p1_control < 5:
+                # Player 2 has finishing window - they win
+                p1_health = 0
+                duel_info['player1_health'] = p1_health
+                combat_ends = True
+                logger.info(f"[analyze_duel_moves] Combat ends due to P2 finishing window: P2 control={p2_control}, P1 health set to 0")
+            else:
+                # Both have 5 control - let AI determine the outcome
+                logger.info(f"[analyze_duel_moves] Both players have 5 control, letting AI determine outcome")
         else:
-            logger.info(f"[analyze_duel_moves] Combat continues: P1={p1_health}, P2={p2_health} (AI determined: {combat_ends})")
+            logger.info(f"[analyze_duel_moves] Combat continues: P1={p1_health}, P2={p2_health}, P1 control={p1_control}, P2 control={p2_control} (AI determined: {combat_ends})")
         try:
             duel_history.append({
                 'round': current_round,
