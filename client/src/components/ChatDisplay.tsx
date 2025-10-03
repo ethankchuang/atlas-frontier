@@ -4,7 +4,7 @@ import { ChatMessage } from '@/types/game';
 import { UserCircleIcon } from '@heroicons/react/24/solid';
 
 const ChatDisplay: React.FC = () => {
-    const { messages, playersInRoom } = useGameStore();
+    const { messages, playersInRoom, player } = useGameStore();
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const scrollContainerRef = useRef<HTMLDivElement>(null);
 
@@ -14,8 +14,24 @@ const ChatDisplay: React.FC = () => {
     }, [messages]);
 
     const getPlayerName = (playerId: string): string => {
-        const player = playersInRoom.find(p => p.id === playerId);
-        return player?.name || 'Unknown Player';
+        // First check if it's the current player
+        if (player && player.id === playerId) {
+            return player.name;
+        }
+        
+        // Then check other players in room
+        const roomPlayer = playersInRoom.find(p => p.id === playerId);
+        if (roomPlayer) {
+            return roomPlayer.name;
+        }
+        
+        // If we can't find the player, try to extract name from player_id
+        // For guest players, the name might be in the format "Anonymous_<id>"
+        if (playerId.startsWith('guest_')) {
+            return `Anonymous_${playerId.split('_')[1]}`;
+        }
+        
+        return 'Unknown Player';
     };
 
     const renderMessage = (message: ChatMessage) => {
