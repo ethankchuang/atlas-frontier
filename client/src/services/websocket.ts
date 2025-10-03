@@ -134,7 +134,13 @@ class WebSocketService {
                 console.error('[WebSocket] Failed to parse message:', error);
                 return;
             }
-            const { type } = data;
+            
+            // Handle messages that have message_type but no type field (chat messages)
+            let type = data.type;
+            if (!type && data.message_type) {
+                console.log('[WebSocket] Message has message_type but no type, treating as chat message');
+                type = 'chat';
+            }
 
             // AGGRESSIVE: Clear stuck duel state on every message
             const store = useGameStore.getState();
@@ -239,6 +245,13 @@ class WebSocketService {
                 const updatedPlayers = [...store.playersInRoom, data.player_data];
                 store.setPlayersInRoom(updatedPlayers);
                 console.log('[WebSocket] Added player to room:', data.player_data.name);
+            } else {
+                // Update existing player data
+                const updatedPlayers = store.playersInRoom.map(p => 
+                    p.id === data.player_id ? data.player_data! : p
+                );
+                store.setPlayersInRoom(updatedPlayers);
+                console.log('[WebSocket] Updated player in room:', data.player_data.name);
             }
         }
     }
