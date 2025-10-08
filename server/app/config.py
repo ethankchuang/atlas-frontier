@@ -20,8 +20,8 @@ class Settings(BaseSettings):
     IMAGE_GENERATION_ENABLED: bool = True
     IMAGE_PROVIDER: str = "replicate"  # "openai" or "replicate"
     
-    # Replicate Settings - Black Forest Labs Flux Schnell
-    REPLICATE_MODEL: str = "black-forest-labs/flux-schnell"  # Flux Schnell model
+    # Replicate Settings - Black Forest Labs Flux 1.1 pro ultra
+    REPLICATE_MODEL: str = "black-forest-labs/flux-1.1-pro-ultra"  # Flux 1.1 pro ultra model
     REPLICATE_IMAGE_WIDTH: int = 1024
     REPLICATE_IMAGE_HEIGHT: int = 576  # 16:9 aspect ratio (landscape)
 
