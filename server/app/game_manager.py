@@ -201,6 +201,61 @@ class GameManager:
         logger.info(f"[Performance] Player creation completed in {elapsed:.2f}s for {name}")
         return player
 
+    def _validate_monster_data(self, monster_data: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
+        """
+        Validate that monster data contains all required fields with valid values.
+        Returns (is_valid, error_message)
+        """
+        required_fields = {
+            'id': str,
+            'name': str,
+            'description': str,
+            'aggressiveness': str,
+            'intelligence': str,
+            'size': str,
+            'location': str,
+            'health': int,
+            'is_alive': bool
+        }
+        
+        # Check all required fields exist and have correct types
+        for field, expected_type in required_fields.items():
+            if field not in monster_data:
+                return False, f"Missing required field: {field}"
+            if not isinstance(monster_data[field], expected_type):
+                return False, f"Invalid type for {field}: expected {expected_type.__name__}, got {type(monster_data[field]).__name__}"
+        
+        # Validate string fields are not empty
+        string_fields = ['id', 'name', 'description', 'aggressiveness', 'intelligence', 'size', 'location']
+        for field in string_fields:
+            if not monster_data[field] or not monster_data[field].strip():
+                return False, f"Empty value for required field: {field}"
+        
+        # Validate enum values
+        valid_aggressiveness = ['passive', 'aggressive', 'neutral', 'territorial']
+        if monster_data['aggressiveness'] not in valid_aggressiveness:
+            return False, f"Invalid aggressiveness: {monster_data['aggressiveness']}"
+        
+        valid_intelligence = ['human', 'subhuman', 'animal', 'omnipotent']
+        if monster_data['intelligence'] not in valid_intelligence:
+            return False, f"Invalid intelligence: {monster_data['intelligence']}"
+        
+        valid_sizes = ['colossal', 'dinosaur', 'horse', 'human', 'chicken', 'insect']
+        if monster_data['size'] not in valid_sizes:
+            return False, f"Invalid size: {monster_data['size']}"
+        
+        # Validate health is positive
+        if monster_data['health'] <= 0:
+            return False, f"Invalid health: {monster_data['health']} (must be positive)"
+        
+        # Validate name and description length
+        if len(monster_data['name']) > 100:
+            return False, f"Name too long: {len(monster_data['name'])} characters (max 100)"
+        if len(monster_data['description']) > 1000:
+            return False, f"Description too long: {len(monster_data['description'])} characters (max 1000)"
+        
+        return True, None
+
     async def generate_room_monsters(self, room_context: Dict[str, Any]) -> List[str]:
         """Generate 0-3 monsters for a room based on biome and environment"""
         import random
@@ -222,6 +277,7 @@ class GameManager:
         monster_ids = []
         
         for i in range(num_monsters):
+            monster_id = None
             try:
                 # Create a fresh context for each monster to ensure diversity
                 # Don't pass room_context directly as it gets modified
@@ -247,30 +303,62 @@ class GameManager:
                 
                 generated_data = await monster_template.parse_response(ai_response)
                 
+                # Validate generated data has required fields
+                if not generated_data.get('name') or not generated_data.get('name').strip():
+                    logger.error(f"[Monsters] AI generation failed: missing or empty name")
+                    continue
+                if not generated_data.get('description') or not generated_data.get('description').strip():
+                    logger.error(f"[Monsters] AI generation failed: missing or empty description")
+                    continue
+                
                 # Create complete monster data
                 monster_id = f"monster_{uuid.uuid4()}"
                 monster_data = {
                     'id': monster_id,
-                    'name': generated_data['name'],
-                    'description': generated_data['description'],
+                    'name': generated_data['name'].strip(),
+                    'description': generated_data['description'].strip(),
                     'aggressiveness': base_data['aggressiveness'],
                     'intelligence': base_data['intelligence'],
                     'size': base_data['size'],
-                    'special_effects': generated_data['special_effects'],
+                    'special_effects': generated_data.get('special_effects', '').strip(),
                     'location': room_context.get('room_id', ''),
                     'health': base_data['health'],
                     'is_alive': True,
                     'properties': {}
                 }
                 
-                # Store monster in database
-                await self.db.set_monster(monster_id, monster_data)
-                monster_ids.append(monster_id)
+                # Validate monster data before saving (FIX #1 & #4)
+                is_valid, error_msg = self._validate_monster_data(monster_data)
+                if not is_valid:
+                    logger.error(f"[Monsters] Monster validation failed: {error_msg}")
+                    logger.error(f"[Monsters] Invalid monster data: {monster_data}")
+                    continue
                 
-                logger.info(f"[Monsters] Generated monster {generated_data['name']} ({monster_id}) for room {room_context.get('room_id', 'unknown')}")
+                # Store monster in database (atomic operation)
+                try:
+                    await self.db.set_monster(monster_id, monster_data)
+                    # Verify the save was successful by reading it back
+                    verification = await self.db.get_monster(monster_id)
+                    if not verification:
+                        raise Exception("Failed to verify monster save")
+                    
+                    monster_ids.append(monster_id)
+                    logger.info(f"[Monsters] Generated and validated monster {generated_data['name']} ({monster_id}) for room {room_context.get('room_id', 'unknown')}")
+                    
+                except Exception as save_error:
+                    logger.error(f"[Monsters] Failed to save monster to database: {str(save_error)}")
+                    # If save failed, don't add to monster_ids
+                    continue
                 
             except Exception as e:
                 logger.error(f"[Monsters] Error generating monster {i+1}: {str(e)}")
+                # If we created a partial monster, try to clean it up
+                if monster_id:
+                    try:
+                        await self.db.delete_monster(monster_id)
+                        logger.info(f"[Monsters] Cleaned up partial monster {monster_id}")
+                    except Exception as cleanup_error:
+                        logger.error(f"[Monsters] Failed to cleanup partial monster: {cleanup_error}")
                 continue
         
         return monster_ids

@@ -564,13 +564,10 @@ class AIHandler:
             buffer = ""
             narrative = ""
             narrative_complete = False
+            json_yielded = False  # Track if we successfully yielded JSON
             chunk_count = 0
             max_chunks = 1000  # Prevent infinite loops
             first_token_time = None
-
-            # Buffering to reduce number of yields and transport overhead
-            text_buffer = ""
-            buffer_size = 5  # Send chunks of ~5 characters for maximum responsiveness
 
             async for chunk in stream:
                 if first_token_time is None:
@@ -584,71 +581,141 @@ class AIHandler:
                     content = chunk.choices[0].delta.content
                     buffer += content
 
-                    # Check if we've hit the JSON part (after two newlines)
-                    if not narrative_complete and "\n\n{" in buffer:
-                        narrative_complete = True
-                        # Flush any remaining text buffer before switching to JSON mode
-                        if text_buffer:
-                            yield text_buffer
-                            text_buffer = ""
-                        # Split at the JSON start - don't yield the narrative since it was already streamed
-                        parts = buffer.split("\n\n{", 1)
-                        if len(parts) == 2:
-                            narrative = parts[0].strip()
-                            # Don't yield narrative here - it was already streamed character by character
-                            buffer = "{" + parts[1]
-                    elif not narrative_complete:
-                        # Still in narrative part, buffer the content
-                        narrative += content
-                        text_buffer += content
+                    # More robust JSON detection - check BEFORE yielding anything
+                    # This prevents JSON from leaking into the narrative stream
+                    if not narrative_complete:
+                        # Look for JSON start with multiple possible separators
+                        json_start_idx = -1
 
-                        # Only yield when buffer reaches threshold
-                        if len(text_buffer) >= buffer_size:
-                            yield text_buffer
-                            text_buffer = ""
+                        # Try different separator patterns (most specific first)
+                        if "\n\n{" in buffer:
+                            json_start_idx = buffer.index("\n\n{") + 2
+                        elif "\n{" in buffer:
+                            json_start_idx = buffer.index("\n{") + 1
+                        elif "{" in buffer and buffer.count("{") >= 1:
+                            # Check if this looks like the start of our JSON object
+                            # (has "response" or "updates" key shortly after)
+                            brace_idx = buffer.index("{")
+                            sample = buffer[brace_idx:brace_idx+100]
+                            if '"response"' in sample or '"updates"' in sample:
+                                json_start_idx = brace_idx
+
+                        if json_start_idx >= 0:
+                            narrative_complete = True
+                            # Extract the pure narrative (everything before JSON)
+                            pure_narrative = buffer[:json_start_idx].strip()
+
+                            # Yield only the part we haven't sent yet
+                            unsent_narrative = pure_narrative[len(narrative):]
+                            if unsent_narrative:
+                                yield unsent_narrative
+
+                            # Update narrative to the complete version
+                            narrative = pure_narrative
+                            buffer = buffer[json_start_idx:]
+                            logger.debug(f"[Stream] JSON detected, narrative: {narrative[:100]}...")
+                        else:
+                            # No JSON detected yet, safe to stream this content
+                            # Stream character by character for maximum responsiveness
+                            yield content
+                            narrative += content
 
                     # Try to parse as JSON to see if it's complete
+                    if narrative_complete:
+                        try:
+                            # This will raise if not complete JSON yet
+                            parsed = json.loads(buffer)
+                            if isinstance(parsed, dict) and "response" in parsed:
+                                # Replace response with the already streamed narrative
+                                parsed["response"] = narrative.strip()
+
+                                # Set the type field for the main.py message storage logic
+                                parsed["type"] = "final"
+
+                                total_ai_time = time.time() - ai_request_start
+                                logger.info(f"⏱️ [TIMING] Complete AI response received: {total_ai_time*1000:.2f}ms (TTFT: {(first_token_time - ai_request_start)*1000:.2f}ms)")
+
+                                # Debug: Log the AI response to see if item_award is included
+                                logger.info(f"[AI Response] Full AI response: {parsed}")
+                                if "updates" in parsed and "item_award" in parsed["updates"]:
+                                    logger.info(f"[AI Response] Item award found: {parsed['updates']['item_award']}")
+                                else:
+                                    logger.warning(f"[AI Response] No item_award found in AI response!")
+
+                                # OPTIMIZATION: Yield room data immediately for instant UI updates
+                                # This allows the client to update the room/image before background tasks complete
+                                room_data_payload = {
+                                    "type": "room_data",
+                                    "updates": parsed.get("updates", {}),
+                                    "response": parsed["response"]
+                                }
+                                logger.info(f"⏱️ [TIMING] Yielding room_data for immediate UI update")
+                                yield room_data_payload
+
+                                # Then yield the final response for background processing
+                                yield parsed
+                                json_yielded = True  # Mark that we successfully yielded
+                                break
+                        except json.JSONDecodeError as e:
+                            # Not yet complete JSON - this is normal during streaming
+                            logger.debug(f"[Stream] JSON not complete yet: {str(e)}")
+                            pass
+                        except Exception as e:
+                            # Other parsing errors - log and continue
+                            logger.warning(f"[Stream] JSON parsing error: {str(e)}")
+                            pass
+
+            # After stream ends, if we still haven't parsed JSON, try to extract it
+            # But ONLY if we didn't already yield successfully
+            if not json_yielded and (not narrative_complete or (narrative_complete and buffer)):
+                logger.warning(f"[Stream] Stream ended without complete JSON, attempting fallback extraction")
+                logger.debug(f"[Stream] Final buffer: {buffer[:200]}...")
+
+                # Try to find JSON in the complete buffer using regex
+                import re
+                json_match = re.search(r'\{.*\}', buffer, re.DOTALL)
+                if json_match:
                     try:
-                        # This will raise if not complete JSON yet
-                        parsed = json.loads(buffer)
-                        if isinstance(parsed, dict) and "response" in parsed:
-                            # Replace response with the already streamed narrative
-                            parsed["response"] = narrative.strip()
+                        parsed = json.loads(json_match.group())
+                        if isinstance(parsed, dict):
+                            # Extract narrative from before the JSON
+                            json_start = buffer.index(json_match.group())
+                            narrative = buffer[:json_start].strip()
 
-                            # Set the type field for the main.py message storage logic
-                            parsed["type"] = "final"
-
-                            total_ai_time = time.time() - ai_request_start
-                            logger.info(f"⏱️ [TIMING] Complete AI response received: {total_ai_time*1000:.2f}ms (TTFT: {(first_token_time - ai_request_start)*1000:.2f}ms)")
-
-                            # Debug: Log the AI response to see if item_award is included
-                            logger.info(f"[AI Response] Full AI response: {parsed}")
-                            if "updates" in parsed and "item_award" in parsed["updates"]:
-                                logger.info(f"[AI Response] Item award found: {parsed['updates']['item_award']}")
+                            # Use the narrative from the response field if available, otherwise use extracted
+                            if "response" in parsed:
+                                parsed["response"] = narrative if narrative else parsed["response"]
                             else:
-                                logger.warning(f"[AI Response] No item_award found in AI response!")
+                                parsed["response"] = narrative
 
-                            # OPTIMIZATION: Yield room data immediately for instant UI updates
-                            # This allows the client to update the room/image before background tasks complete
+                            parsed["type"] = "final"
+                            logger.info(f"[Stream] Successfully extracted JSON via fallback")
+
                             room_data_payload = {
                                 "type": "room_data",
                                 "updates": parsed.get("updates", {}),
                                 "response": parsed["response"]
                             }
-                            logger.info(f"⏱️ [TIMING] Yielding room_data for immediate UI update")
                             yield room_data_payload
-
-                            # Then yield the final response for background processing
                             yield parsed
-                            break
-                    except json.JSONDecodeError as e:
-                        # Not yet complete JSON - this is normal during streaming
-                        logger.debug(f"[Stream] JSON not complete yet: {str(e)}")
-                        pass
-                    except Exception as e:
-                        # Other parsing errors - log and continue
-                        logger.warning(f"[Stream] JSON parsing error: {str(e)}")
-                        pass
+                        else:
+                            raise ValueError("Parsed object is not a dict")
+                    except (json.JSONDecodeError, ValueError) as e:
+                        logger.error(f"[Stream] Fallback JSON extraction failed: {str(e)}")
+                        # Use whatever narrative we collected
+                        yield {
+                            "type": "final",
+                            "response": narrative.strip() if narrative else "Something mysterious happens.",
+                            "updates": {}
+                        }
+                else:
+                    logger.error(f"[Stream] No JSON found in buffer, using narrative only")
+                    # No JSON found, return just the narrative
+                    yield {
+                        "type": "final",
+                        "response": narrative.strip() if narrative else buffer.strip(),
+                        "updates": {}
+                    }
 
         except Exception as e:
             logger.error(f"[Stream Action] Error during streaming: {str(e)}")
