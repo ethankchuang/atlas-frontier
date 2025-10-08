@@ -264,79 +264,82 @@ ITEMS TO COMBINE:
         prompt = f"{self.system_prompt}\n{world_context_text}{recent_items_context}"
         return prompt
     
-    def parse_response(self, response: str, context: Dict[str, Any] = None) -> Dict[str, Any]:
+    async def parse_response(self, response: str, context: Dict[str, Any] = None) -> Dict[str, Any]:
         """Parse the AI response into structured data"""
         if context is None:
             context = {}
         
-        try:
-            # Try to extract JSON from the response
-            json_match = re.search(r'\{.*\}', response, re.DOTALL)
-            if json_match:
-                data = json.loads(json_match.group())
-            else:
-                # Fallback: try to parse the entire response as JSON
-                data = json.loads(response)
-            
-            # Ensure required fields exist
-            required_fields = ['name', 'rarity', 'description', 'capabilities']
-            for field in required_fields:
-                if field not in data:
-                    raise ValueError(f"Missing required field: {field}")
-            
-            # Validate rarity is in correct range
-            rarity = data['rarity']
-            if not isinstance(rarity, int) or rarity < 1 or rarity > 4:
-                rarity = 2  # Default to common if invalid
-            
-            # Ensure capabilities is a list
-            capabilities = data['capabilities']
-            if isinstance(capabilities, str):
-                # If it's a string, split it into a list
-                capabilities = [cap.strip() for cap in capabilities.split(',')]
-            elif not isinstance(capabilities, list):
-                capabilities = ["unknown capability"]
-            
-            # Build clean item data
-            item_data = {
-                'name': data['name'].strip(),
-                'rarity': rarity,
-                'description': data['description'].strip(),
-                'capabilities': capabilities
-            }
-            
-            return item_data
-            
-        except (json.JSONDecodeError, ValueError, KeyError) as e:
-            # Fallback parsing for malformed responses
-            lines = response.strip().split('\n')
-            name = "Mysterious Item"
-            description = "An unknown object"
-            capabilities = ["unknown capability"]
-            rarity = 1
-            
-            for line in lines:
-                line = line.strip()
-                if 'name' in line.lower() and ':' in line:
-                    name = line.split(':', 1)[1].strip().strip('"\'{}')
-                elif 'description' in line.lower() and ':' in line:
-                    description = line.split(':', 1)[1].strip().strip('"\'{}')
-                elif 'rarity' in line.lower() and ':' in line:
-                    try:
-                        rarity = int(line.split(':', 1)[1].strip())
-                        if rarity < 1 or rarity > 4:
-                            rarity = 1
-                    except:
-                        rarity = 1
-            
-            item_data = {
-                'name': name,
-                'rarity': rarity,
-                'description': description,
-                'capabilities': capabilities
-            }
-            
-            return item_data
+        # Retry mechanism for JSON parsing
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                # Try to extract JSON from the response
+                json_match = re.search(r'\{.*\}', response, re.DOTALL)
+                if json_match:
+                    data = json.loads(json_match.group())
+                else:
+                    # Fallback: try to parse the entire response as JSON
+                    data = json.loads(response)
+                
+                # Ensure required fields exist
+                required_fields = ['name', 'rarity', 'description', 'capabilities']
+                for field in required_fields:
+                    if field not in data:
+                        raise ValueError(f"Missing required field: {field}")
+                
+                # Validate rarity is in correct range
+                rarity = data['rarity']
+                if not isinstance(rarity, int) or rarity < 1 or rarity > 4:
+                    rarity = 2  # Default to common if invalid
+                
+                # Ensure capabilities is a list
+                capabilities = data['capabilities']
+                if isinstance(capabilities, str):
+                    # If it's a string, split it into a list
+                    capabilities = [cap.strip() for cap in capabilities.split(',')]
+                elif not isinstance(capabilities, list):
+                    capabilities = ["unknown capability"]
+                
+                # Build clean item data
+                item_data = {
+                    'name': data['name'].strip(),
+                    'rarity': rarity,
+                    'description': data['description'].strip(),
+                    'capabilities': capabilities
+                }
+                
+                return item_data
+                
+            except json.JSONDecodeError as e:
+                logger.warning(f"[Item Generation] JSON parsing failed on attempt {attempt + 1}: {str(e)}")
+                if attempt == max_retries - 1:
+                    # Final attempt failed, raise the error
+                    logger.error(f"[Item Generation] All {max_retries} attempts failed, raising error")
+                    raise
+                else:
+                    # Wait a bit before retrying
+                    await asyncio.sleep(0.5)
+                    continue
+                    
+            except Exception as e:
+                logger.error(f"[Item Generation] Unexpected error on attempt {attempt + 1}: {str(e)}")
+                if attempt == max_retries - 1:
+                    # Final attempt failed, raise the error
+                    logger.error(f"[Item Generation] All {max_retries} attempts failed due to unexpected error, raising error")
+                    raise
+                else:
+                    # Wait a bit before retrying
+                    await asyncio.sleep(0.5)
+                    continue
+        
+        # If we get here, all retries failed - return fallback item
+        logger.error(f"[Item Generation] All retry attempts failed, returning fallback item")
+        return {
+            'name': 'Mysterious Item',
+            'rarity': 1,
+            'description': 'An unknown object that appeared from the void.',
+            'capabilities': ['unknown capability']
+        }
     
     def validate_output(self, output: Dict[str, Any]) -> bool:
         """Validate that the output meets template requirements"""
@@ -372,7 +375,7 @@ ITEMS TO COMBINE:
         try:
             # Generate item using AI
             ai_response = await ai_handler.generate_text(prompt)
-            item_data = self.parse_response(ai_response, context)
+            item_data = await self.parse_response(ai_response, context)
             
             # Validate the output
             if self.validate_output(item_data):

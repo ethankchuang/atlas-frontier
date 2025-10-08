@@ -5,7 +5,12 @@ from typing import Dict, Any
 import json
 import re
 import random
+import asyncio
+import logging
 from .base import MonsterTemplate
+
+# Get logger for this module
+logger = logging.getLogger(__name__)
 
 
 class GenericMonsterTemplate(MonsterTemplate):
@@ -98,29 +103,73 @@ Example response:
         
         return guidance_map.get(style, guidance_map["descriptive"])
 
-    def parse_response(self, response: str) -> Dict[str, Any]:
+    async def parse_response(self, response: str) -> Dict[str, Any]:
         """Parse the AI response into structured data"""
         try:
             # Clean up the response
             response = response.strip()
             
-            # Try to extract JSON from the response
-            json_match = re.search(r'\{.*\}', response, re.DOTALL)
-            if json_match:
-                json_str = json_match.group()
-                data = json.loads(json_str)
-                
-                # Ensure required fields exist
-                if "name" not in data:
-                    data["name"] = "Unknown Monster"
-                if "description" not in data:
-                    data["description"] = "A mysterious creature."
-                if "special_effects" not in data:
-                    data["special_effects"] = ""
-                
-                return data
-            else:
-                raise ValueError("No JSON found in response")
+            # Try to extract JSON from the response with retry mechanism
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    json_match = re.search(r'\{.*\}', response, re.DOTALL)
+                    if json_match:
+                        json_str = json_match.group()
+                        data = json.loads(json_str)
+                        
+                        # Ensure required fields exist
+                        if "name" not in data:
+                            data["name"] = "Unknown Monster"
+                        if "description" not in data:
+                            data["description"] = "A mysterious creature."
+                        if "special_effects" not in data:
+                            data["special_effects"] = ""
+                        
+                        return data
+                    else:
+                        if attempt == max_retries - 1:
+                            raise ValueError("No JSON found in response")
+                        else:
+                            # Wait a bit before retrying
+                            await asyncio.sleep(0.5)
+                            continue
+                            
+                except json.JSONDecodeError as e:
+                    logger.warning(f"[Monster Generation] JSON parsing failed on attempt {attempt + 1}: {str(e)}")
+                    if attempt == max_retries - 1:
+                        # Final attempt failed, return fallback monster
+                        logger.error(f"[Monster Generation] All {max_retries} attempts failed, using fallback monster")
+                        return {
+                            "name": "Mysterious Creature",
+                            "description": "A strange being that appeared from the shadows.",
+                            "special_effects": "",
+                            "size": "human",
+                            "aggressiveness": "neutral",
+                            "intelligence": "animal"
+                        }
+                    else:
+                        # Wait a bit before retrying
+                        await asyncio.sleep(0.5)
+                        continue
+                        
+                except Exception as e:
+                    logger.error(f"[Monster Generation] Unexpected error on attempt {attempt + 1}: {str(e)}")
+                    if attempt == max_retries - 1:
+                        # Final attempt failed, return fallback monster
+                        logger.error(f"[Monster Generation] All {max_retries} attempts failed due to unexpected error, using fallback monster")
+                        return {
+                            "name": "Mysterious Creature",
+                            "description": "A strange being that appeared from the shadows.",
+                            "special_effects": "",
+                            "size": "human",
+                            "aggressiveness": "neutral",
+                            "intelligence": "animal"
+                        }
+                    else:
+                        # Wait a bit before retrying
+                        await asyncio.sleep(0.5)
+                        continue
                 
         except (json.JSONDecodeError, ValueError) as e:
             # Fallback parsing
@@ -191,17 +240,17 @@ Example response:
         return base_data
     
     def _calculate_health(self, size: str) -> int:
-        """Calculate monster health based on size"""
+        """Calculate monster health based on size as percentage of player base health (5 HP)"""
         size_multipliers = {
-            "insect": 0.25,     # tiny (25%)
-            "chicken": 0.5,     # small (50%)
-            "human": 1.0,       # medium (100%)
-            "horse": 1.5,       # big (150%)
-            "dinosaur": 2.0,    # large (200%)
-            "colossal": 3.0     # colossal (300%)
+            "insect": 0.4,      # tiny (2 HP)
+            "chicken": 0.6,     # small (3 HP)
+            "human": 1.0,       # medium (5 HP)
+            "horse": 1.4,       # big (7 HP)
+            "dinosaur": 1.8,    # large (9 HP)
+            "colossal": 2.4     # colossal (12 HP)
         }
         
-        base_health = 20
+        player_base_health = 5
         size_mult = size_multipliers.get(size, 1.0)
         
-        return int(base_health * size_mult) 
+        return int(player_base_health * size_mult) 

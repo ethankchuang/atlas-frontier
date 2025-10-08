@@ -337,10 +337,10 @@ const GameLayout: React.FC<GameLayoutProps> = ({ playerId }) => {
                                     <div className="flex items-center gap-1 mb-0.5">
                                         <span>🎯</span>
                                         <span className="text-gray-200">Advantage</span>
-                                        <span className="ml-auto text-gray-400">{Math.min(5, Math.max(0, player1Control))}/5</span>
+                                        <span className="ml-auto text-gray-400">{Math.min(3, Math.max(0, player1Control))}/3</span>
                                     </div>
                                     <div className="w-40 h-1.5 bg-gray-700 rounded overflow-hidden">
-                                        <div className="h-1.5 bg-blue-500" style={{width: `${Math.min(100, Math.max(0, (Math.min(5, Math.max(0, player1Control))/5)*100))}%`}} />
+                                        <div className="h-1.5 bg-blue-500" style={{width: `${Math.min(100, Math.max(0, (Math.min(3, Math.max(0, player1Control))/3)*100))}%`}} />
                                     </div>
                                 </div>
                             </div>
@@ -363,10 +363,10 @@ const GameLayout: React.FC<GameLayoutProps> = ({ playerId }) => {
                                     <div className="flex items-center gap-1 mb-0.5">
                                         <span>🎯</span>
                                         <span className="text-gray-200">Advantage</span>
-                                        <span className="ml-auto text-gray-400">{Math.min(5, Math.max(0, player2Control))}/5</span>
+                                        <span className="ml-auto text-gray-400">{Math.min(3, Math.max(0, player2Control))}/3</span>
                                     </div>
                                     <div className="w-40 h-1.5 bg-gray-700 rounded overflow-hidden">
-                                        <div className="h-1.5 bg-blue-300" style={{width: `${Math.min(100, Math.max(0, (Math.min(5, Math.max(0, player2Control))/5)*100))}%`}} />
+                                        <div className="h-1.5 bg-blue-300" style={{width: `${Math.min(100, Math.max(0, (Math.min(3, Math.max(0, player2Control))/3)*100))}%`}} />
                                     </div>
                                 </div>
                             </div>

@@ -141,14 +141,31 @@ Make the rules appropriate for the world theme and context.
             
             response = await self.game_manager.ai_handler.generate_text(prompt)
             
-            # Parse AI response
-            try:
-                rules = json.loads(response)
-                logger.info(f"[DynamicMoveValidator] Generated validation rules for world {world_seed}")
-                return rules
-            except json.JSONDecodeError:
-                logger.warning(f"[DynamicMoveValidator] Failed to parse AI response, using defaults")
-                return self._get_default_validation_rules()
+            # Parse AI response with retry mechanism
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    rules = json.loads(response)
+                    logger.info(f"[DynamicMoveValidator] Generated validation rules for world {world_seed}")
+                    return rules
+                except json.JSONDecodeError as e:
+                    logger.warning(f"[DynamicMoveValidator] JSON parsing failed on attempt {attempt + 1}: {str(e)}")
+                    if attempt == max_retries - 1:
+                        logger.warning(f"[DynamicMoveValidator] All {max_retries} attempts failed, using defaults")
+                        return self._get_default_validation_rules()
+                    else:
+                        # Wait a bit before retrying
+                        await asyncio.sleep(0.5)
+                        continue
+                except Exception as e:
+                    logger.error(f"[DynamicMoveValidator] Unexpected error on attempt {attempt + 1}: {str(e)}")
+                    if attempt == max_retries - 1:
+                        logger.error(f"[DynamicMoveValidator] All {max_retries} attempts failed due to unexpected error, using defaults")
+                        return self._get_default_validation_rules()
+                    else:
+                        # Wait a bit before retrying
+                        await asyncio.sleep(0.5)
+                        continue
                 
         except Exception as e:
             logger.error(f"[DynamicMoveValidator] Error generating validation rules: {str(e)}")
@@ -439,18 +456,37 @@ Return JSON:
             
             response = await self.game_manager.ai_handler.generate_text(prompt)
             
-            try:
-                result = json.loads(response)
-                is_valid = result.get('valid', True)
-                reason = result.get('reason', 'AI validation')
-                suggestion = result.get('suggestion')
-                
-                logger.info(f"[DynamicMoveValidator] AI validation result: {is_valid} - {reason}")
-                return is_valid, reason, suggestion
-                
-            except json.JSONDecodeError:
-                logger.warning(f"[DynamicMoveValidator] Failed to parse AI response, allowing move")
-                return True, "AI validation failed - allowing move", None
+            # Retry mechanism for JSON parsing
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    result = json.loads(response)
+                    is_valid = result.get('valid', True)
+                    reason = result.get('reason', 'AI validation')
+                    suggestion = result.get('suggestion')
+                    
+                    logger.info(f"[DynamicMoveValidator] AI validation result: {is_valid} - {reason}")
+                    return is_valid, reason, suggestion
+                    
+                except json.JSONDecodeError as e:
+                    logger.warning(f"[DynamicMoveValidator] JSON parsing failed on attempt {attempt + 1}: {str(e)}")
+                    if attempt == max_retries - 1:
+                        logger.warning(f"[DynamicMoveValidator] All {max_retries} attempts failed, allowing move")
+                        return True, "AI validation failed - allowing move", None
+                    else:
+                        # Wait a bit before retrying
+                        await asyncio.sleep(0.5)
+                        continue
+                        
+                except Exception as e:
+                    logger.error(f"[DynamicMoveValidator] Unexpected error on attempt {attempt + 1}: {str(e)}")
+                    if attempt == max_retries - 1:
+                        logger.error(f"[DynamicMoveValidator] All {max_retries} attempts failed due to unexpected error, allowing move")
+                        return True, "AI validation error - allowing move", None
+                    else:
+                        # Wait a bit before retrying
+                        await asyncio.sleep(0.5)
+                        continue
                 
         except Exception as e:
             logger.error(f"[DynamicMoveValidator] Error in AI validation: {str(e)}")
