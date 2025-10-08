@@ -168,28 +168,27 @@ class AIHandler:
                 logger.info(f"[Replicate] Using model: {settings.REPLICATE_MODEL}")
                 logger.info(f"[Replicate] Image dimensions: {settings.REPLICATE_IMAGE_WIDTH}x{settings.REPLICATE_IMAGE_HEIGHT}")
                 
-                # Run the prediction with Flux Schnell parameters
+                # Run the prediction with Flux Pro Ultra parameters
                 output = replicate.run(
                     settings.REPLICATE_MODEL,
                     input={
                         "prompt": enhanced_prompt,
-                        "aspect_ratio": "16:9",  # Flux Schnell uses aspect_ratio instead of width/height
-                        "num_outputs": 1,
-                        "num_inference_steps": 4,  # Flux Schnell recommends 4 steps
-                        "go_fast": True,  # Enable fast inference
-                        "output_format": "webp",
-                        "output_quality": 80
+                        "aspect_ratio": "16:9",
+                        "output_format": "png",
+                        "safety_tolerance": 6,
                     }
                 )
-                
-                if output and len(output) > 0:
-                    image_url = output[0]
-                    # Convert FileOutput object to string URL if needed
-                    if hasattr(image_url, 'url'):
-                        image_url = image_url.url
-                    elif hasattr(image_url, '__str__'):
-                        image_url = str(image_url)
-                    
+
+                # Flux Pro Ultra returns a single FileOutput object, not a list
+                if output:
+                    # Convert FileOutput object to string URL
+                    if hasattr(output, 'url'):
+                        image_url = output.url
+                    elif hasattr(output, '__str__'):
+                        image_url = str(output)
+                    else:
+                        image_url = output
+
                     logger.info(f"[Replicate] Generated image URL: {image_url}")
                     return image_url
                 else:
