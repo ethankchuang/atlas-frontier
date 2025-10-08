@@ -49,6 +49,60 @@ async def collect_special_effects_from_inventories(player1_inventory: List[str],
     return special_effects_list
 
 
+async def generate_finishing_move_narrative(
+    winner_name: str, winner_move: str, winner_inventory: List[str],
+    loser_name: str, loser_move: str, loser_inventory: List[str],
+    room_name: str, room_description: str, game_manager: GameManager
+) -> str:
+    """
+    Generate a cool finishing move narrative when one combatant has full control (3).
+    This bypasses normal combat analysis and creates a dramatic victory scene.
+    """
+    from .main import logger
+    
+    prompt = f"""
+You are the AI Gamemaster creating a dramatic finishing move scene. One combatant has achieved complete dominance and is about to deliver a devastating finishing blow.
+
+LOCATION: {room_name} - {room_description}
+
+WINNER DETAILS:
+- Name: {winner_name}
+- Final Move: "{winner_move}"
+- Inventory: {winner_inventory}
+
+LOSER DETAILS:
+- Name: {loser_name}
+- Attempted Move: "{loser_move}"
+- Inventory: {loser_inventory}
+
+FINISHING MOVE REQUIREMENTS:
+- Create a dramatic, cinematic description of the winner's finishing move
+- Show how their overwhelming control leads to a devastating victory
+- Make it feel epic and satisfying - this is the climax of the combat
+- Keep it to 2-3 sentences, but make them impactful
+- Use the room environment to enhance the scene
+
+Generate a cool, dramatic finishing move narrative that makes the winner feel powerful and the outcome feel inevitable.
+"""
+
+    try:
+        response = await game_manager.ai_handler.generate_text(prompt)
+        narrative = response.strip()
+        
+        # Clean up narrative formatting
+        if narrative.startswith('"') and narrative.endswith('"'):
+            narrative = narrative[1:-1]
+        if narrative.startswith("'") and narrative.endswith("'"):
+            narrative = narrative[1:-1]
+            
+        logger.info(f"[generate_finishing_move_narrative] Generated finishing move: {narrative}")
+        return narrative
+        
+    except Exception as e:
+        logger.error(f"[generate_finishing_move_narrative] Error: {str(e)}")
+        return f"{winner_name} delivers a devastating finishing blow to {loser_name}, ending the combat in victory!"
+
+
 async def analyze_combat_and_create_narrative(
     player1_name: str, player1_move: str, _player1_condition: str,
     player2_name: str, player2_move: str, _player2_condition: str,
@@ -99,13 +153,11 @@ async def analyze_combat_and_create_narrative(
         special_effects_text = "\n".join([f"- {effect}" for effect in special_effects])
 
     prompt = f"""
-You are the AI Gamemaster for a combat turn. Analyze how the combat progresses based on the moves of each combatant.
+You are the predicting the most likely outcome that results from two moves in a combat turn.
+Analyze how the combat progresses based on the moves of each combatant.
 IMPORTANT:
 - make sure to validate the moves of each combatant based on the equipment they have and the special effects they have.
-- make sure players feel the impact of their moves and feel like the outcome is logical
 - keep combat fast paced and not last a long time.
-- The primary outcome should be change in health, control is a secondary outcome
-- It is okay to have both players end with a positive outcome, it doesn't have to be one or the other.
 - Keep responses concise and to the point, 2 sentences max.
 
 LOCATION: {room_name} - {room_description}
@@ -127,16 +179,15 @@ CURRENT ROUND ACTIONS:
 
 CURRENT COMBAT STATE:
 - {player1_name} Current Health: {duel_info.get('player1_health', player1_max_vital)}/{player1_max_vital}
-- {player1_name} Current Control: {duel_info.get('player1_control', 0)}/5
+- {player1_name} Current Control: {duel_info.get('player1_control', 0)}/3
 - {player2_name} Current Health: {duel_info.get('player2_health', player2_max_vital)}/{player2_max_vital}
-- {player2_name} Current Control: {duel_info.get('player2_control', 0)}/5
-- Finishing Window Owner: {duel_info.get('finishing_window_owner', 'None')}
+- {player2_name} Current Control: {duel_info.get('player2_control', 0)}/3
 
 RECENT STATS CONTEXT (for reference):
 {json.dumps(recent_summary)}
 
 COMBAT SYSTEM RULES:
-You are the gamemaster of this combat encounter. You have COMPLETE CONTROL over all combat outcomes, balancing, and special mechanics.
+You are determining the logical outcome of the two moves that are inputted.
 
 1. EQUIPMENT VALIDATION & SPECIAL EFFECTS:
    - Check the equipment of the players to determine whether or not they are physically able to do the move they inputted.
@@ -156,29 +207,20 @@ You are the gamemaster of this combat encounter. You have COMPLETE CONTROL over 
    - Only describe what each player actually attempted - don't invent actions
    - Defensive moves (dodge, block, parry) only work if explicitly chosen
 
-3. DAMAGE & CONTROL MECHANICS (YOU CONTROL ALL BALANCING):
+3. BALANCING PHILOSOPHY:
+   - Determin the outcome strictly based on the moves that are inputted.
+   - Take into account previous rounds and status of the combatants. Take into account both the health and control of combatants.
+   - DO NOT MAKE UP ANYTHING. ONLY BASED ON THE MOVES THAT ARE INPUTTED.
+   - DO NOT think of this as a game. Think of it as a prediction of the most logical outcome of the two moves.
+   - If a combatant is going to die as a result of the moves (their health is less than the damage delta) then descrie the move as fatal to the loser.
+
+3. DAMAGE & CONTROL MECHANICS:
    - Health represents hit points - when it reaches 0, you're defeated
-   - Control represents combat advantage - at 5 Control, you enter "finishing window"
+   - Control represents combat advantage (0-3 range)
    - Damage Dealt: 0 to 3 (0 = no damage; 1 = light; 2 = moderate; 3 = heavy damage)
    - Control Delta: -2 to 2 (momentum shifts; positive = gaining advantage)
-   - YOU decide all values based on what makes sense based on the interaction, edge on the side of doing more damage.
-   - Be aggressive, players should feel the impact of the moves and combat should feel relatively fast paced and not last a long time.
-   - Make sure there is proper reasoning for the damage and control changes, players should understand why they are what they are.
-   - IMPORTANT: Always assign meaningful damage and control values. Don't leave them at 0 unless the move truly has no impact.
-
-4. SPECIAL MECHANICS (YOU CONTROL THESE):
-   - Finishing Window: When someone reaches 5 Control, they can attempt finishing moves
-   - If someone in finishing window deals ANY damage, it's an instant kill (set target health to 0)
-   - Monster Max Health: {player2_max_vital} (varies by monster size)
-   - Combat ends when someone's health reaches 0
-   - Provide a cool and badass finishing move for the player who wins the duel.
-
-5. BALANCING PHILOSOPHY:
-   - Make outcomes feel fair and reasonable, players should feel the impact of their moves
-   - Do not make the players feel like they were cheated out of their move.
-   - Consider move interactions, timing, and combat flow
-   - Players should feel their choices matter
-   - Combat should be relatively swift, don't let it drag on.
+   - Determine these values based on the prediction of the outcome made.
+   - Do not make up any balancing. Deltas are strictly based on the result of the two moves.
 
 OUTPUT FORMAT:
 Return JSON with:
@@ -195,74 +237,105 @@ Return JSON with:
     "player1_control_delta": 0,
     "player2_control_delta": 0,
     "player1_intends_heal": false,
-    "player2_intends_heal": false,
-    "finishing_window_owner": null,
-    "instant_kill_occurred": false,
-    "combat_ends": false
+    "player2_intends_heal": false
 }}
-
-SPECIAL MECHANICS TO HANDLE:
-- Set "finishing_window_owner" to "player1" or "player2" if they reach 5 Control (or null if neither)
-- Set "instant_kill_occurred" to true if someone in finishing window deals damage
-- Set "combat_ends" to true if someone's health reaches 0
-- Handle all balancing decisions yourself - no external game engine will modify your results
 
 Make it dramatic, make it make sense, and make it fun!
 """
 
-    try:
-        response = await game_manager.ai_handler.generate_text(prompt)
-        result = json.loads(response)
-        
-        # Debug logging for AI response
-        logger.info(f"[analyze_combat_and_create_narrative] AI raw response: {response}")
-        
-        # Ensure we have all required fields with proper defaults
-        combat_result = {
-            'narrative': result.get('narrative', f"Round {current_round}: {player1_name} and {player2_name} engaged in combat."),
-            'player1_result': result.get('player1_result', {
-                'reason': f'{player1_name} continues fighting'
-            }),
-            'player2_result': result.get('player2_result', {
-                'reason': f'{player2_name} continues fighting'
-            }),
-            'player1_damage_dealt': int(result.get('player1_damage_dealt', 0) or 0),
-            'player2_damage_dealt': int(result.get('player2_damage_dealt', 0) or 0),
-            'player1_control_delta': int(result.get('player1_control_delta', 0) or 0),
-            'player2_control_delta': int(result.get('player2_control_delta', 0) or 0),
-            'player1_intends_heal': bool(result.get('player1_intends_heal', False)),
-            'player2_intends_heal': bool(result.get('player2_intends_heal', False)),
-            'finishing_window_owner': result.get('finishing_window_owner'),
-            'instant_kill_occurred': bool(result.get('instant_kill_occurred', False)),
-            'combat_ends': bool(result.get('combat_ends', False)),
-        }
-        
-        # Clean up narrative formatting
-        narrative = combat_result['narrative'].strip()
-        if narrative.startswith('"') and narrative.endswith('"'):
-            narrative = narrative[1:-1]
-        combat_result['narrative'] = narrative
-        
-        logger.info(f"[analyze_combat_and_create_narrative] Generated narrative: {narrative}")
-        return combat_result
-        
-    except Exception as e:
-        logger.error(f"[analyze_combat_and_create_narrative] Error with AI analysis: {str(e)}")
-        raise
+    # Retry mechanism for JSON parsing
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            response = await game_manager.ai_handler.generate_text(prompt)
+            
+            # Debug logging for AI response
+            logger.info(f"[analyze_combat_and_create_narrative] AI raw response (attempt {attempt + 1}): {response}")
+            
+            # Try to parse JSON
+            result = json.loads(response)
+            
+            # Ensure we have all required fields with proper defaults
+            combat_result = {
+                'narrative': result.get('narrative', f"Round {current_round}: {player1_name} and {player2_name} engaged in combat."),
+                'player1_result': result.get('player1_result', {
+                    'reason': f'{player1_name} continues fighting'
+                }),
+                'player2_result': result.get('player2_result', {
+                    'reason': f'{player2_name} continues fighting'
+                }),
+                'player1_damage_dealt': int(result.get('player1_damage_dealt', 0) or 0),
+                'player2_damage_dealt': int(result.get('player2_damage_dealt', 0) or 0),
+                'player1_control_delta': int(result.get('player1_control_delta', 0) or 0),
+                'player2_control_delta': int(result.get('player2_control_delta', 0) or 0),
+                 'player1_intends_heal': bool(result.get('player1_intends_heal', False)),
+                 'player2_intends_heal': bool(result.get('player2_intends_heal', False)),
+            }
+            
+            # Clean up narrative formatting
+            narrative = combat_result['narrative'].strip()
+            if narrative.startswith('"') and narrative.endswith('"'):
+                narrative = narrative[1:-1]
+            combat_result['narrative'] = narrative
+            
+            logger.info(f"[analyze_combat_and_create_narrative] Generated narrative: {narrative}")
+            return combat_result
+            
+        except json.JSONDecodeError as e:
+            logger.warning(f"[analyze_combat_and_create_narrative] JSON parsing failed on attempt {attempt + 1}: {str(e)}")
+            if attempt == max_retries - 1:
+                # Final attempt failed, return fallback response
+                logger.error(f"[analyze_combat_and_create_narrative] All {max_retries} attempts failed, using fallback response")
+                return {
+                    'narrative': f"Round {current_round}: {player1_name} and {player2_name} engaged in combat, but the AI had trouble analyzing the outcome. Please try your move again.",
+                    'player1_result': {'reason': f'{player1_name} continues fighting'},
+                    'player2_result': {'reason': f'{player2_name} continues fighting'},
+                    'player1_damage_dealt': 0,
+                    'player2_damage_dealt': 0,
+                    'player1_control_delta': 0,
+                    'player2_control_delta': 0,
+                     'player1_intends_heal': False,
+                     'player2_intends_heal': False,
+                }
+            else:
+                # Wait a bit before retrying
+                await asyncio.sleep(0.5)
+                continue
+                
+        except Exception as e:
+            logger.error(f"[analyze_combat_and_create_narrative] Unexpected error on attempt {attempt + 1}: {str(e)}")
+            if attempt == max_retries - 1:
+                # Final attempt failed, return fallback response
+                logger.error(f"[analyze_combat_and_create_narrative] All {max_retries} attempts failed due to unexpected error, using fallback response")
+                return {
+                    'narrative': f"Round {current_round}: {player1_name} and {player2_name} engaged in combat, but the AI had trouble analyzing the outcome. Please try your move again.",
+                    'player1_result': {'reason': f'{player1_name} continues fighting'},
+                    'player2_result': {'reason': f'{player2_name} continues fighting'},
+                    'player1_damage_dealt': 0,
+                    'player2_damage_dealt': 0,
+                    'player1_control_delta': 0,
+                    'player2_control_delta': 0,
+                     'player1_intends_heal': False,
+                     'player2_intends_heal': False,
+                }
+            else:
+                # Wait a bit before retrying
+                await asyncio.sleep(0.5)
+                continue
 
 
 async def get_monster_max_vital(monster_data: dict) -> int:
     size = (monster_data or {}).get('size', 'human')
     size_multipliers = {
-        'insect': 0.25,
-        'chicken': 0.5,
+        'insect': 0.4,
+        'chicken': 0.6,
         'human': 1.0,
-        'horse': 1.5,
-        'dinosaur': 2.0,
-        'colossal': 3.0,
+        'horse': 1.4,
+        'dinosaur': 1.8,
+        'colossal': 2.4,
     }
     mult = size_multipliers.get(size, 1.0)
-    return max(1, int(round(6 * mult)))
+    return max(1, int(round(5 * mult)))
 
 
 # The remaining high-level handlers are kept in main.py to avoid websocket routing changes.
@@ -299,7 +372,6 @@ async def generate_and_submit_monster_move(duel_id: str, monster_id: str, player
             monster_intelligence = monster_data.get('intelligence', 'animal')
             monster_description = monster_data.get('description', '')
             monster_special_effects = monster_data.get('special_effects', '')
-            monster_health = monster_data.get('health', 100)
             player_name = player_data.get('name', 'Unknown Player')
             room_title = room_data.get('title', 'Unknown Room')
             room_biome = room_data.get('biome', 'unknown')
@@ -316,7 +388,6 @@ async def generate_and_submit_monster_move(duel_id: str, monster_id: str, player
  - Intelligence: {monster_intelligence}
  - Description: {monster_description}
  - Special Effects: {monster_special_effects}
- - Current Health: {monster_health}
  
  COMBAT CONTEXT:
  - Round: {round_number}
@@ -424,11 +495,6 @@ async def prepare_next_monster_duel_round(duel_id: str, game_manager: GameManage
     except Exception as e:
         logger.error(f"Error preparing next monster duel round: {str(e)}")
 
-
-
-
-
-
 async def send_duel_results(
     duel_id: str, room_id: str, player1_id: str, player2_id: str, current_round: int,
     player1_move: str, player2_move: str,
@@ -437,7 +503,7 @@ async def send_duel_results(
     _player1_total_severity: int, _player2_total_severity: int,
     narrative: str, combat_ends: bool, game_manager: GameManager,
     player1_health: int, player2_health: int, player1_control: int, player2_control: int,
-    player1_max_health: int = 6, player2_max_health: int = 6
+    player1_max_health: int = 5, player2_max_health: int = 5
 ):
     from .main import manager, logger
     player1_data = await game_manager.db.get_player(player1_id)
@@ -662,9 +728,6 @@ async def analyze_duel_moves(duel_id: str, game_manager: GameManager):
         player2_id = duel_info['player2_id']
         room_id = duel_info['room_id']
         current_round = duel_info['round']
-        prev_p1_control = duel_info.get('player1_control', 0)
-        prev_p2_control = duel_info.get('player2_control', 0)
-        prev_finishing_owner = duel_info.get('finishing_window_owner')
         moves = duel_moves.get(duel_id, {})
         player1_move = moves.get(player1_id, 'do nothing')
         player2_move = moves.get(player2_id, 'do nothing')
@@ -688,10 +751,81 @@ async def analyze_duel_moves(duel_id: str, game_manager: GameManager):
         player2_condition_prev = 'healthy'
         player1_invalid = None  # Equipment validation handled by AI
         player2_invalid = None  # Equipment validation handled by AI
-        player1_max_vital = 6
-        player2_max_vital = 6
+        player1_max_vital = 5
+        player2_max_vital = 5
         if is_monster_duel:
             player2_max_vital = await get_monster_max_vital(monster_data)
+        
+        # Check if one combatant has full control (3) - if so, generate finishing move
+        p1_current_control = duel_info.get('player1_control', 0)
+        p2_current_control = duel_info.get('player2_control', 0)
+        
+        if (p1_current_control >= 3 and p2_current_control < 3) or (p2_current_control >= 3 and p1_current_control < 3):
+            # One combatant has full control - generate finishing move
+            if p1_current_control >= 3:
+                winner_name, winner_move, winner_inventory = player1_name, player1_move, player1_inventory
+                loser_name, loser_move, loser_inventory = player2_name, player2_move, player2_inventory
+            else:
+                winner_name, winner_move, winner_inventory = player2_name, player2_move, player2_inventory
+                loser_name, loser_move, loser_inventory = player1_name, player1_move, player1_inventory
+            
+            logger.info(f"[analyze_duel_moves] {winner_name} has full control, generating finishing move...")
+            narrative = await generate_finishing_move_narrative(
+                winner_name, winner_move, winner_inventory,
+                loser_name, loser_move, loser_inventory,
+                room_name, room_description, game_manager
+            )
+            
+            # Set up combat result for finishing move
+            if p1_current_control >= 3:
+                p1_health = duel_info.get('player1_health', player1_max_vital)
+                p2_health = 0  # Loser defeated
+                p1_control = p1_current_control
+                p2_control = p2_current_control
+                combat_ends = True
+            else:
+                p1_health = 0  # Loser defeated
+                p2_health = duel_info.get('player2_health', player2_max_vital)
+                p1_control = p1_current_control
+                p2_control = p2_current_control
+                combat_ends = True
+            
+            # Update duel info
+            duel_info['player1_health'] = p1_health
+            duel_info['player2_health'] = p2_health
+            duel_info['player1_control'] = p1_control
+            duel_info['player2_control'] = p2_control
+            
+            # Record the finishing move in history
+            duel_history.append({
+                'round': current_round,
+                'player1_move': player1_move,
+                'player2_move': player2_move,
+                'narrative': narrative,
+                'player1_result': {'reason': f'{player1_name} delivers a finishing blow!' if p1_current_control >= 3 else f'{player1_name} is defeated!'},
+                'player2_result': {'reason': f'{player2_name} delivers a finishing blow!' if p2_current_control >= 3 else f'{player2_name} is defeated!'},
+                'player1_damage_dealt': 0,
+                'player2_damage_dealt': 0,
+                'player1_control_delta': 0,
+                'player2_control_delta': 0,
+                'player1_health': p1_health,
+                'player2_health': p2_health,
+                'player1_control': p1_control,
+                'player2_control': p2_control
+            })
+            
+            # Send results and end combat
+            await send_duel_results(
+                duel_id, room_id, player1_id, player2_id, current_round,
+                player1_move, player2_move,
+                '', '',
+                [], [],
+                0, 0,
+                narrative, combat_ends, game_manager,
+                p1_health, p2_health, p1_control, p2_control,
+                player1_max_vital, player2_max_vital
+            )
+            return
         
         # Collect special effects from both players' inventories
         logger.info(f"[analyze_duel_moves] Collecting special effects for combat...")
@@ -716,12 +850,13 @@ async def analyze_duel_moves(duel_id: str, game_manager: GameManager):
         # Debug logging for damage and control
         logger.info(f"[analyze_duel_moves] AI returned - P1 dealt {p1_damage_dealt} damage, P2 dealt {p2_damage_dealt} damage, P1 control: {p1_control_delta}, P2 control: {p2_control_delta}")
         
+        
         # Apply damage and control changes
         # Health starts at max, decreases with damage. Control starts at 0, increases with advantage.
         p1_health = max(0, duel_info.get('player1_health', player1_max_vital) - p2_damage_dealt)  # P1 takes damage from P2
         p2_health = max(0, duel_info.get('player2_health', player2_max_vital) - p1_damage_dealt)  # P2 takes damage from P1
-        p1_control = max(0, min(5, duel_info.get('player1_control', 0) + p1_control_delta))
-        p2_control = max(0, min(5, duel_info.get('player2_control', 0) + p2_control_delta))
+        p1_control = max(0, min(3, duel_info.get('player1_control', 0) + p1_control_delta))
+        p2_control = max(0, min(3, duel_info.get('player2_control', 0) + p2_control_delta))
         
         # Update persistent state
         duel_info['player1_health'] = p1_health
@@ -729,46 +864,30 @@ async def analyze_duel_moves(duel_id: str, game_manager: GameManager):
         duel_info['player1_control'] = p1_control
         duel_info['player2_control'] = p2_control
         
-        # Apply AI-determined special mechanics
-        if combat_outcome.get('finishing_window_owner'):
-            duel_info['finishing_window_owner'] = combat_outcome['finishing_window_owner']
-        elif combat_outcome.get('finishing_window_owner') is None:
-            duel_info['finishing_window_owner'] = None
-            
-        # Handle instant kills if AI determined one occurred
-        if combat_outcome.get('instant_kill_occurred'):
-            if combat_outcome.get('finishing_window_owner') == 'player1':
-                p2_health = 0  # Set to 0 health (instant kill)
-                duel_info['player2_health'] = p2_health
-            elif combat_outcome.get('finishing_window_owner') == 'player2':
-                p1_health = 0  # Set to 0 health (instant kill)
-                duel_info['player1_health'] = p1_health
-            duel_info['finishing_window_owner'] = None
-        
-        # Use AI's combat end determination, but override if health reaches 0 or control reaches 5
-        combat_ends = combat_outcome.get('combat_ends', False)
+        # Determine combat end based on health and control (code-driven only)
+        combat_ends = False
         if p1_health <= 0 or p2_health <= 0:
             combat_ends = True
             logger.info(f"[analyze_duel_moves] Combat ends due to health: P1={p1_health}, P2={p2_health}")
-        elif p1_control >= 5 or p2_control >= 5:
-            # When control reaches 5, the combatant with 5 control should automatically win
-            if p1_control >= 5 and p2_control < 5:
+        elif p1_control >= 3 or p2_control >= 3:
+            # When control reaches 3, the combatant with 3 control should automatically win
+            if p1_control >= 3 and p2_control < 3:
                 # Player 1 has finishing window - they win
                 p2_health = 0
                 duel_info['player2_health'] = p2_health
                 combat_ends = True
                 logger.info(f"[analyze_duel_moves] Combat ends due to P1 finishing window: P1 control={p1_control}, P2 health set to 0")
-            elif p2_control >= 5 and p1_control < 5:
+            elif p2_control >= 3 and p1_control < 3:
                 # Player 2 has finishing window - they win
                 p1_health = 0
                 duel_info['player1_health'] = p1_health
                 combat_ends = True
                 logger.info(f"[analyze_duel_moves] Combat ends due to P2 finishing window: P2 control={p2_control}, P1 health set to 0")
             else:
-                # Both have 5 control - let AI determine the outcome
-                logger.info(f"[analyze_duel_moves] Both players have 5 control, letting AI determine outcome")
+                # Both have 3 control - continue combat, let the next round determine outcome
+                logger.info(f"[analyze_duel_moves] Both players have 3 control, combat continues")
         else:
-            logger.info(f"[analyze_duel_moves] Combat continues: P1={p1_health}, P2={p2_health}, P1 control={p1_control}, P2 control={p2_control} (AI determined: {combat_ends})")
+            logger.info(f"[analyze_duel_moves] Combat continues: P1={p1_health}, P2={p2_health}, P1 control={p1_control}, P2 control={p2_control}")
         try:
             duel_history.append({
                 'round': current_round,

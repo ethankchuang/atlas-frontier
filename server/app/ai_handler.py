@@ -66,8 +66,32 @@ class AIHandler:
             content = response.choices[0].message.content
             logger.debug(f"[Room Description] Received response from OpenAI: {content}")
 
-            result = json.loads(content)
-            return result["title"], result["description"], result["image_prompt"]
+            # Retry mechanism for JSON parsing
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    result = json.loads(content)
+                    return result["title"], result["description"], result["image_prompt"]
+                except json.JSONDecodeError as e:
+                    logger.warning(f"[Room Description] JSON parsing failed on attempt {attempt + 1}: {str(e)}")
+                    if attempt == max_retries - 1:
+                        # Final attempt failed, raise the error
+                        logger.error(f"[Room Description] All {max_retries} attempts failed, raising error")
+                        raise
+                    else:
+                        # Wait a bit before retrying
+                        await asyncio.sleep(0.5)
+                        continue
+                except Exception as e:
+                    logger.error(f"[Room Description] Unexpected error on attempt {attempt + 1}: {str(e)}")
+                    if attempt == max_retries - 1:
+                        # Final attempt failed, raise the error
+                        logger.error(f"[Room Description] All {max_retries} attempts failed due to unexpected error, raising error")
+                        raise
+                    else:
+                        # Wait a bit before retrying
+                        await asyncio.sleep(0.5)
+                        continue
         except Exception as e:
             logger.error(f"[Room Description] Error generating room description: {str(e)}")
             raise
@@ -756,53 +780,105 @@ class AIHandler:
         # Log the raw content for debugging
         logger.debug(f"[generate_world_seed] Raw response: {repr(response_content)}")
         
-        # First, try to parse the JSON as-is
-        try:
-            result = json.loads(response_content)
-            logger.debug("[generate_world_seed] Successfully parsed JSON on first attempt")
-        except json.JSONDecodeError as e:
-            logger.debug(f"[generate_world_seed] First JSON parse failed: {str(e)}")
-            
-            # Clean the content and try again
-            # Remove control characters except for newlines, tabs, and carriage returns
-            cleaned_content = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]', '', response_content)
-            
-            # Fix escaped newlines that might be causing issues
-            # Replace \\n with \n in the cleaned content
-            cleaned_content = cleaned_content.replace('\\n', '\n')
-            
-            # Then properly escape newlines within string values
-            cleaned_content = re.sub(r'(".*?)\n(.*?")', r'\1\\n\2', cleaned_content, flags=re.DOTALL)
-            
-            logger.debug(f"[generate_world_seed] Cleaned response: {repr(cleaned_content)}")
-            
+        # Retry mechanism for JSON parsing
+        max_retries = 3
+        result = None
+        
+        for attempt in range(max_retries):
             try:
-                result = json.loads(cleaned_content)
-                logger.debug("[generate_world_seed] Successfully parsed JSON after cleaning")
-            except json.JSONDecodeError as e:
-                logger.error(f"[generate_world_seed] JSON parsing failed after cleaning: {str(e)}")
-                logger.error(f"[generate_world_seed] Problematic content: {repr(cleaned_content)}")
+                # First, try to parse the JSON as-is
+                result = json.loads(response_content)
+                logger.debug(f"[generate_world_seed] Successfully parsed JSON on attempt {attempt + 1}")
+                break  # Success, exit retry loop
                 
-                # Try to extract JSON from the response if it's embedded in other text
-                json_match = re.search(r'\{.*\}', cleaned_content, re.DOTALL)
-                if json_match:
-                    try:
-                        result = json.loads(json_match.group())
-                        logger.info("[generate_world_seed] Successfully extracted JSON from response")
-                    except json.JSONDecodeError:
-                        logger.error("[generate_world_seed] Failed to parse extracted JSON, using fallback")
-                        # Fallback to a default world state
-                        result = {
-                            "world_seed": f"Fallback World {hash(str(time.time())) % 10000}",
-                            "main_quest_summary": "Explore this mysterious realm and uncover its secrets.",
-                            "starting_state": {
-                                "quest_stage": "beginning",
-                                "world_time": "dawn", 
-                                "weather": "clear"
-                            }
+            except json.JSONDecodeError as e:
+                logger.warning(f"[generate_world_seed] JSON parsing failed on attempt {attempt + 1}: {str(e)}")
+                
+                if attempt == max_retries - 1:
+                    # Final attempt failed, use fallback
+                    logger.error(f"[generate_world_seed] All {max_retries} attempts failed, using fallback")
+                    result = {
+                        "world_seed": f"Fallback World {hash(str(time.time())) % 10000}",
+                        "main_quest_summary": "Explore this mysterious realm and uncover its secrets.",
+                        "starting_state": {
+                            "quest_stage": "beginning",
+                            "world_time": "dawn", 
+                            "weather": "clear"
                         }
+                    }
+                    break
                 else:
-                    logger.error("[generate_world_seed] No JSON found in response, using fallback")
+                    # Clean the content and try again
+                    # Remove control characters except for newlines, tabs, and carriage returns
+                    cleaned_content = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]', '', response_content)
+                    
+                    # Fix escaped newlines that might be causing issues
+                    # Replace \\n with \n in the cleaned content
+                    cleaned_content = cleaned_content.replace('\\n', '\n')
+                    
+                    # Then properly escape newlines within string values
+                    cleaned_content = re.sub(r'(".*?)\n(.*?")', r'\1\\n\2', cleaned_content, flags=re.DOTALL)
+                    
+                    logger.debug(f"[generate_world_seed] Cleaned response (attempt {attempt + 1}): {repr(cleaned_content)}")
+                    
+                    try:
+                        result = json.loads(cleaned_content)
+                        logger.debug(f"[generate_world_seed] Successfully parsed JSON after cleaning on attempt {attempt + 1}")
+                        break  # Success, exit retry loop
+                    except json.JSONDecodeError as e2:
+                        logger.warning(f"[generate_world_seed] JSON parsing failed after cleaning on attempt {attempt + 1}: {str(e2)}")
+                        
+                        # Try to extract JSON from the response if it's embedded in other text
+                        json_match = re.search(r'\{.*\}', cleaned_content, re.DOTALL)
+                        if json_match:
+                            try:
+                                result = json.loads(json_match.group())
+                                logger.info(f"[generate_world_seed] Successfully extracted JSON from response on attempt {attempt + 1}")
+                                break  # Success, exit retry loop
+                            except json.JSONDecodeError:
+                                logger.warning(f"[generate_world_seed] Failed to parse extracted JSON on attempt {attempt + 1}")
+                                if attempt == max_retries - 1:
+                                    # Final attempt failed, use fallback
+                                    logger.error(f"[generate_world_seed] All {max_retries} attempts failed, using fallback")
+                                    result = {
+                                        "world_seed": f"Fallback World {hash(str(time.time())) % 10000}",
+                                        "main_quest_summary": "Explore this mysterious realm and uncover its secrets.",
+                                        "starting_state": {
+                                            "quest_stage": "beginning",
+                                            "world_time": "dawn", 
+                                            "weather": "clear"
+                                        }
+                                    }
+                                    break
+                                else:
+                                    # Wait a bit before retrying
+                                    await asyncio.sleep(0.5)
+                                    continue
+                        else:
+                            logger.warning(f"[generate_world_seed] No JSON found in response on attempt {attempt + 1}")
+                            if attempt == max_retries - 1:
+                                # Final attempt failed, use fallback
+                                logger.error(f"[generate_world_seed] All {max_retries} attempts failed, using fallback")
+                                result = {
+                                    "world_seed": f"Fallback World {hash(str(time.time())) % 10000}",
+                                    "main_quest_summary": "Explore this mysterious realm and uncover its secrets.",
+                                    "starting_state": {
+                                        "quest_stage": "beginning",
+                                        "world_time": "dawn",
+                                        "weather": "clear"
+                                    }
+                                }
+                                break
+                            else:
+                                # Wait a bit before retrying
+                                await asyncio.sleep(0.5)
+                                continue
+                                
+            except Exception as e:
+                logger.error(f"[generate_world_seed] Unexpected error on attempt {attempt + 1}: {str(e)}")
+                if attempt == max_retries - 1:
+                    # Final attempt failed, use fallback
+                    logger.error(f"[generate_world_seed] All {max_retries} attempts failed due to unexpected error, using fallback")
                     result = {
                         "world_seed": f"Fallback World {hash(str(time.time())) % 10000}",
                         "main_quest_summary": "Explore this mysterious realm and uncover its secrets.",
@@ -812,6 +888,11 @@ class AIHandler:
                             "weather": "clear"
                         }
                     }
+                    break
+                else:
+                    # Wait a bit before retrying
+                    await asyncio.sleep(0.5)
+                    continue
 
         # Convert all values in starting_state to strings
         starting_state = {
@@ -899,8 +980,33 @@ Return a JSON object with these exact fields:
             )
             content = response.choices[0].message.content
             logger.debug(f"[Biome Generation] Received biome chunk response: {content}")
-            result = json.loads(content)
-            return {"name": result["name"], "description": result["description"], "color": result["color"]}
+            
+            # Retry mechanism for JSON parsing
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    result = json.loads(content)
+                    return {"name": result["name"], "description": result["description"], "color": result["color"]}
+                except json.JSONDecodeError as e:
+                    logger.warning(f"[Biome Generation] JSON parsing failed on attempt {attempt + 1}: {str(e)}")
+                    if attempt == max_retries - 1:
+                        # Final attempt failed, raise the error
+                        logger.error(f"[Biome Generation] All {max_retries} attempts failed, raising error")
+                        raise
+                    else:
+                        # Wait a bit before retrying
+                        await asyncio.sleep(0.5)
+                        continue
+                except Exception as e:
+                    logger.error(f"[Biome Generation] Unexpected error on attempt {attempt + 1}: {str(e)}")
+                    if attempt == max_retries - 1:
+                        # Final attempt failed, raise the error
+                        logger.error(f"[Biome Generation] All {max_retries} attempts failed due to unexpected error, raising error")
+                        raise
+                    else:
+                        # Wait a bit before retrying
+                        await asyncio.sleep(0.5)
+                        continue
         except Exception as e:
             logger.error(f"[Biome Generation] Error generating biome chunk: {str(e)}")
             # Generate a simple fallback biome without hardcoded names

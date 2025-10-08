@@ -19,7 +19,7 @@ class BaseTemplate(ABC):
         pass
     
     @abstractmethod
-    def parse_response(self, response: str) -> Dict[str, Any]:
+    async def parse_response(self, response: str) -> Dict[str, Any]:
         """Parse the AI response into structured data"""
         pass
     

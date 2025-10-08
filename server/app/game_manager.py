@@ -245,7 +245,7 @@ class GameManager:
                 prompt = monster_template.generate_prompt(fresh_context)
                 ai_response = await self.ai_handler.generate_text(prompt)
                 
-                generated_data = monster_template.parse_response(ai_response)
+                generated_data = await monster_template.parse_response(ai_response)
                 
                 # Create complete monster data
                 monster_id = f"monster_{uuid.uuid4()}"

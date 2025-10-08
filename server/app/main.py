@@ -369,37 +369,61 @@ async def detect_monster_attack(action_text: str, player_id: str, room_data: Dic
             return None
         
         # Ask AI to classify whether the action intends to attack a monster, and which one
-        try:
-            monsters_context = [
-                {"id": mid, "name": mdata.get("name", "Unknown Monster")}
-                for (mid, mdata) in monsters_in_room
-            ]
-            prompt = (
-                "You are an impartial combat intent classifier for a medieval fantasy MUD.\n"
-                f"Player action: {json.dumps(action_text)}\n"
-                f"Monsters present: {json.dumps(monsters_context)}\n"
-                "Task: Determine if the player intends to ATTACK any of the listed monsters right now.\n"
-                "Return ONLY strict JSON with keys: is_attack (boolean) and target_monster_id (string|null). "
-                "If an attack is intended but target is ambiguous, pick the most obvious; otherwise null.\n"
-                "Base your judgment on overall intent and semantics, not fixed keywords."
-            )
-            response = await game_manager.ai_handler.generate_text(prompt)
-            result = json.loads(response)
-            is_attack = bool(result.get('is_attack', False))
-            target_monster_id = result.get('target_monster_id')
-            if is_attack:
-                valid_ids = {mid for (mid, _) in monsters_in_room}
-                if target_monster_id in valid_ids:
-                    logger.info(f"[detect_monster_attack] AI classified action as attack on monster {target_monster_id}")
-                    return target_monster_id
-                # Fallback if unspecified/ambiguous: choose first alive monster
-                first_id = monsters_in_room[0][0]
-                logger.info(f"[detect_monster_attack] AI classified attack with ambiguous target; defaulting to {first_id}")
-                return first_id
-            return None
-        except Exception as e:
-            logger.error(f"[detect_monster_attack] AI classification failed: {str(e)}")
-            return None
+        # Retry mechanism for JSON parsing
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                monsters_context = [
+                    {"id": mid, "name": mdata.get("name", "Unknown Monster")}
+                    for (mid, mdata) in monsters_in_room
+                ]
+                prompt = (
+                    "You are an impartial combat intent classifier for a medieval fantasy MUD.\n"
+                    f"Player action: {json.dumps(action_text)}\n"
+                    f"Monsters present: {json.dumps(monsters_context)}\n"
+                    "Task: Determine if the player intends to ATTACK any of the listed monsters right now.\n"
+                    "Return ONLY strict JSON with keys: is_attack (boolean) and target_monster_id (string|null). "
+                    "If an attack is intended but target is ambiguous, pick the most obvious; otherwise null.\n"
+                    "Base your judgment on overall intent and semantics, not fixed keywords."
+                )
+                response = await game_manager.ai_handler.generate_text(prompt)
+                logger.info(f"[detect_monster_attack] AI raw response (attempt {attempt + 1}): {response}")
+                
+                result = json.loads(response)
+                is_attack = bool(result.get('is_attack', False))
+                target_monster_id = result.get('target_monster_id')
+                if is_attack:
+                    valid_ids = {mid for (mid, _) in monsters_in_room}
+                    if target_monster_id in valid_ids:
+                        logger.info(f"[detect_monster_attack] AI classified action as attack on monster {target_monster_id}")
+                        return target_monster_id
+                    # Fallback if unspecified/ambiguous: choose first alive monster
+                    first_id = monsters_in_room[0][0]
+                    logger.info(f"[detect_monster_attack] AI classified attack with ambiguous target; defaulting to {first_id}")
+                    return first_id
+                return None
+                
+            except json.JSONDecodeError as e:
+                logger.warning(f"[detect_monster_attack] JSON parsing failed on attempt {attempt + 1}: {str(e)}")
+                if attempt == max_retries - 1:
+                    # Final attempt failed, return None (no attack detected)
+                    logger.error(f"[detect_monster_attack] All {max_retries} attempts failed, assuming no attack intended")
+                    return None
+                else:
+                    # Wait a bit before retrying
+                    await asyncio.sleep(0.5)
+                    continue
+                    
+            except Exception as e:
+                logger.error(f"[detect_monster_attack] Unexpected error on attempt {attempt + 1}: {str(e)}")
+                if attempt == max_retries - 1:
+                    # Final attempt failed, return None (no attack detected)
+                    logger.error(f"[detect_monster_attack] All {max_retries} attempts failed due to unexpected error, assuming no attack intended")
+                    return None
+                else:
+                    # Wait a bit before retrying
+                    await asyncio.sleep(0.5)
+                    continue
         
     except Exception as e:
         logger.error(f"Error detecting monster attack: {str(e)}")
@@ -422,7 +446,7 @@ async def initiate_monster_duel(player_id: str, monster_id: str, player_action: 
             return
         
         # Compute max vitals upfront and include immediately
-        player1_max_vital = 6
+        player1_max_vital = 5
         player2_max_vital = await combat.get_monster_max_vital(monster_data)
 
         # Send duel challenge from player to monster
@@ -510,6 +534,34 @@ async def generate_combat_tags_from_narrative(*args, **kwargs):
 async def websocket_endpoint(websocket: WebSocket, room_id: str, player_id: str):
     logger.info(f"[WebSocket] New connection request from player {player_id} for room {room_id}")
     await manager.connect(websocket, room_id, player_id)
+    
+    # Ensure player is in the room's player list
+    try:
+        room_players = await game_manager.db.get_room_players(room_id)
+        if player_id not in room_players:
+            await game_manager.db.add_to_room_players(room_id, player_id)
+            logger.info(f"[WebSocket] Added player {player_id} to room {room_id} player list")
+            
+            # Get player data and broadcast presence update
+            try:
+                player_data = await game_manager.db.get_player(player_id)
+                if player_data:
+                    await manager.broadcast_to_room(
+                        room_id=room_id,
+                        message={
+                            "type": "presence", 
+                            "player_id": player_id, 
+                            "status": "joined",
+                            "player_data": player_data
+                        },
+                        exclude_player=player_id
+                    )
+                    logger.info(f"[WebSocket] Broadcasted player join for {player_id}")
+            except Exception as e:
+                logger.error(f"[WebSocket] Error broadcasting player join: {str(e)}")
+    except Exception as e:
+        logger.error(f"[WebSocket] Error managing room player list: {str(e)}")
+    
     try:
         # Send current room state immediately after connection
         room_data = await game_manager.db.get_room(room_id)
@@ -542,7 +594,48 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, player_id: str)
         while True:
             data = await websocket.receive_text()
             logger.debug(f"[WebSocket] Received message from player {player_id}: {data[:100]}...")
-            message = json.loads(data)
+            
+            # Retry mechanism for JSON parsing
+            max_retries = 3
+            message = None
+            for attempt in range(max_retries):
+                try:
+                    message = json.loads(data)
+                    break  # Success, exit retry loop
+                except json.JSONDecodeError as e:
+                    logger.warning(f"[WebSocket] JSON parsing failed on attempt {attempt + 1}: {str(e)}")
+                    if attempt == max_retries - 1:
+                        # Final attempt failed, send error message to client
+                        logger.error(f"[WebSocket] All {max_retries} attempts failed, sending error to client")
+                        await websocket.send_json({
+                            "type": "error",
+                            "message": "Invalid message format. Please try again.",
+                            "timestamp": datetime.now().isoformat()
+                        })
+                        continue  # Continue to next message
+                    else:
+                        # Wait a bit before retrying
+                        await asyncio.sleep(0.1)
+                        continue
+                except Exception as e:
+                    logger.error(f"[WebSocket] Unexpected error parsing message on attempt {attempt + 1}: {str(e)}")
+                    if attempt == max_retries - 1:
+                        # Final attempt failed, send error message to client
+                        logger.error(f"[WebSocket] All {max_retries} attempts failed due to unexpected error, sending error to client")
+                        await websocket.send_json({
+                            "type": "error",
+                            "message": "Message processing error. Please try again.",
+                            "timestamp": datetime.now().isoformat()
+                        })
+                        continue  # Continue to next message
+                    else:
+                        # Wait a bit before retrying
+                        await asyncio.sleep(0.1)
+                        continue
+            
+            # Skip processing if message parsing failed
+            if message is None:
+                continue
 
             if message.get('type') == 'action':
                 logger.info(f"[WebSocket] Received action from player {player_id}: {message['action']}")
@@ -566,6 +659,13 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, player_id: str)
         
         # Handle duel forfeit on disconnect
         await handle_player_disconnect(player_id, room_id)
+        
+        # Remove player from room's player list in database
+        try:
+            await game_manager.db.remove_from_room_players(room_id, player_id)
+            logger.info(f"[WebSocket] Removed player {player_id} from room {room_id} player list")
+        except Exception as e:
+            logger.error(f"[WebSocket] Error removing player from room list: {str(e)}")
         
         manager.disconnect(room_id, player_id)
         await manager.broadcast_to_room(
@@ -1672,11 +1772,11 @@ async def process_action_stream(
                                         monster_data = None
                                     monster_name = (monster_data or {}).get('name', 'Unknown Monster')
                                     try:
-                                        player1_max_vital = 6
+                                        player1_max_vital = 5
                                         player2_max_vital = await get_monster_max_vital(monster_data or {})
                                     except Exception:
-                                        player1_max_vital = 6
-                                        player2_max_vital = 6
+                                        player1_max_vital = 5
+                                        player2_max_vital = 5
                                     yield json.dumps({
                                         "type": "final",
                                         "content": combat_message,
@@ -1711,11 +1811,11 @@ async def process_action_stream(
                                             monster_data = None
                                         monster_name = (monster_data or {}).get('name', 'Unknown Monster')
                                         try:
-                                            player1_max_vital = 6
+                                            player1_max_vital = 5
                                             player2_max_vital = await get_monster_max_vital(monster_data or {})
                                         except Exception:
-                                            player1_max_vital = 6
-                                            player2_max_vital = 6
+                                            player1_max_vital = 5
+                                            player2_max_vital = 5
                                         yield json.dumps({
                                             "type": "final",
                                             "content": combat_message,
@@ -2067,11 +2167,11 @@ async def process_action_stream(
                                                 monster_data = None
                                             monster_name = (monster_data or {}).get('name', 'Unknown Monster')
                                             try:
-                                                player1_max_vital = 6
+                                                player1_max_vital = 5
                                                 player2_max_vital = await get_monster_max_vital(monster_data or {})
                                             except Exception:
-                                                player1_max_vital = 6
-                                                player2_max_vital = 6
+                                                player1_max_vital = 5
+                                                player2_max_vital = 5
                                             yield json.dumps({
                                                 "type": "final",
                                                 "content": combat_message,
@@ -2143,11 +2243,11 @@ async def process_action_stream(
                                         monster_data = None
                                     monster_name = (monster_data or {}).get('name', 'Unknown Monster')
                                     try:
-                                        player1_max_vital = 6
+                                        player1_max_vital = 5
                                         player2_max_vital = await get_monster_max_vital(monster_data or {})
                                     except Exception:
-                                        player1_max_vital = 6
-                                        player2_max_vital = 6
+                                        player1_max_vital = 5
+                                        player2_max_vital = 5
                                     yield json.dumps({
                                         "type": "final",
                                         "content": combat_message,
