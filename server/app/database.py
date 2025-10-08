@@ -323,8 +323,14 @@ class Database:
         """Get list of players in a room"""
         try:
             players = redis_client.smembers(f"room:{room_id}:players")
-            # Convert any bytes to strings
-            return [p.decode('utf-8') if isinstance(p, bytes) else p for p in players]
+            # Convert any bytes to strings and filter out null/empty values
+            valid_players = []
+            for p in players:
+                player_id = p.decode('utf-8') if isinstance(p, bytes) else p
+                # Filter out None, empty strings, and 'null' string
+                if player_id and player_id != 'null' and player_id != 'None':
+                    valid_players.append(player_id)
+            return valid_players
         except Exception as e:
             logger.error(f"Error getting players for room {room_id}: {str(e)}")
             raise

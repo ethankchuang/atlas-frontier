@@ -16,6 +16,46 @@ class WebSocketService {
         this.nextRoomId = roomId;
     }
 
+    private getCloseCodeMessage(code: number): string {
+        // WebSocket close codes: https://developer.mozilla.org/en-US/docs/Web/API/CloseEvent
+        switch (code) {
+            case 1000:
+                return 'Connection closed normally';
+            case 1001:
+                return 'Server is going away or browser navigating away';
+            case 1002:
+                return 'Protocol error';
+            case 1003:
+                return 'Unsupported data received';
+            case 1006:
+                return 'Connection lost - check your internet connection';
+            case 1007:
+                return 'Invalid data format';
+            case 1008:
+                return 'Policy violation';
+            case 1009:
+                return 'Message too large';
+            case 1010:
+                return 'Server did not negotiate required extension';
+            case 1011:
+                return 'Server encountered an unexpected error';
+            case 1012:
+                return 'Service is restarting';
+            case 1013:
+                return 'Service is temporarily overloaded';
+            case 1014:
+                return 'Bad gateway';
+            case 1015:
+                return 'TLS handshake failed';
+            default:
+                return `Connection closed with code ${code}`;
+        }
+    }
+
+    private get url(): string {
+        return `${process.env.NEXT_PUBLIC_API_URL?.replace('http', 'ws')}/ws/${this.roomId}/${this.playerId}`;
+    }
+
     connect(roomId: string, playerId: string) {
         if (this.socket) {
             console.log('[WebSocket] Disconnecting existing connection');
@@ -106,17 +146,32 @@ class WebSocketService {
         };
 
         this.socket.onclose = (event) => {
-            console.log('[WebSocket] Connection closed:', {
+            const closeInfo = {
                 code: event.code,
                 reason: event.reason,
                 wasClean: event.wasClean
-            });
+            };
+            console.log('[WebSocket] Connection closed:', closeInfo);
+
+            // Provide more helpful error messages based on close code
+            if (!event.wasClean) {
+                const errorMessage = this.getCloseCodeMessage(event.code);
+                console.warn('[WebSocket] Abnormal close:', errorMessage);
+                useGameStore.getState().setError(errorMessage);
+            }
+
             useGameStore.getState().setIsConnected(false);
         };
 
         this.socket.onerror = (error) => {
-            console.error('[WebSocket] Connection error:', error);
-            useGameStore.getState().setError('WebSocket connection error');
+            // WebSocket errors don't contain much info - the close event has details
+            console.error('[WebSocket] Connection error event fired');
+            console.error('[WebSocket] Error object:', error);
+            console.error('[WebSocket] WebSocket URL:', this.url);
+            console.error('[WebSocket] WebSocket state:', this.socket?.readyState);
+
+            // Don't set error here - wait for onclose which has better info
+            // useGameStore.getState().setError('WebSocket connection error');
         };
 
         this.socket.onmessage = (event) => {
@@ -1064,9 +1119,9 @@ class WebSocketService {
         try {
             const store = useGameStore.getState();
             const currentPlayer = store.player;
-            
-            // Filter out the current player from the list
-            const otherPlayerIds = playerIds.filter(id => id !== currentPlayer?.id);
+
+            // Filter out null/undefined values and the current player from the list
+            const otherPlayerIds = playerIds.filter(id => id && id !== currentPlayer?.id);
             
             if (otherPlayerIds.length === 0) {
                 store.setPlayersInRoom([]);

@@ -346,6 +346,18 @@ async def get_monster_max_vital(monster_data: dict) -> int:
 async def generate_and_submit_monster_move(duel_id: str, monster_id: str, player_data: dict, monster_data: dict, room_id: str, round_number: int, game_manager: GameManager):
     from .main import manager, logger
     try:
+        # FIX #3: Validate monster_data is not None or corrupted
+        if not monster_data:
+            logger.error(f"[generate_and_submit_monster_move] Monster data is None for {monster_id}")
+            raise ValueError(f"Corrupt monster data for {monster_id}")
+        
+        # Validate required fields exist
+        required_fields = ['name', 'size', 'aggressiveness', 'intelligence', 'description']
+        missing_fields = [field for field in required_fields if not monster_data.get(field)]
+        if missing_fields:
+            logger.error(f"[generate_and_submit_monster_move] Monster {monster_id} missing required fields: {missing_fields}")
+            raise ValueError(f"Corrupt monster data for {monster_id}: missing {missing_fields}")
+        
         # Get room data and recent combat history
         room_data = await game_manager.db.get_room(room_id)
         try:
@@ -469,6 +481,52 @@ async def generate_and_submit_monster_move(duel_id: str, monster_id: str, player
                 logger.info(f"[generate_and_submit_monster_move] Both moves ready, processing duel round for {duel_id}")
                 await analyze_duel_moves(duel_id, game_manager)
                 
+    except ValueError as ve:
+        # FIX #3: Handle corrupt monster data - cancel duel and remove monster
+        logger.error(f"[generate_and_submit_monster_move] Corrupt monster detected: {str(ve)}")
+        
+        # Cancel the duel
+        if duel_id in duel_pending:
+            del duel_pending[duel_id]
+        if duel_id in duel_moves:
+            del duel_moves[duel_id]
+        
+        # Try to remove the corrupt monster from the room
+        try:
+            room_data = await game_manager.db.get_room(room_id)
+            if room_data and 'monsters' in room_data:
+                monsters = room_data.get('monsters', [])
+                if monster_id in monsters:
+                    monsters.remove(monster_id)
+                    room_data['monsters'] = monsters
+                    await game_manager.db.set_room(room_id, room_data)
+                    logger.info(f"[generate_and_submit_monster_move] Removed corrupt monster {monster_id} from room {room_id}")
+            
+            # Try to delete the corrupt monster
+            await game_manager.db.delete_monster(monster_id)
+            logger.info(f"[generate_and_submit_monster_move] Deleted corrupt monster {monster_id}")
+        except Exception as cleanup_error:
+            logger.error(f"[generate_and_submit_monster_move] Failed to cleanup corrupt monster: {cleanup_error}")
+        
+        # Notify player about the error
+        try:
+            await manager.send_to_player(room_id, player_data.get('id'), {
+                "type": "system_message",
+                "message": "⚠️ Combat cancelled: The monster data was corrupted and has been removed. You can continue exploring.",
+                "timestamp": datetime.now().isoformat()
+            })
+            await manager.send_to_player(room_id, player_data.get('id'), {
+                "type": "duel_outcome",
+                "winner_id": None,
+                "loser_id": None,
+                "analysis": "Combat cancelled due to corrupted monster data.",
+                "room_id": room_id,
+                "timestamp": datetime.now().isoformat(),
+                "duel_id": duel_id
+            })
+        except Exception as notify_error:
+            logger.error(f"[generate_and_submit_monster_move] Failed to notify player: {notify_error}")
+        
     except Exception as e:
         logger.error(f"Error generating and submitting monster move: {str(e)}")
 

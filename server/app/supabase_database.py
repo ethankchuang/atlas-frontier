@@ -84,27 +84,44 @@ class SupabaseDatabase:
             logger.debug(f"Setting player {player_id} with data: {player_data}")
             client = get_supabase_client()
             serializable_data = SupabaseDatabase._serialize_data(player_data)
-            
+
             # Extract user_id from player_data for the foreign key
             user_id = player_data.get('user_id')
             if not user_id:
                 logger.error(f"Player data missing user_id: {player_data}")
                 return False
-            
+
             # Skip saving system/dummy/guest players to avoid foreign key constraint issues
-            if user_id == "system" or player_id == "dummy" or user_id == "guest":
+            if user_id == "system" or player_id == "dummy" or user_id == "guest" or player_id.startswith("guest_"):
                 logger.debug(f"Skipping save for system/dummy/guest player: {player_id}")
                 return True  # Return success without actually saving
-            
+
+            # Verify user_id exists in user_profiles before attempting to save
+            # This prevents foreign key constraint violations
+            try:
+                profile_check = client.table('user_profiles').select('id').eq('id', user_id).execute()
+                if not profile_check.data or len(profile_check.data) == 0:
+                    logger.error(f"[set_player] User profile {user_id} does not exist in user_profiles table. Cannot save player {player_id}.")
+                    logger.error(f"[set_player] This indicates the user registration may have failed partway through.")
+                    # Don't raise - just return False to allow graceful handling
+                    return False
+            except Exception as profile_err:
+                logger.error(f"[set_player] Error checking user_profile existence for {user_id}: {profile_err}")
+                # If we can't verify, fail safe and don't attempt the insert
+                return False
+
             result = client.table('players').upsert({
                 'id': player_id,
                 'user_id': user_id,
                 'data': serializable_data
             }).execute()
-            
+
             return len(result.data) > 0
         except Exception as e:
-            logger.error(f"Error setting player {player_id}: {str(e)}")
+            logger.error(f"[set_player] Error setting player {player_id}: {e}")
+            # Check if it's a foreign key violation
+            if hasattr(e, 'message') and 'foreign key constraint' in str(e):
+                logger.error(f"[set_player] Foreign key constraint violation - user_id {player_data.get('user_id')} does not exist in user_profiles")
             raise
 
     @staticmethod

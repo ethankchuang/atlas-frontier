@@ -79,6 +79,27 @@ class MonsterBehaviorManager:
             monster_data = await game_manager.db.get_monster(monster_id)
             if not monster_data or not monster_data.get('is_alive', True):
                 continue
+            
+            # FIX #3: Validate monster data is not corrupted
+            required_fields = ['name', 'aggressiveness', 'size', 'description']
+            missing_fields = [field for field in required_fields if not monster_data.get(field) or not str(monster_data.get(field)).strip()]
+            if missing_fields:
+                logger.error(f"[MonsterBehavior] Corrupt monster {monster_id} detected, missing fields: {missing_fields}")
+                # Remove corrupt monster from room
+                try:
+                    room_db = await game_manager.db.get_room(new_room_id)
+                    if room_db and 'monsters' in room_db:
+                        monsters_list = room_db.get('monsters', [])
+                        if monster_id in monsters_list:
+                            monsters_list.remove(monster_id)
+                            room_db['monsters'] = monsters_list
+                            await game_manager.db.set_room(new_room_id, room_db)
+                            logger.info(f"[MonsterBehavior] Removed corrupt monster {monster_id} from room {new_room_id}")
+                    await game_manager.db.delete_monster(monster_id)
+                    logger.info(f"[MonsterBehavior] Deleted corrupt monster {monster_id}")
+                except Exception as cleanup_error:
+                    logger.error(f"[MonsterBehavior] Failed to cleanup corrupt monster {monster_id}: {cleanup_error}")
+                continue
                 
             aggressiveness = monster_data.get('aggressiveness', 'neutral')
             monster_name = monster_data.get('name', 'Unknown Monster')
@@ -341,6 +362,31 @@ class MonsterBehaviorManager:
         
         return None
     
+    async def _cleanup_corrupt_monster(self, monster_id: str, room_id: str, game_manager):
+        """Helper to clean up a corrupt monster from the database and room"""
+        try:
+            # Remove from room
+            room_data = await game_manager.db.get_room(room_id)
+            if room_data and 'monsters' in room_data:
+                monsters_list = room_data.get('monsters', [])
+                if monster_id in monsters_list:
+                    monsters_list.remove(monster_id)
+                    room_data['monsters'] = monsters_list
+                    await game_manager.db.set_room(room_id, room_data)
+                    logger.info(f"[MonsterBehavior] Removed corrupt monster {monster_id} from room {room_id}")
+            
+            # Delete from database
+            await game_manager.db.delete_monster(monster_id)
+            logger.info(f"[MonsterBehavior] Deleted corrupt monster {monster_id}")
+            
+            # Remove from tracking
+            if room_id in self.aggressive_monsters and monster_id in self.aggressive_monsters[room_id]:
+                del self.aggressive_monsters[room_id][monster_id]
+            self.clear_territorial_block_for_monster(room_id, monster_id)
+            
+        except Exception as e:
+            logger.error(f"[MonsterBehavior] Error cleaning up corrupt monster {monster_id}: {e}")
+    
     async def handle_territorial_combat_initiation(
         self, 
         player_id: str, 
@@ -352,7 +398,21 @@ class MonsterBehaviorManager:
         """Initiate combat with territorial monster when player tries to pass"""
         try:
             monster_data = await game_manager.db.get_monster(monster_id)
-            monster_name = monster_data.get('name', 'Unknown Monster') if monster_data else 'Unknown Monster'
+            
+            # FIX #3: Validate monster data
+            if not monster_data:
+                logger.error(f"[MonsterBehavior] Monster {monster_id} data not found")
+                await self._cleanup_corrupt_monster(monster_id, room_id, game_manager)
+                return "⚠️ A creature was blocking your path but has vanished mysteriously..."
+            
+            required_fields = ['name', 'description']
+            missing_fields = [field for field in required_fields if not monster_data.get(field) or not str(monster_data.get(field)).strip()]
+            if missing_fields:
+                logger.error(f"[MonsterBehavior] Monster {monster_id} is corrupt (missing {missing_fields})")
+                await self._cleanup_corrupt_monster(monster_id, room_id, game_manager)
+                return "⚠️ A strange creature was here but dissolved into shadows..."
+            
+            monster_name = monster_data.get('name', 'Unknown Monster')
             
             # Import here to avoid circular import
             from .main import initiate_monster_duel
@@ -492,15 +552,29 @@ class MonsterBehaviorManager:
                 logger.warning(f"[MonsterBehavior] Error checking player {player_id} rejoin immunity: {str(e)}")
             
             monster_data = await game_manager.db.get_monster(monster_id)
-            monster_name = monster_data.get('name', 'Unknown Monster') if monster_data else 'Unknown Monster'
-            monster_size = (monster_data or {}).get('size', 'creature')
-            monster_desc = (monster_data or {}).get('description', '').strip()
+            
+            # FIX #3: Validate monster data before initiating combat
+            if not monster_data:
+                logger.error(f"[MonsterBehavior] Monster {monster_id} data not found - removing from room")
+                await self._cleanup_corrupt_monster(monster_id, room_id, game_manager)
+                return "⚠️ A creature was here but has vanished mysteriously..."
+            
+            required_fields = ['name', 'size', 'description', 'aggressiveness']
+            missing_fields = [field for field in required_fields if not monster_data.get(field) or not str(monster_data.get(field)).strip()]
+            if missing_fields:
+                logger.error(f"[MonsterBehavior] Monster {monster_id} is corrupt (missing {missing_fields}) - removing")
+                await self._cleanup_corrupt_monster(monster_id, room_id, game_manager)
+                return "⚠️ A strange creature was here but dissolved into shadows..."
+            
+            monster_name = monster_data.get('name', 'Unknown Monster')
+            monster_size = monster_data.get('size', 'creature')
+            monster_desc = monster_data.get('description', '').strip()
             brief_desc = ''
             if monster_desc:
                 brief_desc = monster_desc.split('.')[0][:120]
             
             # Check if monster has rejoin_safe flag - if so, don't initiate combat
-            if monster_data and monster_data.get('rejoin_safe', False):
+            if monster_data.get('rejoin_safe', False):
                 logger.info(f"[MonsterBehavior] Monster {monster_name} has rejoin_safe flag, not initiating combat")
                 return f"The {monster_name} watches you warily but doesn't attack."
             

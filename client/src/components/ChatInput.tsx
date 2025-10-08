@@ -16,6 +16,7 @@ const ChatInput: React.FC = () => {
     const streamMessageIdRef = useRef<string | null>(null);
     const inputRef = useRef<HTMLInputElement>(null);
     const spinnerIntervalRef = useRef<NodeJS.Timeout | null>(null);
+    const isSubmittingRef = useRef<boolean>(false);
     const {
         player,
         currentRoom,
@@ -87,6 +88,13 @@ const ChatInput: React.FC = () => {
         e.preventDefault();
         if (!input.trim() || !player || !currentRoom) return;
 
+        // Prevent double submission
+        if (isSubmittingRef.current) {
+            console.warn('[ChatInput] Prevented double submission');
+            return;
+        }
+        isSubmittingRef.current = true;
+
         const trimmedInput = input.trim();
         setInput('');
 
@@ -118,6 +126,7 @@ const ChatInput: React.FC = () => {
                 };
                 addMessage(message);
             }
+            isSubmittingRef.current = false;
             return;
         }
 
@@ -193,6 +202,8 @@ const ChatInput: React.FC = () => {
                 websocketService.sendChatMessage(trimmedInput, 'emote');
             } catch (error) {
                 console.error('Failed to send emote:', error);
+            } finally {
+                isSubmittingRef.current = false;
             }
         } else if (trimmedInput.startsWith('/')) {
             // Handle chat command
@@ -209,6 +220,8 @@ const ChatInput: React.FC = () => {
                 websocketService.sendChatMessage(trimmedInput);
             } catch (error) {
                 console.error('Failed to send chat:', error);
+            } finally {
+                isSubmittingRef.current = false;
             }
         } else {
             // Handle game action with streaming
@@ -287,11 +300,12 @@ const ChatInput: React.FC = () => {
 
                         setIsStreaming(false);
                         streamMessageIdRef.current = null;
+                        isSubmittingRef.current = false;
                     },
                     // Handle errors
                     (error) => {
                         console.error('[ChatInput] Action error:', error);
-                        const friendly = "That didn’t go through. Please try again.";
+                        const friendly = "That didn't go through. Please try again.";
                         if (streamMessageIdRef.current) {
                             updateMessage(streamMessageIdRef.current, (prev) => ({
                                 ...prev,
@@ -301,6 +315,7 @@ const ChatInput: React.FC = () => {
                         }
                         setIsStreaming(false);
                         streamMessageIdRef.current = null;
+                        isSubmittingRef.current = false;
                     }
                 );
             } catch (error) {
@@ -315,6 +330,7 @@ const ChatInput: React.FC = () => {
                 addMessage(errorMessage);
                 setIsStreaming(false);
                 streamMessageIdRef.current = null;
+                isSubmittingRef.current = false;
             }
         }
 
