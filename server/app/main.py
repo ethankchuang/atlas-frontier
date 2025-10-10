@@ -183,6 +183,7 @@ async def handle_duel_message(message: dict, room_id: str, player_id: str, game_
     global duel_moves, duel_pending
     
     message_type = message.get("type")
+    logger.info(f"[handle_duel_message] Processing {message_type} from player {player_id} in room {room_id}")
     
     if message_type == "duel_challenge":
         try:
@@ -226,6 +227,7 @@ async def handle_duel_message(message: dict, room_id: str, player_id: str, game_
                 "is_active": True
             }
             await game_manager.db.create_active_duel(active_duel_data)
+            
             await manager.broadcast_to_room(room_id, {
                 "type": "duel_challenge",
                 "challenger_id": challenger_id,
@@ -233,6 +235,7 @@ async def handle_duel_message(message: dict, room_id: str, player_id: str, game_
                 "room_id": room_id,
                 "timestamp": datetime.now().isoformat()
             })
+            logger.info(f"[handle_duel_message] Duel challenge broadcasted from {challenger_id} to {target_id}")
             return
         except Exception as e:
             logger.error(f"[handle_duel_message] Error handling duel_challenge: {str(e)}")

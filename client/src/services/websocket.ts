@@ -454,10 +454,13 @@ class WebSocketService {
             // Find challenger's name
             const challenger = store.playersInRoom.find(p => p.id === data.challenger_id);
             if (challenger) {
+                console.log('[WebSocket] Received duel challenge from:', challenger.name);
                 store.setDuelChallenge({
                     challengerName: challenger.name,
                     challengerId: data.challenger_id
                 });
+            } else {
+                console.error('[WebSocket] Challenger not found in playersInRoom!');
             }
         }
     }
@@ -1186,7 +1189,10 @@ class WebSocketService {
     }
 
     sendDuelChallenge(targetPlayerId: string) {
-        if (!this.socket || !this.roomId || !this.playerId) return;
+        if (!this.socket || !this.roomId || !this.playerId) {
+            console.error('[WebSocket] Cannot send duel challenge - missing required data');
+            return;
+        }
 
         const duelMessage = {
             type: 'duel_challenge',
@@ -1196,6 +1202,7 @@ class WebSocketService {
             timestamp: new Date().toISOString()
         };
 
+        console.log('[WebSocket] Sending duel challenge to:', targetPlayerId);
         this.socket.send(JSON.stringify(duelMessage));
     }
 
