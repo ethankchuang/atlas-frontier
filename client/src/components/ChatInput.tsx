@@ -3,7 +3,7 @@ import useGameStore from '@/store/gameStore';
 import apiService from '@/services/api';
 import websocketService from '@/services/websocket';
 import { ChatMessage, Player } from '@/types/game';
-import { PaperAirplaneIcon, FaceSmileIcon } from '@heroicons/react/24/solid';
+import { PaperAirplaneIcon, ChatBubbleLeftIcon, BoltIcon } from '@heroicons/react/24/solid';
 
 // ASCII spinner frames like Claude Code
 const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
@@ -333,9 +333,6 @@ const ChatInput: React.FC = () => {
                 isSubmittingRef.current = false;
             }
         }
-
-        // Reset emote mode
-        setIsEmote(false);
     };
 
     const toggleEmote = () => {
@@ -351,14 +348,18 @@ const ChatInput: React.FC = () => {
             <button
                 type="button"
                     onClick={toggleEmote}
-                    className={`p-2 rounded transition-colors ${
+                    className={`p-2 rounded transition-colors cursor-pointer ${
                         isEmote 
                             ? 'bg-amber-600 text-amber-100' 
                             : 'bg-amber-900/50 text-amber-400 hover:bg-amber-800/50'
                     }`}
                     disabled={isStreaming || isInDuel}
             >
-                    <FaceSmileIcon className="w-5 h-5" />
+                    {isEmote ? (
+                        <ChatBubbleLeftIcon className="w-5 h-5" />
+                    ) : (
+                        <BoltIcon className="w-5 h-5" />
+                    )}
             </button>
 
                 <div className="relative flex-1">
@@ -371,7 +372,7 @@ const ChatInput: React.FC = () => {
                         placeholder={
                             isInDuel 
                                 ? (myDuelMove ? "Waiting for opponent..." : "Enter your combat move...")
-                                : (isEmote ? "Express an action..." : "What do you want to do?")
+                                : (isEmote ? "Chat in this room..." : "What do you want to do?")
                         }
                     className="w-full pl-10 py-2.5 bg-black text-green-400 font-mono text-xl border border-amber-900 focus:border-amber-500 focus:outline-none rounded"
                         disabled={isStreaming || (isInDuel && !!myDuelMove && !bothMovesSubmitted)}
