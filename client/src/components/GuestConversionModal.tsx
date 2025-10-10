@@ -95,10 +95,10 @@ const GuestConversionModal: React.FC<GuestConversionModalProps> = ({ isOpen, onC
                 throw new Error('Failed to update user: No user data returned');
             }
 
-            // Get the new session token
-            const { data: sessionData } = await supabase.auth.getSession();
+            console.log('[GuestConversion] User updated, user_id:', updateData.user.id);
 
-            // Update the player with the new user information
+            // First, update the player and create user profile on backend
+            // This uses the old anonymous token which is still valid
             await apiService.convertGuestToUser({
                 email: formData.email,
                 password: formData.password,
@@ -106,20 +106,46 @@ const GuestConversionModal: React.FC<GuestConversionModalProps> = ({ isOpen, onC
                 guest_player_id: player?.id || '',
                 new_user_id: updateData.user.id
             });
+            console.log('[GuestConversion] Backend player updated and user profile created');
+
+            // Now sign out and sign back in to get a fresh JWT without anonymous flags
+            await supabase.auth.signOut();
+            console.log('[GuestConversion] Signed out, now signing in with new credentials');
+            
+            const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+                email: formData.email,
+                password: formData.password
+            });
+
+            if (signInError || !signInData.session) {
+                throw new Error(`Failed to sign in with new credentials: ${signInError?.message || 'No session'}`);
+            }
+
+            console.log('[GuestConversion] Successfully signed in with new credentials');
+            const sessionData = signInData;
 
             // Store the updated session token
             if (sessionData.session?.access_token) {
                 localStorage.setItem('auth_token', sessionData.session.access_token);
+                console.log('[GuestConversion] Updated auth token with fresh session (no anonymous flag)');
+            } else {
+                throw new Error('No access token in new session');
             }
             
-            // Update the user state
+            // Update the user state with the new session user (should be the same user, now non-anonymous)
             useGameStore.getState().setUser({
-                id: updateData.user.id,
+                id: signInData.user.id,
                 username: formData.username,
                 email: formData.email,
                 is_anonymous: false
             });
             useGameStore.getState().setIsAuthenticated(true);
+            
+            console.log('[GuestConversion] Updated user state:', {
+                id: signInData.user.id,
+                username: formData.username,
+                is_anonymous: false
+            });
             
             // Update the player state with the new name
             if (player) {
@@ -127,7 +153,7 @@ const GuestConversionModal: React.FC<GuestConversionModalProps> = ({ isOpen, onC
                 useGameStore.getState().setPlayer({
                     ...player,
                     name: formData.username,
-                    user_id: updateData.user.id
+                    user_id: signInData.user.id
                 });
                 
                 // Also refresh the player data from the server to ensure full sync
