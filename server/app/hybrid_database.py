@@ -369,6 +369,11 @@ class HybridDatabase:
         return await RedisDatabase.get_active_duels_for_player(player_id)
     
     @staticmethod
+    async def create_active_duel(duel_data: Dict[str, Any]) -> bool:
+        """Create an active duel record (Redis)"""
+        return await RedisDatabase.create_active_duel(duel_data)
+    
+    @staticmethod
     async def add_to_room_players(room_id: str, player_id: str) -> bool:
         """Add player to room's player list (Redis)"""
         return await RedisDatabase.add_to_room_players(room_id, player_id)
