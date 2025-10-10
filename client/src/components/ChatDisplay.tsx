@@ -26,9 +26,9 @@ const ChatDisplay: React.FC = () => {
         }
         
         // If we can't find the player, try to extract name from player_id
-        // For guest players, the name might be in the format "Anonymous_<id>"
+        // For guest players, the name might be in the format "Anon_<id>"
         if (playerId.startsWith('guest_')) {
-            return `Anonymous_${playerId.split('_')[1]}`;
+            return `Anon_${playerId.split('_')[1]}`;
         }
         
         return 'Unknown Player';

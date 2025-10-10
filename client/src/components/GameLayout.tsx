@@ -44,6 +44,18 @@ const GameLayout: React.FC<GameLayoutProps> = ({ playerId }) => {
     const p1Max = player1MaxVital ?? 6;
     const p2Max = player2MaxVital ?? 6;
 
+    // Check if first-time user and show tutorial
+    useEffect(() => {
+        const hasSeenTutorial = localStorage.getItem('tutorial_seen');
+        if (!hasSeenTutorial) {
+            // Wait a bit for the game to initialize, then show tutorial
+            const timer = setTimeout(() => {
+                setIsMenuOpen(true);
+            }, 1000);
+            return () => clearTimeout(timer);
+        }
+    }, [setIsMenuOpen]);
+
     // Initialize game state
     useEffect(() => {
         const initializeGame = async () => {

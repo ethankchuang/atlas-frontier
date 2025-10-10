@@ -778,7 +778,7 @@ async def create_guest_player(
     try:
         # Use the anonymous user ID from Supabase
         anonymous_user_id = request.anonymous_user_id
-        guest_player_id = f"guest_{anonymous_user_id[:8]}"
+        guest_player_id = f"guest_{anonymous_user_id[:6]}"
         
         # Get starting room
         starting_room = await game_manager.ensure_starting_room()
@@ -787,7 +787,7 @@ async def create_guest_player(
         player = Player(
             id=guest_player_id,
             user_id=anonymous_user_id,  # Use the Supabase anonymous user ID
-            name=f"Anonymous_{anonymous_user_id[:8]}",
+            name=f"Anon_{anonymous_user_id[:6]}",
             current_room=starting_room.id,
             inventory=[],
             quest_progress={},

@@ -105,8 +105,8 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
             # For anonymous users, return basic info without requiring a profile
             return {
                 'id': user_id,
-                'username': f"Anonymous_{user_id[:8]}",
-                'email': f"anonymous_{user_id[:8]}@example.com",
+                'username': f"Anon_{user_id[:6]}",
+                'email': f"anonymous_{user_id[:6]}@example.com",
                 'is_anonymous': True,
                 'jwt_payload': payload
             }
@@ -167,8 +167,8 @@ async def get_optional_current_user(credentials: Optional[HTTPAuthorizationCrede
             # For anonymous users, return basic info without requiring a profile
             return {
                 'id': user_id,
-                'username': f"Anonymous_{user_id[:8]}",
-                'email': f"anonymous_{user_id[:8]}@example.com",
+                'username': f"Anon_{user_id[:6]}",
+                'email': f"anonymous_{user_id[:6]}@example.com",
                 'is_anonymous': True,
                 'jwt_payload': payload
             }

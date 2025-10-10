@@ -13,7 +13,7 @@ interface AuthFormProps {
 type FormMode = 'login' | 'register' | 'guest';
 
 const AuthForm: React.FC<AuthFormProps> = ({ onSuccess }) => {
-    const [mode, setMode] = useState<FormMode>('login');
+    const [mode, setMode] = useState<FormMode>('guest');
     const [formData, setFormData] = useState({
         email: '',
         password: '',
@@ -185,16 +185,30 @@ const AuthForm: React.FC<AuthFormProps> = ({ onSuccess }) => {
     };
 
     return (
-        <div className="max-w-md w-full p-6 bg-gray-800 rounded-lg shadow-xl">
-            <h1 className="text-3xl font-bold text-white text-center mb-8">
-                AI-Powered MUD Game
+        <div className="w-[448px] p-6 bg-gray-800/40 backdrop-blur-md rounded-lg shadow-xl">
+            <h1 className="text-3xl font-bold text-white text-center mb-2">
+                Eternal Engine
             </h1>
+            <p className="text-center text-gray-400 mb-8">
+                Inifinite AI-Powered Multiplayer World
+            </p>
 
             <div className="flex mb-6">
                 <button
                     type="button"
-                    onClick={() => setMode('login')}
+                    onClick={() => setMode('guest')}
                     className={`flex-1 py-2 px-4 rounded-l-lg font-medium transition-colors ${
+                        mode === 'guest' 
+                            ? 'bg-green-600 text-white' 
+                            : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                    }`}
+                >
+                    Play Now
+                </button>
+                <button
+                    type="button"
+                    onClick={() => setMode('login')}
+                    className={`flex-1 py-2 px-4 font-medium transition-colors ${
                         mode === 'login' 
                             ? 'bg-blue-600 text-white' 
                             : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
@@ -205,7 +219,7 @@ const AuthForm: React.FC<AuthFormProps> = ({ onSuccess }) => {
                 <button
                     type="button"
                     onClick={() => setMode('register')}
-                    className={`flex-1 py-2 px-4 font-medium transition-colors ${
+                    className={`flex-1 py-2 px-4 rounded-r-lg font-medium transition-colors ${
                         mode === 'register' 
                             ? 'bg-blue-600 text-white' 
                             : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
@@ -213,27 +227,16 @@ const AuthForm: React.FC<AuthFormProps> = ({ onSuccess }) => {
                 >
                     Register
                 </button>
-                <button
-                    type="button"
-                    onClick={() => setMode('guest')}
-                    className={`flex-1 py-2 px-4 rounded-r-lg font-medium transition-colors ${
-                        mode === 'guest' 
-                            ? 'bg-green-600 text-white' 
-                            : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                    }`}
-                >
-                    Play as Guest
-                </button>
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-4">
                 {mode === 'guest' && (
                     <div className="text-center py-4">
                         <p className="text-gray-300 mb-4">
-                            Play as a guest to try the game without creating an account.
+                            Play as a guest. No account required.
                         </p>
                         <p className="text-sm text-gray-400">
-                            You can convert to a full account later to save your progress.
+                            You can convert to a free account later to save your progress.
                         </p>
                     </div>
                 )}
@@ -324,18 +327,17 @@ const AuthForm: React.FC<AuthFormProps> = ({ onSuccess }) => {
                     }`}
                 >
                     {isLoading ? 'Please wait...' : 
-                     mode === 'register' ? 'Create Account' : 
-                     mode === 'guest' ? 'Start Playing' : 'Login'}
+                     mode === 'register' ? 'Create Free Account' : 
+                     mode === 'guest' ? 'Start Playing for Free' : 'Login'}
                 </button>
             </form>
 
             <div className="mt-6 text-sm text-gray-400 text-center">
-                <p>Welcome to our AI-powered MUD game!</p>
                 <p className="mt-2">
                     {mode === 'register' 
                         ? 'Create an account to save your progress and begin your adventure.'
                         : mode === 'guest'
-                        ? 'Play as a guest to try the game without registration.'
+                        ? 'Join thousands of players online in the infinite sandbox.'
                         : 'Login to continue your adventure.'
                     }
                 </p>
