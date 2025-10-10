@@ -120,6 +120,41 @@ const GuestConversionModal: React.FC<GuestConversionModalProps> = ({ isOpen, onC
                 is_anonymous: false
             });
             useGameStore.getState().setIsAuthenticated(true);
+            
+            // Update the player state with the new name
+            if (player) {
+                // Immediately update with new name
+                useGameStore.getState().setPlayer({
+                    ...player,
+                    name: formData.username,
+                    user_id: updateData.user.id
+                });
+                
+                // Also refresh the player data from the server to ensure full sync
+                try {
+                    const updatedPlayer = await apiService.getPlayer(player.id);
+                    useGameStore.getState().setPlayer(updatedPlayer);
+                    console.log('[GuestConversion] Player successfully updated to:', updatedPlayer.name);
+                } catch (err) {
+                    console.warn('[GuestConversion] Failed to refresh player data after conversion:', err);
+                    // Non-critical, we already updated locally
+                }
+                
+                // Reconnect WebSocket to update presence with new name
+                try {
+                    const websocketService = (await import('@/services/websocket')).default;
+                    if (player.current_room) {
+                        console.log('[GuestConversion] Reconnecting WebSocket with new name:', formData.username);
+                        websocketService.disconnect();
+                        // Small delay to ensure clean disconnect
+                        await new Promise(resolve => setTimeout(resolve, 100));
+                        websocketService.connect(player.current_room, player.id);
+                    }
+                } catch (err) {
+                    console.warn('[GuestConversion] Failed to reconnect WebSocket:', err);
+                    // Non-critical, but other players might see old name until refresh
+                }
+            }
 
             onSuccess();
         } catch (error) {
