@@ -83,16 +83,21 @@ export default function Home() {
             
             // Check if this is an anonymous user
             if (user?.is_anonymous) {
-                // For anonymous users, the player should already be created in AuthForm
-                // We just need to join the game with the existing player
-                if (player) {
-                    const result = await apiService.joinGame(player.id);
-                    setPlayer(result.player);
-                } else {
-                    // This shouldn't happen with the new system, but handle gracefully
-                    setError('Player not found. Please try signing in again.');
-                    return;
+                // For anonymous users, get or create the guest player
+                let guestPlayer = player;
+                
+                if (!guestPlayer) {
+                    // Player state was lost (e.g., after page reload)
+                    // Try to get or create the guest player
+                    console.log('[JoinGame] Guest player not in state, fetching/creating for user:', user.id);
+                    const guestResponse = await apiService.createGuestPlayer(user.id);
+                    guestPlayer = guestResponse.player;
+                    setPlayer(guestPlayer);
                 }
+                
+                // Join the game with the guest player
+                const result = await apiService.joinGame(guestPlayer.id);
+                setPlayer(result.player);
             } else {
                 // Get user's players
                 const playersData = await apiService.getPlayers();
@@ -214,12 +219,7 @@ export default function Home() {
                     </div>
 
                     <div className="mt-6 text-sm text-gray-400 text-center">
-                        <p>Explore a dynamic world, interact with AI NPCs, and embark on epic quests.</p>
-                        {isAnonymous && (
-                            <p className="mt-2 text-yellow-400">
-                                Your progress will be saved temporarily. Create an account to make it permanent.
-                            </p>
-                        )}
+                        <p>Explore a dynamic world generated completely by AI, interact with other players, and create your own adventures.</p>
                     </div>
                 </div>
             </BackgroundContainer>

@@ -51,6 +51,7 @@ class UserProfile(BaseModel):
     id: str
     username: str
     email: str
+    is_anonymous: bool = False
 
 class RegisterResponse(BaseModel):
     user_id: str

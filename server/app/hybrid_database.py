@@ -364,6 +364,11 @@ class HybridDatabase:
     # === TRANSIENT DATA (Redis) ===
     
     @staticmethod
+    async def get_active_duels_for_player(player_id: str) -> List[Dict[str, Any]]:
+        """Get all active duels for a specific player (Redis)"""
+        return await RedisDatabase.get_active_duels_for_player(player_id)
+    
+    @staticmethod
     async def add_to_room_players(room_id: str, player_id: str) -> bool:
         """Add player to room's player list (Redis)"""
         return await RedisDatabase.add_to_room_players(room_id, player_id)

@@ -774,16 +774,25 @@ async def create_guest_player(
     request: AnonymousGuestRequest,
     game_manager: GameManager = Depends(get_game_manager)
 ):
-    """Create a guest player for anonymous Supabase user"""
+    """Create or retrieve a guest player for anonymous Supabase user (idempotent)"""
     try:
         # Use the anonymous user ID from Supabase
         anonymous_user_id = request.anonymous_user_id
         guest_player_id = f"guest_{anonymous_user_id[:6]}"
         
+        # Check if guest player already exists
+        existing_player = await game_manager.db.get_player(guest_player_id)
+        if existing_player:
+            logger.info(f"Guest player {guest_player_id} already exists, returning existing player")
+            return {
+                'player': Player(**existing_player),
+                'message': 'Existing guest player retrieved successfully'
+            }
+        
         # Get starting room
         starting_room = await game_manager.ensure_starting_room()
         
-        # Create guest player with anonymous user ID
+        # Create new guest player with anonymous user ID
         player = Player(
             id=guest_player_id,
             user_id=anonymous_user_id,  # Use the Supabase anonymous user ID
@@ -802,6 +811,7 @@ async def create_guest_player(
         # Add player to the starting room's player list
         await game_manager.db.add_to_room_players(starting_room.id, guest_player_id)
         
+        logger.info(f"Created new guest player {guest_player_id}")
         return {
             'player': player,
             'message': 'Anonymous guest player created successfully'
@@ -1011,7 +1021,8 @@ async def get_user_profile(current_user: Dict[str, Any] = Depends(get_current_us
     return {
         'id': current_user['id'],
         'username': current_user['username'],
-        'email': current_user['email']
+        'email': current_user['email'],
+        'is_anonymous': current_user.get('is_anonymous', False)
     }
 
 @app.put("/auth/username")
