@@ -35,7 +35,8 @@ from .auth_models import (
     AnonymousGuestRequest
 )
 from .auth_service import AuthService
-from .auth_utils import get_current_user, get_optional_current_user
+from .auth_utils import get_current_user, get_optional_current_user, validate_username, is_username_available
+from .supabase_client import get_supabase_client
 from .game_manager import GameManager
 from .config import settings
 from .logger import setup_logging
@@ -903,6 +904,20 @@ async def convert_guest_to_user(
 ):
     """Convert an anonymous guest player to a registered user, preserving player data"""
     try:
+        # Validate username format
+        if not validate_username(request.username):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Username must be 3-20 characters, start with a letter, and contain only letters and numbers"
+            )
+        
+        # Check if username is available (case insensitive)
+        if not await is_username_available(request.username):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Username is already taken"
+            )
+        
         # Get the guest player data
         guest_player_data = await game_manager.db.get_player(request.guest_player_id)
         
@@ -912,11 +927,32 @@ async def convert_guest_to_user(
                 detail="Guest player not found"
             )
         
+        # Create user profile in Supabase
+        # This is crucial - without this, the user can't log in later!
+        supabase = get_supabase_client()
+        profile_data = {
+            'id': request.new_user_id,
+            'username': request.username.lower(),  # Store as lowercase for consistency
+            'email': request.email
+        }
+        
+        profile_result = supabase.table('user_profiles').insert(profile_data).execute()
+        
+        if not profile_result.data:
+            logger.error(f"Failed to create user profile: {profile_result}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to create user profile"
+            )
+        
         # Update the player to belong to the new user ID (from Supabase)
         guest_player_data['user_id'] = request.new_user_id
+        guest_player_data['name'] = request.username  # Update player name to match username
         
         # Save the updated player
         await game_manager.db.set_player(request.guest_player_id, guest_player_data)
+        
+        logger.info(f"Successfully converted guest player {request.guest_player_id} to user {request.username}")
         
         return {
             'user_id': request.new_user_id,
@@ -926,6 +962,8 @@ async def convert_guest_to_user(
             'message': 'Anonymous guest account converted to registered user successfully'
         }
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error converting guest to user: {str(e)}")
         raise HTTPException(
