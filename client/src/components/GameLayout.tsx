@@ -231,7 +231,7 @@ const GameLayout: React.FC<GameLayoutProps> = ({ playerId }) => {
         };
     }, [playerId, addVisitedCoordinate, setCurrentRoom, setError, setGameState, setIsLoading, setNPCs, setPlayer, setPlayersInRoom, upsertItems]);
 
-    // Update room data when current room ID changes (but not on every room object change)
+            // Update room data when current room ID changes (but not on every room object change)
     useEffect(() => {
         const updateRoomData = async () => {
             if (!currentRoom || !player) return;
@@ -262,7 +262,13 @@ const GameLayout: React.FC<GameLayoutProps> = ({ playerId }) => {
                 console.log('[GameLayout] Updating room state with fresh data');
                 setCurrentRoom(roomInfo.room);
                 setNPCs(roomInfo.npcs);
-                setPlayersInRoom(roomInfo.players);
+                
+                // CRITICAL: Filter out the current player from the playersInRoom list
+                // to prevent overwriting the current player's state with potentially stale data
+                const otherPlayers = roomInfo.players.filter((p: { id: string }) => p.id !== player.id);
+                setPlayersInRoom(otherPlayers);
+                console.log('[GameLayout] Set players in room (excluding current player):', otherPlayers.length);
+                
                 upsertItems(roomInfo.items || []);
 
                 // Mark the room as visited on minimap

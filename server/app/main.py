@@ -2482,14 +2482,19 @@ async def update_presence(
             raise ValueError("Player not found")
 
         player = Player(**player_data)
-
-        # Update room presence
-        await game_manager.db.remove_from_room_players(player.current_room, request.player_id)
-        await game_manager.db.add_to_room_players(request.room_id, request.player_id)
-
-        # Update player's current room
-        player.current_room = request.room_id
-        await game_manager.db.set_player(request.player_id, player.dict())
+        
+        # CRITICAL: Only update room presence lists, don't modify player data
+        # This prevents accidentally overwriting health or other critical fields
+        # when a player re-enters a room (especially after death/respawn)
+        if player.current_room != request.room_id:
+            # Update room presence lists
+            await game_manager.db.remove_from_room_players(player.current_room, request.player_id)
+            await game_manager.db.add_to_room_players(request.room_id, request.player_id)
+            logger.info(f"[Presence] Player {request.player_id} moved from {player.current_room} to {request.room_id}")
+        else:
+            # Player already in this room, just ensure they're in the player list
+            await game_manager.db.add_to_room_players(request.room_id, request.player_id)
+            logger.info(f"[Presence] Player {request.player_id} already in room {request.room_id}, ensuring presence")
 
         # Notify other players
         await manager.broadcast_to_room(

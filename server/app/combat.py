@@ -652,15 +652,20 @@ async def send_duel_results(
                             old_room_id = defeated_player_data.get('current_room')
                             spawn_room_id = 'room_start'  # Spawn location (starting room)
 
-                            # Update player's room
+                            # Update player's state after death - full restoration
                             defeated_player_data['current_room'] = spawn_room_id
+                            defeated_player_data['health'] = 5  # Reset to full health
+                            defeated_player_data['rejoin_immunity'] = True  # Protect from immediate re-attack
                             await game_manager.db.set_player(defeated_player_id, defeated_player_data)
+                            
+                            # Clear monster combat history for this player
+                            monster_behavior_manager._clear_player_combat_history(defeated_player_id)
                             
                             # Update room player lists
                             await game_manager.db.remove_from_room_players(old_room_id, defeated_player_id)
                             await game_manager.db.add_to_room_players(spawn_room_id, defeated_player_id)
                             
-                            logger.info(f"[Combat] Teleported defeated player {defeated_player_id} from {old_room_id} to spawn {spawn_room_id}")
+                            logger.info(f"[Combat] Teleported defeated player {defeated_player_id} from {old_room_id} to spawn {spawn_room_id} with full health and rejoin immunity")
 
                             # Get spawn room data
                             spawn_room_data = await game_manager.db.get_room(spawn_room_id)
@@ -673,11 +678,12 @@ async def send_duel_results(
                                     if isinstance(value, bytes):
                                         spawn_room_dict[key] = value.decode('utf-8')
 
-                                # Send defeat message and teleport to player
+                                # Send defeat message and teleport to player with updated player data
                                 await manager.send_to_player(old_room_id, defeated_player_id, {
                                     "type": "player_death",
                                     "message": "💀 You have been defeated! You wake up back at spawn...",
                                     "new_room": spawn_room_dict,
+                                    "player": defeated_player_data,  # Include updated player state (health, immunity)
                                     "timestamp": datetime.now().isoformat()
                                 })
 
