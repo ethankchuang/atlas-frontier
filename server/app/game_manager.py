@@ -13,6 +13,7 @@ from .hybrid_database import HybridDatabase as Database
 from .ai_handler import AIHandler
 from .rate_limiter import RateLimiter
 from .biome_manager import BiomeManager
+from .image_storage import is_temporary_image_url
 
 # Helper to get chunk id using Perlin noise
 CHUNK_SIZE = 13  # Slightly larger chunk size for bigger biomes
@@ -773,6 +774,16 @@ class GameManager:
                 existing_room_data["players"] = players_in_room
                 room = Room(**existing_room_data)
                 
+                # Check if room has a temporary image URL and needs regeneration
+                image_url = existing_room_data.get('image_url', '')
+                if image_url and is_temporary_image_url(image_url):
+                    logger.warning(f"[Image Retry] Room {existing_room_id} has temporary/expired image URL, regenerating...")
+                    # Set status to pending so client knows image is being regenerated
+                    existing_room_data['image_status'] = 'pending'
+                    await self.db.set_room(existing_room_id, existing_room_data)
+                    # Trigger image regeneration in background
+                    asyncio.create_task(self._regenerate_room_image(existing_room_id, existing_room_data))
+                
                 room_load_time = time.time() - room_load_start
                 total_time = time.time() - start_time
                 logger.info(f"[Performance] Discovered room loaded in {room_load_time:.2f}s (total: {total_time:.2f}s)")
@@ -1175,6 +1186,14 @@ class GameManager:
             if existing_room_data:
                 elapsed = time.time() - start_time
                 logger.info(f"[Preload] Room already exists at ({x}, {y}) - skipped in {elapsed:.2f}s")
+                
+                # Check if room has a temporary image URL and needs regeneration
+                image_url = existing_room_data.get('image_url', '')
+                if image_url and is_temporary_image_url(image_url):
+                    logger.warning(f"[Image Retry] Room {room_id} has temporary/expired image URL, regenerating...")
+                    # Trigger image regeneration in background
+                    asyncio.create_task(self._regenerate_room_image(room_id, existing_room_data))
+                
                 return existing_room_data["id"]
             
             # Check if coordinate is already discovered
@@ -1526,6 +1545,64 @@ class GameManager:
                 await self.broadcast_room_update(room_id, {
                     "type": "room_update",
                     "room": room_data
+                })
+    
+    async def _regenerate_room_image(self, room_id: str, room_data: dict):
+        """
+        Regenerate an image for a room that has an expired/temporary URL.
+        This generates a new image based on the room's description and uploads to Supabase.
+        """
+        try:
+            logger.info(f"[Image Retry] Starting image regeneration for room {room_id}")
+            
+            # Build a new image prompt from room data
+            title = room_data.get('title', 'Unknown Location')
+            description = room_data.get('description', '')
+            biome = room_data.get('biome', 'unknown')
+            
+            # Create a simple image prompt based on room data
+            image_prompt = f"{description}"
+            if not image_prompt or len(image_prompt) < 10:
+                # Fallback if description is missing
+                image_prompt = f"A {biome} landscape in a medieval fantasy world"
+            
+            logger.info(f"[Image Retry] Generated image prompt for {room_id}: {image_prompt[:100]}...")
+            
+            # Generate and upload the new image to Supabase Storage
+            image_url = await self.ai_handler.generate_room_image(image_prompt, room_id=room_id)
+            
+            # Update room with new image URL
+            fresh_room_data = await self.db.get_room(room_id)
+            if fresh_room_data:
+                fresh_room_data['image_url'] = image_url
+                fresh_room_data['image_status'] = 'ready' if image_url else 'error'
+                fresh_room_data['image_prompt'] = None  # Clear old prompt
+                await self.db.set_room(room_id, fresh_room_data)
+                
+                logger.info(f"[Image Retry] Successfully regenerated image for room {room_id}: {image_url[:100] if image_url else 'Failed'}")
+                
+                # Broadcast room update to all clients
+                await self.broadcast_room_update(room_id, {
+                    "type": "room_update",
+                    "room": fresh_room_data
+                })
+            else:
+                logger.error(f"[Image Retry] Room {room_id} not found when updating regenerated image")
+                
+        except Exception as e:
+            logger.error(f"[Image Retry] Error regenerating image for room {room_id}: {str(e)}")
+            
+            # Set error status but keep the temporary URL for now
+            fresh_room_data = await self.db.get_room(room_id)
+            if fresh_room_data:
+                # Keep the old URL but mark as error - client can still try to display it
+                fresh_room_data['image_status'] = 'error'
+                await self.db.set_room(room_id, fresh_room_data)
+                
+                # Broadcast room update
+                await self.broadcast_room_update(room_id, {
+                    "type": "room_update",
+                    "room": fresh_room_data
                 })
 
     async def broadcast_room_update(self, room_id: str, update: dict):
