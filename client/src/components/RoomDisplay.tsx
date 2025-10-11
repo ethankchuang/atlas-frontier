@@ -115,12 +115,12 @@ const RoomDisplay: React.FC = () => {
                 {/* Fallback gradient background when image fails to load or expires */}
                 {(imageError && retryCount >= MAX_RETRIES) && (
                     <div className={`absolute inset-0 bg-gradient-to-br ${getBiomeGradient(currentRoom.biome)} flex items-center justify-center`}>
-                        <div className="text-center text-gray-300 px-8 max-w-2xl">
-                            <div className="text-2xl font-bold mb-4 text-amber-300">{formattedTitle}</div>
-                            <div className="text-base opacity-80 leading-relaxed">
+                        <div className="text-center text-gray-300 px-4 md:px-8 max-w-2xl">
+                            <div className="text-lg md:text-2xl font-bold mb-2 md:mb-4 text-amber-300">{formattedTitle}</div>
+                            <div className="text-sm md:text-base opacity-80 leading-relaxed">
                                 {currentRoom.description}
                             </div>
-                            <div className="text-xs mt-4 opacity-60">
+                            <div className="text-xs mt-2 md:mt-4 opacity-60">
                                 (Image temporarily unavailable)
                             </div>
                         </div>
@@ -142,8 +142,8 @@ const RoomDisplay: React.FC = () => {
                 )}
             </div>
             {/* Room Title Overlay */}
-            <div className="absolute top-4 left-1/2 transform -translate-x-1/2 bg-black bg-opacity-70 px-6 py-2 rounded shadow-lg z-20">
-                <span className="text-2xl font-bold text-amber-400 font-mono">{formattedTitle}</span>
+            <div className="absolute top-4 left-1/2 transform -translate-x-1/2 bg-black bg-opacity-70 px-3 md:px-6 py-1 md:py-2 rounded shadow-lg z-20">
+                <span className="text-sm md:text-2xl font-bold text-amber-400 font-mono">{formattedTitle}</span>
             </div>
         </div>
     );

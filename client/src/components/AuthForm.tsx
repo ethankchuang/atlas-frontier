@@ -185,11 +185,11 @@ const AuthForm: React.FC<AuthFormProps> = ({ onSuccess }) => {
     };
 
     return (
-        <div className="w-[448px] p-6 bg-gray-800/40 backdrop-blur-md rounded-lg shadow-xl">
+        <div className="w-[448px] p-6 bg-gray-800/60 backdrop-blur-md rounded-lg shadow-xl">
             <h1 className="text-3xl font-bold text-white text-center mb-2">
                 Eternal Engine
             </h1>
-            <p className="text-center text-gray-400 mb-8">
+            <p className="text-center text-gray-300 mb-8">
                 Inifinite AI-Powered Multiplayer World
             </p>
 
@@ -235,7 +235,7 @@ const AuthForm: React.FC<AuthFormProps> = ({ onSuccess }) => {
                         <p className="text-gray-300 mb-4">
                             Play as guest. No account required.
                         </p>
-                        <p className="text-sm text-gray-400">
+                        <p className="text-sm text-gray-300">
                             Create a free account later to save your progress.
                         </p>
                     </div>
@@ -244,7 +244,7 @@ const AuthForm: React.FC<AuthFormProps> = ({ onSuccess }) => {
                 {mode === 'register' && (
                     <div>
                         <label htmlFor="username" className="block text-sm font-medium text-gray-300 mb-2">
-                            Username
+                            Choose a Username
                         </label>
                         <input
                             type="text"
@@ -253,7 +253,6 @@ const AuthForm: React.FC<AuthFormProps> = ({ onSuccess }) => {
                             value={formData.username}
                             onChange={handleInputChange}
                             className={getUsernameInputStyle()}
-                            placeholder="Your unique username..."
                             required
                             maxLength={20}
                         />
@@ -330,7 +329,7 @@ const AuthForm: React.FC<AuthFormProps> = ({ onSuccess }) => {
                 </button>
             </form>
 
-            <div className="mt-6 text-sm text-gray-400 text-center">
+            <div className="mt-6 text-sm text-gray-300 text-center">
                 <p className="mt-2">
                     {mode === 'register' 
                         ? 'Create an account to save your progress and begin your adventure.'

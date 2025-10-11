@@ -132,7 +132,7 @@ const Minimap: React.FC<MinimapProps> = ({ className = '' }) => {
                     Position: ({playerX}, {playerY})
                 </div>
                 {currentRoom?.biome && (
-                    <div className="text-[10px] text-green-500 mt-0.5 font-mono truncate" title={currentRoom.biome}>
+                    <div className="text-xs text-green-500 mt-0.5 font-mono truncate" title={currentRoom.biome}>
                         Biome: {currentRoom.biome}
                     </div>
                 )}
