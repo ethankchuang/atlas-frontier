@@ -340,11 +340,11 @@ const ChatInput: React.FC = () => {
     };
 
     return (
-        <div className="bg-black border-t border-amber-900">
+        <div className="p-3 md:p-4 border-t border-amber-900/30">
             {/* Condition Display for Duels */}
             {/* Removed duel condition overlay above input while in battle mode */}
-            
-            <form onSubmit={handleSubmit} className="flex items-center gap-2 p-3">
+
+            <form onSubmit={handleSubmit} className="flex items-center gap-2">
             <button
                 type="button"
                     onClick={toggleEmote}
@@ -374,7 +374,7 @@ const ChatInput: React.FC = () => {
                                 ? (myDuelMove ? "Waiting for opponent..." : "Enter your combat move...")
                                 : (isEmote ? "Chat in this room..." : "What do you want to do?")
                         }
-                    className="w-full pl-10 py-2.5 bg-black text-green-400 font-mono text-xl border border-amber-900 focus:border-amber-500 focus:outline-none rounded"
+                    className="w-full pl-10 py-2.5 bg-black bg-opacity-40 text-green-400 font-mono text-xl border border-amber-900 focus:border-amber-500 focus:outline-none rounded"
                         disabled={isStreaming || (isInDuel && !!myDuelMove && !bothMovesSubmitted)}
                     readOnly={isInDuel && !!myDuelMove}
                 />

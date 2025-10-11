@@ -3,7 +3,11 @@ import useGameStore from '@/store/gameStore';
 import { ChatMessage } from '@/types/game';
 import { UserCircleIcon } from '@heroicons/react/24/solid';
 
-const ChatDisplay: React.FC = () => {
+interface ChatDisplayProps {
+    onScrollToTop?: () => void;
+}
+
+const ChatDisplay: React.FC<ChatDisplayProps> = ({ onScrollToTop }) => {
     const { messages, playersInRoom, player } = useGameStore();
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -12,6 +16,21 @@ const ChatDisplay: React.FC = () => {
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [messages]);
+
+    // Detect scroll to top
+    useEffect(() => {
+        const container = scrollContainerRef.current;
+        if (!container || !onScrollToTop) return;
+
+        const handleScroll = () => {
+            if (container.scrollTop <= 10) {
+                onScrollToTop();
+            }
+        };
+
+        container.addEventListener('scroll', handleScroll);
+        return () => container.removeEventListener('scroll', handleScroll);
+    }, [onScrollToTop]);
 
     const getPlayerName = (playerId: string): string => {
         // First check if it's the current player
@@ -129,20 +148,18 @@ const ChatDisplay: React.FC = () => {
     return (
         <div className="relative h-full w-full">
             {/* Gradient overlay for fade effect */}
-            <div className="absolute top-0 left-0 right-0 h-32 bg-gradient-to-b from-black to-transparent z-10 pointer-events-none" />
+            <div className="absolute top-0 left-0 right-0 h-32 bg-gradient-to-b from-black/30 to-transparent z-10 pointer-events-none" />
 
             <div
                 ref={scrollContainerRef}
-                className="h-full overflow-y-auto p-3 md:p-6 bg-black bg-opacity-90 font-mono text-sm md:text-xl leading-5 md:leading-7"
+                className="h-full overflow-y-auto p-3 md:p-4 font-mono text-sm md:text-xl leading-5 md:leading-7"
             >
-                <div className="max-w-4xl mx-auto">
                 {messages.map((message, index) => (
-                        <div key={`${message.timestamp}-${index}`} className="px-2 md:px-3 transition-opacity duration-200">
+                    <div key={`${message.timestamp}-${index}`} className="px-2 md:px-3 transition-opacity duration-200">
                         {renderMessage(message)}
                     </div>
                 ))}
                 <div ref={messagesEndRef} />
-                </div>
             </div>
         </div>
     );
