@@ -2,6 +2,10 @@ import { create } from 'zustand';
 import { Player, Room, NPC, GameState, ChatMessage, Item } from '@/types/game';
 import { User } from '@/types/auth';
 
+// Duel combat constants
+export const DUEL_MAX_HEALTH = 5;
+export const DUEL_MAX_ADVANTAGE = 3;
+
 // Extend ChatMessage type to support streaming
 interface ExtendedChatMessage extends ChatMessage {
     id?: string;
@@ -178,13 +182,13 @@ const useGameStore = create<GameStore>((set, get) => ({
     currentRound: 1,
     player1Condition: "Healthy",
     player2Condition: "Healthy",
-    // Health/Control - Health starts at 6, Control starts at 0
-    player1Vital: 6,  // represents health
-    player2Vital: 6,  // represents health
+    // Health/Control - Health starts at DUEL_MAX_HEALTH, Control starts at 0
+    player1Vital: DUEL_MAX_HEALTH,  // represents health
+    player2Vital: DUEL_MAX_HEALTH,  // represents health
     player1Control: 0,
     player2Control: 0,
-    player1MaxVital: 6,
-    player2MaxVital: 6,
+    player1MaxVital: DUEL_MAX_HEALTH,
+    player2MaxVital: DUEL_MAX_HEALTH,
 
     // Auth setters
     setUser: (user) => set({ user }),
@@ -287,9 +291,9 @@ const useGameStore = create<GameStore>((set, get) => ({
     startDuel: (opponent) => {
         console.log('[GameStore] Starting duel with opponent:', opponent);
         const state = get();
-        set({ 
-            isInDuel: true, 
-            duelOpponent: opponent, 
+        set({
+            isInDuel: true,
+            duelOpponent: opponent,
             myDuelMove: null,
             opponentDuelMove: null,
             bothMovesSubmitted: false,
@@ -297,8 +301,8 @@ const useGameStore = create<GameStore>((set, get) => ({
             player1Condition: "Healthy",
             player2Condition: "Healthy",
             // Reset health to maximum values when starting duel
-            player1Vital: state.player1MaxVital ?? 6,
-            player2Vital: state.player2MaxVital ?? 6,
+            player1Vital: state.player1MaxVital ?? DUEL_MAX_HEALTH,
+            player2Vital: state.player2MaxVital ?? DUEL_MAX_HEALTH,
             player1Control: 0,
             player2Control: 0,
         });
@@ -336,9 +340,9 @@ const useGameStore = create<GameStore>((set, get) => ({
         opponentDuelMove: null,
         bothMovesSubmitted: false
     }),
-    endDuel: () => set({ 
-        isInDuel: false, 
-        duelOpponent: null, 
+    endDuel: () => set({
+        isInDuel: false,
+        duelOpponent: null,
         myDuelMove: null,
         opponentDuelMove: null,
         bothMovesSubmitted: false,
@@ -349,26 +353,26 @@ const useGameStore = create<GameStore>((set, get) => ({
         player2Vital: 0,
         player1Control: 0,
         player2Control: 0,
-        player1MaxVital: 6,
-        player2MaxVital: 6,
+        player1MaxVital: DUEL_MAX_HEALTH,
+        player2MaxVital: DUEL_MAX_HEALTH,
     }),
     forceClearDuelState: () => {
         console.log('[GameStore] Force clearing all duel state');
-        set({ 
-            isInDuel: false, 
-            duelOpponent: null, 
+        set({
+            isInDuel: false,
+            duelOpponent: null,
             myDuelMove: null,
             opponentDuelMove: null,
             bothMovesSubmitted: false,
             currentRound: 1,
             player1Condition: "Healthy",
             player2Condition: "Healthy",
-            player1Vital: 6,
-            player2Vital: 6,
+            player1Vital: DUEL_MAX_HEALTH,
+            player2Vital: DUEL_MAX_HEALTH,
             player1Control: 0,
             player2Control: 0,
-            player1MaxVital: 6,
-            player2MaxVital: 6,
+            player1MaxVital: DUEL_MAX_HEALTH,
+            player2MaxVital: DUEL_MAX_HEALTH,
             duelChallenge: null
         });
         console.log('[GameStore] Force cleared all duel state');

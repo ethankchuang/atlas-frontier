@@ -285,21 +285,26 @@ class APIService {
                             if (data.updates) {
                                 // Handle player updates (position, inventory, etc.)
                                 if (data.updates.player && store.player) {
-                                    // CRITICAL: Preserve health when merging player updates
-                                    // to prevent stale data from overwriting fresh state (e.g., after death/respawn)
+                                    // CRITICAL: Preserve health and inventory when merging player updates
+                                    // to prevent stale data from overwriting fresh state (e.g., after death/respawn, during movement)
                                     const currentHealth = store.player.health;
-                                    
-                                    const updatedPlayer = { 
-                                        ...store.player, 
+                                    const currentInventory = store.player.inventory;
+
+                                    const updatedPlayer = {
+                                        ...store.player,
                                         ...data.updates.player,
                                         // Preserve current health if set (prevents overwrites from stale data)
-                                        health: currentHealth !== undefined ? currentHealth : data.updates.player.health
+                                        health: currentHealth !== undefined ? currentHealth : data.updates.player.health,
+                                        // Preserve current inventory if incoming update doesn't include it (prevents inventory loss during movement/other updates)
+                                        inventory: data.updates.player.inventory !== undefined ? data.updates.player.inventory : currentInventory
                                     };
                                     store.setPlayer(updatedPlayer);
-                                    console.log('[API] Room update: Updated player state with health safeguard', {
+                                    console.log('[API] Room update: Updated player state with health and inventory safeguard', {
                                         currentHealth,
                                         incomingHealth: data.updates.player.health,
-                                        finalHealth: updatedPlayer.health
+                                        finalHealth: updatedPlayer.health,
+                                        hasIncomingInventory: data.updates.player.inventory !== undefined,
+                                        inventoryCount: updatedPlayer.inventory?.length || 0
                                     });
                                 }
 

@@ -62,10 +62,8 @@ const RoomDisplay: React.FC = () => {
         );
     }
 
-    // Format the room title with biome in parenthesis if present
-    const formattedTitle = currentRoom.biome
-        ? `${currentRoom.title} (${currentRoom.biome})`
-        : currentRoom.title;
+    // Use room title without biome (biome now shown in minimap)
+    const formattedTitle = currentRoom.title;
 
     return (
         <div className="w-full h-full bg-black">
@@ -134,7 +132,7 @@ const RoomDisplay: React.FC = () => {
                         src={currentRoom.image_url}
                         alt={formattedTitle}
                         fill
-                        className="object-cover"
+                        className="object-cover object-bottom"
                         onLoad={handleImageLoad}
                         onError={handleImageError}
                         style={{ display: isImageLoading ? 'none' : 'block' }}

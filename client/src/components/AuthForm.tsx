@@ -233,10 +233,10 @@ const AuthForm: React.FC<AuthFormProps> = ({ onSuccess }) => {
                 {mode === 'guest' && (
                     <div className="text-center py-4">
                         <p className="text-gray-300 mb-4">
-                            Play as a guest. No account required.
+                            Play as guest. No account required.
                         </p>
                         <p className="text-sm text-gray-400">
-                            You can convert to a free account later to save your progress.
+                            Create a free account later to save your progress.
                         </p>
                     </div>
                 )}
@@ -281,7 +281,6 @@ const AuthForm: React.FC<AuthFormProps> = ({ onSuccess }) => {
                                 value={formData.email}
                                 onChange={handleInputChange}
                                 className="w-full px-4 py-2 bg-gray-700 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                placeholder="your.email@example.com"
                                 required
                             />
                         </div>
@@ -297,7 +296,6 @@ const AuthForm: React.FC<AuthFormProps> = ({ onSuccess }) => {
                                 value={formData.password}
                                 onChange={handleInputChange}
                                 className="w-full px-4 py-2 bg-gray-700 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                placeholder="Enter your password..."
                                 required
                                 minLength={8}
                             />
