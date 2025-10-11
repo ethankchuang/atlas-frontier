@@ -22,6 +22,8 @@ const RoomDisplay: React.FC = () => {
     const [imageError, setImageError] = useState(false);
     const [retryCount, setRetryCount] = useState(0);
     const [isImageLoading, setIsImageLoading] = useState(true);
+    const [imageHeight, setImageHeight] = useState(0);
+    const imageRef = React.useRef<HTMLDivElement>(null);
 
     // Reset error state when room changes
     useEffect(() => {
@@ -39,7 +41,25 @@ const RoomDisplay: React.FC = () => {
         console.log('[RoomDisplay] Image loaded successfully');
         setIsImageLoading(false);
         setImageError(false);
+
+        // Measure image height after load
+        if (imageRef.current) {
+            const height = imageRef.current.offsetHeight;
+            setImageHeight(height);
+        }
     };
+
+    // Update image height on window resize
+    useEffect(() => {
+        const updateHeight = () => {
+            if (imageRef.current) {
+                setImageHeight(imageRef.current.offsetHeight);
+            }
+        };
+
+        window.addEventListener('resize', updateHeight);
+        return () => window.removeEventListener('resize', updateHeight);
+    }, []);
 
     const handleImageError = () => {
         console.error('[RoomDisplay] Image failed to load (likely expired URL)');
@@ -128,17 +148,49 @@ const RoomDisplay: React.FC = () => {
                 )}
                 
                 {currentRoom.image_url && !imageError && (
-                    <Image
-                        src={currentRoom.image_url}
-                        alt={formattedTitle}
-                        fill
-                        className="object-cover"
-                        onLoad={handleImageLoad}
-                        onError={handleImageError}
-                        style={{ display: isImageLoading ? 'none' : 'block' }}
-                        priority={true}
-                        unoptimized={true}
-                    />
+                    <>
+                        {/* Main image - fills horizontally edge to edge, min 60% height on mobile */}
+                        <div ref={imageRef} className="absolute top-0 left-0 right-0 w-full h-auto min-h-[60vh] z-[5]">
+                            <Image
+                                src={currentRoom.image_url}
+                                alt={formattedTitle}
+                                width={1024}
+                                height={1024}
+                                className="w-full h-full object-cover object-top"
+                                onLoad={handleImageLoad}
+                                onError={handleImageError}
+                                style={{
+                                    display: isImageLoading ? 'none' : 'block',
+                                    minHeight: '60vh'
+                                }}
+                                priority={true}
+                                unoptimized={true}
+                            />
+                        </div>
+                        {/* Mirrored image at bottom to fill space - only show if there's space below the image */}
+                        {!isImageLoading && imageHeight > 0 && (
+                            <div
+                                className="absolute left-0 right-0 overflow-hidden pointer-events-none z-[1]"
+                                style={{
+                                    top: `${imageHeight}px`,
+                                    height: `calc(100% - ${imageHeight}px)`
+                                }}
+                            >
+                                <Image
+                                    src={currentRoom.image_url}
+                                    alt=""
+                                    width={1024}
+                                    height={1024}
+                                    className="w-full object-cover scale-y-[-1]"
+                                    unoptimized={true}
+                                    style={{
+                                        objectPosition: 'center bottom',
+                                        height: imageHeight
+                                    }}
+                                />
+                            </div>
+                        )}
+                    </>
                 )}
             </div>
             {/* Room Title Overlay */}
