@@ -372,7 +372,7 @@ const ChatInput: React.FC = () => {
                         placeholder={
                             isInDuel 
                                 ? (myDuelMove ? "Waiting for opponent..." : "Enter your combat move...")
-                                : (isEmote ? "Chat in this room..." : "What do you want to do?")
+                                : (isEmote ? "Chat in this room..." : "What do you want to do? (go north, look around, etc)")
                         }
                     className="w-full pl-10 py-2.5 bg-black bg-opacity-40 text-green-400 font-mono text-xl border border-amber-900 focus:border-amber-500 focus:outline-none rounded"
                         disabled={isStreaming || (isInDuel && !!myDuelMove && !bothMovesSubmitted)}
