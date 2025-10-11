@@ -132,7 +132,7 @@ const RoomDisplay: React.FC = () => {
                         src={currentRoom.image_url}
                         alt={formattedTitle}
                         fill
-                        className="object-cover object-bottom"
+                        className="object-cover"
                         onLoad={handleImageLoad}
                         onError={handleImageError}
                         style={{ display: isImageLoading ? 'none' : 'block' }}

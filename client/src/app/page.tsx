@@ -8,23 +8,11 @@ import apiService from '@/services/api';
 
 // Background images from public/images/background
 const BACKGROUND_IMAGES = [
-    '/images/background/-fXalwLTmqWZUmcH1OTlG_bf0414bd272a43c8b1448b5edd174faa.png',
-    '/images/background/48UJdR0yWbMzNQ-QGIS99_c3b5d8aabece4cf2be983d1dff64a90b.png',
-    '/images/background/crP0SOxo1w-htHw0vG2ho_5b6c5eb30e834525a1338363203d90e6.png',
-    '/images/background/e46d94dwVzUG459QQrxtf_b992edf03a794702881f45ffbdc59d40.png',
-    '/images/background/EgT_jRDMKt7IfGjNgZTt__11c8dc5334ab4f99adfa42d52cda52bf.png',
-    '/images/background/EROgAuAYKJRWsY2ei5fh1_17b799462f3644e392ac58949b25a104.png',
-    '/images/background/g33XkpgLW4EBBK2u-x2pR_fab3e588b7054bf3a4a2313339b21185.png',
-    '/images/background/gFpbeMgOyogbHc0I3PFbh_92109a24ddf6478cbb6f5bd811e8b6e0.png',
-    '/images/background/IIVj8l9vdlkq2YtuudPo6_c4b7d06560064d83855dc08d0f8b2f90.png',
-    '/images/background/IW9Ee934NBHKhCBaYwf7a_89a9d84e55174690a75dfe645e47e672.png',
-    '/images/background/jRMhP70mdA36heDMfithO_b4a6157ccd684f7198c2c056bead0c2b.png',
-    '/images/background/LEqbud4uB8ELhA62CGziH_6b26697dbff14b95a2c2f6fbd84e226e.png',
-    '/images/background/O3ZLu3ZV3cBly0zj0fBnS_74c7e2bdc85f4fba89624ec5d8c4816d.png',
-    '/images/background/Px2D3AixOn0FkhbaHxoA6_197a2a32eb0e4eb5914180fd61ae8603.png',
-    '/images/background/U5mOEksgVoYcbbL8_oMrb_5f13271bfaea466484e085aeedd7e855.png',
-    '/images/background/VRwNPNcUkONg5VcIizyIb_8281709c93df4ddd9a0f8d6e309277e0.png',
-    '/images/background/w49bNmdEra5GNOSFfluPy_b009a2659db446ae8fbc63eba16f6733.png',
+    '/images/background/a.png',
+    '/images/background/b.png',
+    '/images/background/c.png',
+    '/images/background/d.png',
+    '/images/background/e.png',
 ];
 
 export default function Home() {
@@ -148,7 +136,7 @@ export default function Home() {
                 }}
             />
             {/* Dark overlay for better readability */}
-            <div className="absolute inset-0 bg-black/50" />
+            <div className="absolute inset-0" />
             {/* Content */}
             <div className="relative z-10">
                 {children}
