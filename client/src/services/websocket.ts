@@ -1,4 +1,4 @@
-import useGameStore from '@/store/gameStore';
+import useGameStore, { DUEL_MAX_HEALTH } from '@/store/gameStore';
 import { ChatMessage, Player, Room, NPC, Monster } from '@/types/game';
 import apiService from './api';
 
@@ -487,8 +487,8 @@ class WebSocketService {
                     store.startDuel({ id: data.responder_id, name: data.monster_name });
                     // Apply max vitals immediately if provided
                     try {
-                        const p1Max = (data as { player1_max_vital?: number }).player1_max_vital ?? 6;
-                        const p2Max = (data as { player2_max_vital?: number }).player2_max_vital ?? 6;
+                        const p1Max = (data as { player1_max_vital?: number }).player1_max_vital ?? DUEL_MAX_HEALTH;
+                        const p2Max = (data as { player2_max_vital?: number }).player2_max_vital ?? DUEL_MAX_HEALTH;
                         
                         if (typeof p1Max === 'number' && typeof p2Max === 'number') {
                             useGameStore.getState().setMaxVitals(p1Max, p2Max);
@@ -531,7 +531,7 @@ class WebSocketService {
             console.log('DEBUG: data.response =', data.response, 'Type:', typeof data.response, 'Is "accept"?', data.response === 'accept'); // Added for debugging
             if (data.response === 'accept') {
                 console.log('[WebSocket] Duel accepted! Starting duel for player:', player.name);
-                
+
                 // Start the duel for both players
                 if (player.id === data.challenger_id) {
                     // Challenger starts duel with responder
@@ -542,7 +542,22 @@ class WebSocketService {
                     console.log('[WebSocket] Responder starting duel with:', challenger.name);
                     store.startDuel({ id: data.challenger_id, name: challenger.name });
                 }
-                
+
+                // Apply max vitals for player duels (same as monster duels)
+                try {
+                    const p1Max = (data as { player1_max_vital?: number }).player1_max_vital ?? DUEL_MAX_HEALTH;
+                    const p2Max = (data as { player2_max_vital?: number }).player2_max_vital ?? DUEL_MAX_HEALTH;
+
+                    if (typeof p1Max === 'number' && typeof p2Max === 'number') {
+                        useGameStore.getState().setMaxVitals(p1Max, p2Max);
+                        console.log('[WebSocket] Set max vitals for player duel:', { p1Max, p2Max });
+                    } else {
+                        console.error('[WebSocket] Invalid max vital values for player duel:', { p1Max, p2Max });
+                    }
+                } catch (error) {
+                    console.error('[WebSocket] Error setting max vitals for player duel:', error);
+                }
+
                 const message = `${responder.name} accepted ${challenger.name}'s duel challenge! The duel begins!`;
                 store.addMessage({
                     player_id: 'system',
@@ -579,7 +594,22 @@ class WebSocketService {
                     // We're the responder, start duel with challenger
                     store.startDuel({ id: data.challenger_id, name: 'Opponent' });
                 }
-                
+
+                // Apply max vitals for player duels (same as monster duels)
+                try {
+                    const p1Max = (data as { player1_max_vital?: number }).player1_max_vital ?? DUEL_MAX_HEALTH;
+                    const p2Max = (data as { player2_max_vital?: number }).player2_max_vital ?? DUEL_MAX_HEALTH;
+
+                    if (typeof p1Max === 'number' && typeof p2Max === 'number') {
+                        useGameStore.getState().setMaxVitals(p1Max, p2Max);
+                        console.log('[WebSocket] Set max vitals for player duel (fallback):', { p1Max, p2Max });
+                    } else {
+                        console.error('[WebSocket] Invalid max vital values for player duel (fallback):', { p1Max, p2Max });
+                    }
+                } catch (error) {
+                    console.error('[WebSocket] Error setting max vitals for player duel (fallback):', error);
+                }
+
                 const message = `Duel challenge accepted! The duel begins!`;
                 store.addMessage({
                     player_id: 'system',
@@ -1161,22 +1191,26 @@ class WebSocketService {
 
     private handlePlayerUpdate(player: Player) {
         if (player.id === this.playerId) {
-            // CRITICAL: When updating current player, preserve health to prevent
-            // stale data from overwriting fresh state (e.g., after death/respawn)
+            // CRITICAL: When updating current player, preserve health and inventory to prevent
+            // stale data from overwriting fresh state (e.g., after death/respawn, during movement)
             const store = useGameStore.getState();
             const currentPlayer = store.player;
-            
+
             if (currentPlayer) {
-                // Merge incoming updates with current state, preferring current health
+                // Merge incoming updates with current state, preferring current health and inventory
                 const mergedPlayer = {
                     ...player,
                     // Prefer current health if it's set (prevents overwrites from stale data)
-                    health: currentPlayer.health !== undefined ? currentPlayer.health : player.health
+                    health: currentPlayer.health !== undefined ? currentPlayer.health : player.health,
+                    // Preserve current inventory if incoming update doesn't include it (prevents inventory loss during movement/other updates)
+                    inventory: player.inventory !== undefined ? player.inventory : currentPlayer.inventory
                 };
-                console.log('[WebSocket] Updating current player with health safeguard:', {
+                console.log('[WebSocket] Updating current player with health and inventory safeguard:', {
                     incomingHealth: player.health,
                     currentHealth: currentPlayer.health,
-                    finalHealth: mergedPlayer.health
+                    finalHealth: mergedPlayer.health,
+                    hasIncomingInventory: player.inventory !== undefined,
+                    inventoryCount: mergedPlayer.inventory?.length || 0
                 });
                 store.setPlayer(mergedPlayer);
             } else {
@@ -1292,12 +1326,20 @@ class WebSocketService {
             
             // Update player state if provided (includes health restoration, immunity, etc.)
             if (data.player && store.player) {
-                const updatedPlayer = { ...store.player, ...data.player } as Player;
+                // CRITICAL: Preserve inventory when updating player after death
+                const currentInventory = store.player.inventory;
+                const updatedPlayer = {
+                    ...store.player,
+                    ...data.player,
+                    // Preserve inventory if not included in death update
+                    inventory: data.player.inventory !== undefined ? data.player.inventory : currentInventory
+                } as Player;
                 store.setPlayer(updatedPlayer);
                 console.log('[WebSocket] Updated player state after death:', {
                     health: updatedPlayer.health,
                     rejoin_immunity: updatedPlayer.rejoin_immunity,
-                    current_room: updatedPlayer.current_room
+                    current_room: updatedPlayer.current_room,
+                    inventoryCount: updatedPlayer.inventory?.length || 0
                 });
             }
             

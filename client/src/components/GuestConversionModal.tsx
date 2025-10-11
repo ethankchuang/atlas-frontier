@@ -249,7 +249,7 @@ const GuestConversionModal: React.FC<GuestConversionModalProps> = ({ isOpen, onC
                 <form onSubmit={handleSubmit} className="space-y-4">
                     <div>
                         <label htmlFor="username" className="block text-sm font-medium text-gray-300 mb-2">
-                            Username
+                            Choose a Username
                         </label>
                         <input
                             type="text"
@@ -258,7 +258,6 @@ const GuestConversionModal: React.FC<GuestConversionModalProps> = ({ isOpen, onC
                             value={formData.username}
                             onChange={handleInputChange}
                             className={getUsernameInputStyle()}
-                            placeholder="Your unique username..."
                             required
                             maxLength={20}
                         />
@@ -283,7 +282,6 @@ const GuestConversionModal: React.FC<GuestConversionModalProps> = ({ isOpen, onC
                             value={formData.email}
                             onChange={handleInputChange}
                             className="w-full px-4 py-2 bg-gray-700 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            placeholder="your.email@example.com"
                             required
                         />
                     </div>
@@ -299,7 +297,6 @@ const GuestConversionModal: React.FC<GuestConversionModalProps> = ({ isOpen, onC
                             value={formData.password}
                             onChange={handleInputChange}
                             className="w-full px-4 py-2 bg-gray-700 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            placeholder="Enter your password..."
                             required
                             minLength={8}
                         />
