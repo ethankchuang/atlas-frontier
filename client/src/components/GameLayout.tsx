@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import useGameStore, { DUEL_MAX_HEALTH, DUEL_MAX_ADVANTAGE } from '@/store/gameStore';
 import RoomDisplay from './RoomDisplay';
 import ChatDisplay from './ChatDisplay';
@@ -11,12 +11,15 @@ import apiService from '@/services/api';
 import websocketService from '@/services/websocket';
 import { ChatMessage, Room } from '@/types/game';
 import PauseMenu from '@/components/PauseMenu';
+import { ChevronUpIcon, ChevronDownIcon } from '@heroicons/react/24/solid';
 
 interface GameLayoutProps {
     playerId: string;
 }
 
 const GameLayout: React.FC<GameLayoutProps> = ({ playerId }) => {
+    const [isChatExpanded, setIsChatExpanded] = useState(false);
+
     const {
         player,
         setPlayer,
@@ -308,10 +311,9 @@ const GameLayout: React.FC<GameLayoutProps> = ({ playerId }) => {
     }
 
     return (
-        <div className="flex flex-col h-screen bg-black text-green-500 font-['VT323',monospace] relative overflow-hidden">
-            {/* Room Display (top 65%) */}
-            <div className="h-[50%] relative">
-                {/* Retro border overlay */}
+        <div className="h-screen bg-black text-green-500 font-['VT323',monospace] relative overflow-hidden">
+            {/* Full-screen Room Display with border */}
+            <div className="absolute inset-0">
                 <div className="absolute inset-0 border-4 md:border-8 border-double border-amber-900 pointer-events-none z-10" />
                 <RoomDisplay />
             </div>
@@ -393,11 +395,24 @@ const GameLayout: React.FC<GameLayoutProps> = ({ playerId }) => {
                 </div>
             )}
 
-            {/* Chat Display (bottom 35%) */}
-            <div className="h-[50%] flex flex-col relative">
-                {/* Retro terminal border */}
-                <div className="absolute inset-0 border-2 md:border-4 border-amber-900 pointer-events-none" />
-                <div className="flex-1 flex flex-col bg-black bg-opacity-90 overflow-hidden">
+            {/* Chat Display Overlay (bottom portion, translucent) */}
+            <div className={`absolute bottom-0 left-0 right-0 flex flex-col z-20 p-3 md:p-6 transition-all duration-300 ${
+                isChatExpanded ? 'top-16' : 'h-[40vh]'
+            }`}>
+                <div className="max-w-4xl mx-auto bg-black/60 backdrop-blur-md rounded-lg flex flex-col h-full relative">
+                    {/* Expand/Collapse Button */}
+                    <button
+                        onClick={() => setIsChatExpanded(!isChatExpanded)}
+                        className="absolute -top-2 left-1/2 -translate-x-1/2 bg-black/60 backdrop-blur-md border border-amber-900/50 rounded-full p-1.5 hover:bg-black/80 transition-colors z-30"
+                        aria-label={isChatExpanded ? "Collapse chat" : "Expand chat"}
+                    >
+                        {isChatExpanded ? (
+                            <ChevronDownIcon className="w-4 h-4 text-amber-400" />
+                        ) : (
+                            <ChevronUpIcon className="w-4 h-4 text-amber-400" />
+                        )}
+                    </button>
+
                     <div className="flex-1 overflow-hidden">
                         <ChatDisplay />
                     </div>
