@@ -11,7 +11,7 @@ import apiService from '@/services/api';
 import websocketService from '@/services/websocket';
 import { ChatMessage, Room } from '@/types/game';
 import PauseMenu from '@/components/PauseMenu';
-import { ChevronUpIcon, ChevronDownIcon } from '@heroicons/react/24/solid';
+import { ChevronUpIcon, ChevronDownIcon, Bars3Icon } from '@heroicons/react/24/solid';
 
 interface GameLayoutProps {
     playerId: string;
@@ -33,6 +33,7 @@ const GameLayout: React.FC<GameLayoutProps> = ({ playerId }) => {
         addVisitedCoordinate,
         isMinimapFullscreen,
         setIsMinimapFullscreen,
+        isMenuOpen,
         setIsMenuOpen,
         upsertItems,
         isInDuel,
@@ -317,6 +318,15 @@ const GameLayout: React.FC<GameLayoutProps> = ({ playerId }) => {
                 <div className="absolute inset-0 border-4 md:border-8 border-double border-amber-900 pointer-events-none z-10" />
                 <RoomDisplay />
             </div>
+
+            {/* Menu button - positioned in top-left corner */}
+            <button
+                onClick={() => setIsMenuOpen(!isMenuOpen)}
+                className="absolute top-2 left-2 md:top-4 md:left-4 z-20 bg-black bg-opacity-80 p-2 md:p-3 border border-amber-900 rounded hover:bg-opacity-100 transition-all"
+                aria-label="Toggle menu"
+            >
+                <Bars3Icon className="w-5 h-5 md:w-6 md:h-6 text-amber-500" />
+            </button>
 
             {/* Minimap - positioned in top-right corner */}
             <div className="absolute top-2 right-2 md:top-4 md:right-4 z-20 bg-black bg-opacity-80 p-2 md:p-3 border border-green-700 rounded text-xs md:text-sm">
