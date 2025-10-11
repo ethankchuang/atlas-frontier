@@ -312,12 +312,12 @@ const GameLayout: React.FC<GameLayoutProps> = ({ playerId }) => {
             {/* Room Display (top 65%) */}
             <div className="h-[50%] relative">
                 {/* Retro border overlay */}
-                <div className="absolute inset-0 border-8 border-double border-amber-900 pointer-events-none z-10" />
+                <div className="absolute inset-0 border-4 md:border-8 border-double border-amber-900 pointer-events-none z-10" />
                 <RoomDisplay />
             </div>
 
             {/* Minimap - positioned in top-right corner */}
-            <div className="absolute top-4 right-4 z-20 bg-black bg-opacity-80 p-3 border border-green-700 rounded">
+            <div className="absolute top-2 right-2 md:top-4 md:right-4 z-20 bg-black bg-opacity-80 p-2 md:p-3 border border-green-700 rounded text-xs md:text-sm">
                 <Minimap />
             </div>
 
@@ -396,7 +396,7 @@ const GameLayout: React.FC<GameLayoutProps> = ({ playerId }) => {
             {/* Chat Display (bottom 35%) */}
             <div className="h-[50%] flex flex-col relative">
                 {/* Retro terminal border */}
-                <div className="absolute inset-0 border-4 border-amber-900 pointer-events-none" />
+                <div className="absolute inset-0 border-2 md:border-4 border-amber-900 pointer-events-none" />
                 <div className="flex-1 flex flex-col bg-black bg-opacity-90 overflow-hidden">
                     <div className="flex-1 overflow-hidden">
                         <ChatDisplay />

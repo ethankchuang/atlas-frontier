@@ -42,7 +42,7 @@ const ChatDisplay: React.FC = () => {
                 // Check if this is a player action (starts with ">")
                 if (message.message.startsWith('> ')) {
                     return (
-                        <div className="mb-3 text-amber-400 font-mono text-xl italic">
+                        <div className="mb-3 text-amber-400 font-mono text-sm md:text-xl italic">
                             {playerName} {message.message.substring(2)}
                         </div>
                     );
@@ -50,18 +50,18 @@ const ChatDisplay: React.FC = () => {
 
                 // Regular chat message
                 return (
-                    <div className="flex items-start gap-3 mb-3 font-mono">
-                        <UserCircleIcon className="w-6 h-6 text-amber-500 flex-shrink-0 mt-1" />
+                    <div className="flex items-start gap-2 md:gap-3 mb-3 font-mono">
+                        <UserCircleIcon className="w-4 h-4 md:w-6 md:h-6 text-amber-500 flex-shrink-0 mt-1" />
                         <div>
-                            <span className="font-bold text-amber-500 text-xl">{playerName}: </span>
-                            <span className="text-green-400 text-xl">{message.message}</span>
+                            <span className="font-bold text-amber-500 text-sm md:text-xl">{playerName}: </span>
+                            <span className="text-green-400 text-sm md:text-xl">{message.message}</span>
                         </div>
                     </div>
                 );
 
             case 'emote':
                 return (
-                    <div className="mb-3 text-yellow-500 italic font-mono text-xl">
+                    <div className="mb-3 text-yellow-500 italic font-mono text-sm md:text-xl">
                         * {playerName} {message.message}
                     </div>
                 );
@@ -70,14 +70,14 @@ const ChatDisplay: React.FC = () => {
                 // Check if this is a user command (starts with ">>")
                 if (message.message.startsWith('>> ')) {
                     return (
-                        <div className="mb-3 text-gray-500 font-mono text-xl">
+                        <div className="mb-3 text-gray-500 font-mono text-sm md:text-xl">
                             {message.message}
                         </div>
                     );
                 }
 
                 return (
-                    <div className="mb-3 text-cyan-400 font-mono text-xl">
+                    <div className="mb-3 text-cyan-400 font-mono text-sm md:text-xl">
                         <span className={message.isStreaming ? 'animate-pulse' : ''}>{'>'}</span>{' '}
                         <span className={message.isStreaming && message.message === '▮' ? 'animate-blink' : ''}>
                             {message.message}
@@ -87,7 +87,7 @@ const ChatDisplay: React.FC = () => {
 
             case 'ai_response':
                 return (
-                    <div className="mb-3 text-green-400 font-mono text-xl">
+                    <div className="mb-3 text-green-400 font-mono text-sm md:text-xl">
                         {message.message}
                     </div>
                 );
@@ -95,19 +95,19 @@ const ChatDisplay: React.FC = () => {
             case 'room_description':
                 return (
                     <div className="mb-6 font-mono">
-                        <div className="flex items-center justify-between mb-3">
-                            <div className="text-xl font-bold text-amber-500">
+                        <div className="flex items-center justify-between mb-2 md:mb-3">
+                            <div className="text-base md:text-xl font-bold text-amber-500">
                                 {message.title}{message.biome ? ` (${message.biome})` : ''}
                             </div>
-                            <div className="text-sm text-amber-300 bg-amber-900 bg-opacity-30 px-2 py-1 rounded">
+                            <div className="text-xs md:text-sm text-amber-300 bg-amber-900 bg-opacity-30 px-2 py-1 rounded">
                                 ({message.x ?? 0}, {message.y ?? 0})
                             </div>
                         </div>
-                        <div className="text-green-400 text-lg mb-3">
+                        <div className="text-green-400 text-sm md:text-lg mb-3">
                             {message.description}
                         </div>
                         {message.atmospheric_presence && (
-                            <div className="text-yellow-400 text-base mb-3 font-bold">
+                            <div className="text-yellow-400 text-sm md:text-base mb-3 font-bold">
                                 {message.atmospheric_presence}
                             </div>
                         )}
@@ -116,7 +116,7 @@ const ChatDisplay: React.FC = () => {
 
             case 'item_obtained':
                 return (
-                    <div className="mb-3 text-purple-400 font-mono text-xl font-bold bg-purple-900 bg-opacity-30 px-4 py-2 rounded border border-purple-500">
+                    <div className="mb-3 text-purple-400 font-mono text-sm md:text-xl font-bold bg-purple-900 bg-opacity-30 px-3 md:px-4 py-2 rounded border border-purple-500">
                         {message.message}
                     </div>
                 );
@@ -133,11 +133,11 @@ const ChatDisplay: React.FC = () => {
 
             <div
                 ref={scrollContainerRef}
-                className="h-full overflow-y-auto p-6 bg-black bg-opacity-90 font-mono text-xl leading-7"
+                className="h-full overflow-y-auto p-3 md:p-6 bg-black bg-opacity-90 font-mono text-sm md:text-xl leading-5 md:leading-7"
             >
                 <div className="max-w-4xl mx-auto">
                 {messages.map((message, index) => (
-                        <div key={`${message.timestamp}-${index}`} className="px-3 transition-opacity duration-200">
+                        <div key={`${message.timestamp}-${index}`} className="px-2 md:px-3 transition-opacity duration-200">
                         {renderMessage(message)}
                     </div>
                 ))}
