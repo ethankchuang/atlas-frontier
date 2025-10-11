@@ -1161,7 +1161,29 @@ class WebSocketService {
 
     private handlePlayerUpdate(player: Player) {
         if (player.id === this.playerId) {
-            useGameStore.getState().setPlayer(player);
+            // CRITICAL: When updating current player, preserve health to prevent
+            // stale data from overwriting fresh state (e.g., after death/respawn)
+            const store = useGameStore.getState();
+            const currentPlayer = store.player;
+            
+            if (currentPlayer) {
+                // Merge incoming updates with current state, preferring current health
+                const mergedPlayer = {
+                    ...player,
+                    // Prefer current health if it's set (prevents overwrites from stale data)
+                    health: currentPlayer.health !== undefined ? currentPlayer.health : player.health
+                };
+                console.log('[WebSocket] Updating current player with health safeguard:', {
+                    incomingHealth: player.health,
+                    currentHealth: currentPlayer.health,
+                    finalHealth: mergedPlayer.health
+                });
+                store.setPlayer(mergedPlayer);
+            } else {
+                // No current player state, use incoming data as-is
+                console.log('[WebSocket] No current player state, using incoming data');
+                store.setPlayer(player);
+            }
         } else {
             const store = useGameStore.getState();
             const players = store.playersInRoom.map(p =>
@@ -1250,7 +1272,7 @@ class WebSocketService {
         this.socket.send(JSON.stringify(duelCancel));
     }
 
-    private handlePlayerDeath(data: { message: string; new_room: Room; timestamp: string }) {
+    private handlePlayerDeath(data: { message: string; new_room: Room; player?: Player; timestamp: string }) {
         console.log('[WebSocket] Handling player death:', data);
         
         // Add death message to chat
@@ -1266,12 +1288,31 @@ class WebSocketService {
         // Update player's current room to the spawn room
         if (data.new_room) {
             const store = useGameStore.getState();
-            store.setCurrentRoom(data.new_room);
             console.log('[WebSocket] Player teleported to spawn room:', data.new_room.id);
             
+            // Update player state if provided (includes health restoration, immunity, etc.)
+            if (data.player && store.player) {
+                const updatedPlayer = { ...store.player, ...data.player } as Player;
+                store.setPlayer(updatedPlayer);
+                console.log('[WebSocket] Updated player state after death:', {
+                    health: updatedPlayer.health,
+                    rejoin_immunity: updatedPlayer.rejoin_immunity,
+                    current_room: updatedPlayer.current_room
+                });
+            }
+            
+            // Set pending room update BEFORE disconnecting
+            // This ensures the room_update from server will be properly applied
+            this.pendingRoomUpdate = data.new_room;
+            
             // Disconnect from current room and reconnect to spawn room
+            const savedPlayerId = this.playerId; // Save playerId before disconnect clears it
             this.disconnect();
-            this.connect(data.new_room.id, this.playerId!);
+            
+            // Set reconnection state AFTER disconnect (which resets it to false)
+            this.isReconnecting = true;
+            
+            this.connect(data.new_room.id, savedPlayerId!);
         }
     }
 

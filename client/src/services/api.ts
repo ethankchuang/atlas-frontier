@@ -106,7 +106,6 @@ class APIService {
         onError: (error: string) => void
     ): Promise<void> {
         const requestStart = performance.now();
-        console.log(`⏱️ [CLIENT TIMING] Action request starting: "${action.action.substring(0, 50)}..."`);
 
         try {
             const store = useGameStore.getState();
@@ -150,18 +149,12 @@ class APIService {
                 (headers as Record<string, string>)['Authorization'] = `Bearer ${token}`;
             }
 
-            const fetchStart = performance.now();
-            console.log(`⏱️ [CLIENT TIMING] Preparation complete: ${(fetchStart - requestStart).toFixed(2)}ms`);
-
             // For streaming, we need to make a direct call but through our proxy
             const response = await fetch('/api/game/action/stream', {
                 method: 'POST',
                 headers,
                 body: JSON.stringify(action),
             });
-
-            const responseReceived = performance.now();
-            console.log(`⏱️ [CLIENT TIMING] Response received: ${(responseReceived - fetchStart).toFixed(2)}ms`);
 
             if (!response.ok) {
                 const errorText = await response.text();
@@ -212,8 +205,6 @@ class APIService {
             let buffer = '';
             let firstChunkTime: number | null = null;
             let chunkCount = 0;
-            let lastChunkTime: number | null = null;
-            let totalWaitingTime = 0;
 
             while (true) {
                 const { done, value } = await reader.read();
@@ -223,11 +214,7 @@ class APIService {
 
                 if (firstChunkTime === null) {
                     firstChunkTime = chunkReceived;
-                    console.log(`⏱️ [CLIENT TIMING] First data chunk received: ${(firstChunkTime - responseReceived).toFixed(2)}ms`);
-                } else if (lastChunkTime) {
-                    const timeBetweenChunks = chunkReceived - lastChunkTime;
-                    totalWaitingTime += timeBetweenChunks;
-                    console.log(`⏱️ [CLIENT TIMING] Time between chunks: ${timeBetweenChunks.toFixed(2)}ms (total waiting: ${totalWaitingTime.toFixed(2)}ms)`);
+                    console.log(`⏱️ [TIMING] First chunk: ${(firstChunkTime - requestStart).toFixed(0)}ms`);
                 }
 
                 buffer += decoder.decode(value, { stream: true });
@@ -290,24 +277,30 @@ class APIService {
                             return;
                         }
                         if (data.type === 'chunk') {
-                            if (chunkCount === 1) {
-                                console.log(`⏱️ [CLIENT TIMING] First content chunk: ${(performance.now() - requestStart).toFixed(2)}ms from request start`);
-                            } else {
-                                console.log(`⏱️ [CLIENT TIMING] Content chunk ${chunkCount}: ${(performance.now() - requestStart).toFixed(2)}ms from request start`);
-                            }
                             onChunk(data.content);
                         } else if (data.type === 'room_update') {
                             // OPTIMIZATION: Handle room updates immediately for instant UI updates
-                            const roomUpdateTime = performance.now();
-                            console.log(`⏱️ [CLIENT TIMING] Room update received: ${(roomUpdateTime - requestStart).toFixed(2)}ms from request start`);
 
                             // Process room updates immediately
                             if (data.updates) {
                                 // Handle player updates (position, inventory, etc.)
                                 if (data.updates.player && store.player) {
-                                    const updatedPlayer = { ...store.player, ...data.updates.player };
+                                    // CRITICAL: Preserve health when merging player updates
+                                    // to prevent stale data from overwriting fresh state (e.g., after death/respawn)
+                                    const currentHealth = store.player.health;
+                                    
+                                    const updatedPlayer = { 
+                                        ...store.player, 
+                                        ...data.updates.player,
+                                        // Preserve current health if set (prevents overwrites from stale data)
+                                        health: currentHealth !== undefined ? currentHealth : data.updates.player.health
+                                    };
                                     store.setPlayer(updatedPlayer);
-                                    console.log('[API] Room update: Updated player state', updatedPlayer);
+                                    console.log('[API] Room update: Updated player state with health safeguard', {
+                                        currentHealth,
+                                        incomingHealth: data.updates.player.health,
+                                        finalHealth: updatedPlayer.health
+                                    });
                                 }
 
                                 // Handle room changes
@@ -344,29 +337,14 @@ class APIService {
                                     console.log('[API] Room update: Updated inventory', data.updates.inventory);
                                 }
                             }
-
-                            console.log(`⏱️ [CLIENT TIMING] Room update processed: ${(performance.now() - roomUpdateTime).toFixed(2)}ms`);
                         } else if (data.type === 'final') {
                             const finalTime = performance.now();
-                            console.log(`⏱️ [CLIENT TIMING] Final response received: ${(finalTime - requestStart).toFixed(2)}ms total`);
-                            console.log(`⏱️ [CLIENT TIMING] Total chunks processed: ${chunkCount}`);
+                            const totalTime = finalTime - requestStart;
+                            console.log(`⏱️ [TIMING] Complete: ${totalTime.toFixed(0)}ms (${chunkCount} chunks)`);
 
                             // Clear movement animation states
                             store.setIsAttemptingMovement(false);
                             store.setShowMovementAnimation(false);
-                            
-                            // Enhanced timing breakdown
-                            const totalTime = finalTime - requestStart;
-                            const timeToFirstChunk = firstChunkTime - requestStart;
-                            const timeFromFirstToFinal = finalTime - firstChunkTime;
-                            
-                            console.log(`⏱️ [CLIENT TIMING] === DETAILED BREAKDOWN ===`);
-                            console.log(`⏱️ [CLIENT TIMING] Time to first chunk: ${timeToFirstChunk.toFixed(2)}ms`);
-                            console.log(`⏱️ [CLIENT TIMING] Time from first chunk to final: ${timeFromFirstToFinal.toFixed(2)}ms`);
-                            console.log(`⏱️ [CLIENT TIMING] Total waiting time between chunks: ${totalWaitingTime.toFixed(2)}ms`);
-                            console.log(`⏱️ [CLIENT TIMING] Total processing time: ${(totalTime - totalWaitingTime).toFixed(2)}ms`);
-                            console.log(`⏱️ [CLIENT TIMING] Average time per chunk: ${(timeFromFirstToFinal / chunkCount).toFixed(2)}ms`);
-                            console.log(`⏱️ [CLIENT TIMING] ================================`);
 
                             // Guard against malformed updates by ensuring object shape
                             if (data.updates && typeof data.updates !== 'object') {
@@ -425,9 +403,6 @@ class APIService {
                         }
                     }
                 }
-                
-                // Update lastChunkTime for next iteration
-                lastChunkTime = chunkReceived;
             }
                     } catch (error) {
                 console.error('[API] Stream error:', error);

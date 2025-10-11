@@ -2,7 +2,20 @@ import React, { useState, useEffect } from 'react';
 import Image from 'next/image';
 import useGameStore from '@/store/gameStore';
 
-const MAX_RETRIES = 3;
+const MAX_RETRIES = 1; // Reduced retries since Replicate URLs expire quickly
+
+// Biome-themed gradient backgrounds for fallback
+const BIOME_GRADIENTS: Record<string, string> = {
+    forest: 'from-green-900 via-green-800 to-emerald-900',
+    desert: 'from-yellow-800 via-orange-700 to-amber-900',
+    mountain: 'from-gray-700 via-slate-800 to-gray-900',
+    ocean: 'from-blue-900 via-cyan-900 to-indigo-900',
+    swamp: 'from-green-950 via-teal-900 to-emerald-950',
+    tundra: 'from-cyan-950 via-blue-950 to-slate-900',
+    volcanic: 'from-red-900 via-orange-900 to-amber-900',
+    bloodplain: 'from-red-950 via-rose-900 to-red-900',
+    default: 'from-gray-900 via-slate-900 to-gray-800'
+};
 
 const RoomDisplay: React.FC = () => {
     const { currentRoom, isAttemptingMovement, showMovementAnimation, movementFailed, isRoomGenerating } = useGameStore();
@@ -17,23 +30,28 @@ const RoomDisplay: React.FC = () => {
             imageUrl: currentRoom?.image_url,
             imageStatus: currentRoom?.image_status
         });
-        console.log(`⏱️ [IMAGE TIMING] Starting to load image for room ${currentRoom?.id}`);
         setImageError(false);
         setRetryCount(0);
         setIsImageLoading(true);
     }, [currentRoom?.id, currentRoom?.image_url, currentRoom?.image_status]);
 
     const handleImageLoad = () => {
-        console.log('[RoomDisplay] Image loaded successfully:', currentRoom?.image_url);
+        console.log('[RoomDisplay] Image loaded successfully');
         setIsImageLoading(false);
         setImageError(false);
     };
 
-    const handleImageError = (error: React.SyntheticEvent<HTMLImageElement, Event>) => {
-        console.error('[RoomDisplay] Image failed to load:', currentRoom?.image_url, error);
+    const handleImageError = () => {
+        console.error('[RoomDisplay] Image failed to load (likely expired URL)');
         setIsImageLoading(false);
         setImageError(true);
         setRetryCount(prev => prev + 1);
+    };
+
+    const getBiomeGradient = (biome?: string): string => {
+        if (!biome) return BIOME_GRADIENTS.default;
+        const normalizedBiome = biome.toLowerCase();
+        return BIOME_GRADIENTS[normalizedBiome] || BIOME_GRADIENTS.default;
     };
 
     if (!currentRoom) {
@@ -85,7 +103,7 @@ const RoomDisplay: React.FC = () => {
                     </div>
                 )}
 
-                {(isImageLoading || isRoomGenerating) && (
+                {(isImageLoading || isRoomGenerating) && !imageError && (
                     <div className="absolute inset-0 flex items-center justify-center bg-black">
                         <div className="flex flex-col items-center justify-center">
                             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-400"></div>
@@ -95,14 +113,22 @@ const RoomDisplay: React.FC = () => {
                         </div>
                     </div>
                 )}
-                {imageError && retryCount >= MAX_RETRIES && (
-                    <div className="absolute inset-0 flex items-center justify-center bg-black">
-                        <div className="text-red-500 text-center">
-                            <div className="text-lg mb-2">Failed to load image</div>
-                            <div className="text-sm">Please try again later</div>
+                
+                {/* Fallback gradient background when image fails to load or expires */}
+                {(imageError && retryCount >= MAX_RETRIES) && (
+                    <div className={`absolute inset-0 bg-gradient-to-br ${getBiomeGradient(currentRoom.biome)} flex items-center justify-center`}>
+                        <div className="text-center text-gray-300 px-8 max-w-2xl">
+                            <div className="text-2xl font-bold mb-4 text-amber-300">{formattedTitle}</div>
+                            <div className="text-base opacity-80 leading-relaxed">
+                                {currentRoom.description}
+                            </div>
+                            <div className="text-xs mt-4 opacity-60">
+                                (Image temporarily unavailable)
+                            </div>
                         </div>
                     </div>
                 )}
+                
                 {currentRoom.image_url && !imageError && (
                     <Image
                         src={currentRoom.image_url}

@@ -51,6 +51,8 @@ export interface Player {
     memory_log: string[];
     last_action?: string;
     last_action_text?: string;
+    health?: number;  // Player health (default 5)
+    rejoin_immunity?: boolean;  // Temporary immunity to aggressive monsters when rejoining
 }
 
 export interface GameState {
