@@ -313,7 +313,7 @@ const GameLayout: React.FC<GameLayoutProps> = ({ playerId }) => {
     }
 
     return (
-        <div className="h-screen bg-black text-green-500 font-['VT323',monospace] relative overflow-hidden" style={{ height: '100lvh' }}>
+        <div className="h-screen bg-black text-green-500 font-['VT323',monospace] relative overflow-hidden" style={{ minHeight: '100svh' }}>
             {/* Full-screen Room Display with border */}
             <div className="absolute inset-0">
                 <div className="absolute inset-0 border-4 md:border-8 border-double border-amber-900 pointer-events-none z-10" />
@@ -415,10 +415,7 @@ const GameLayout: React.FC<GameLayoutProps> = ({ playerId }) => {
                 style={{
                     paddingLeft: typeof window !== 'undefined' && window.innerWidth >= 768 ? '1.5rem' : '0.75rem',
                     paddingRight: typeof window !== 'undefined' && window.innerWidth >= 768 ? '1.5rem' : '0.75rem',
-                    paddingTop: typeof window !== 'undefined' && window.innerWidth >= 768 ? '1.5rem' : '0.75rem',
-                    paddingBottom: typeof window !== 'undefined' && window.innerWidth >= 768
-                        ? 'max(1.5rem, env(safe-area-inset-bottom))'
-                        : 'max(0.75rem, env(safe-area-inset-bottom))'
+                    paddingTop: typeof window !== 'undefined' && window.innerWidth >= 768 ? '1.5rem' : '0.75rem'
                 }}
             >
                 <div className="w-full max-w-4xl mx-auto bg-black/60 backdrop-blur-md rounded-lg flex flex-col h-full relative">
@@ -438,7 +435,9 @@ const GameLayout: React.FC<GameLayoutProps> = ({ playerId }) => {
                     <div className="flex-1 overflow-hidden">
                         <ChatDisplay />
                     </div>
-                    <ChatInput />
+                    <div style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
+                        <ChatInput />
+                    </div>
                 </div>
             </div>
 
