@@ -94,6 +94,10 @@ interface GameStore {
     isInventoryOpen: boolean;
     setIsInventoryOpen: (open: boolean) => void;
 
+    // Chat mode state
+    isEmote: boolean;
+    setIsEmote: (isEmote: boolean) => void;
+
     // Item registry for client-side lookup
     itemsById: { [id: string]: Item };
     upsertItems: (items: Item[]) => void;
@@ -169,6 +173,9 @@ const useGameStore = create<GameStore>((set, get) => ({
     // Menu/Inventory state
     isMenuOpen: false,
     isInventoryOpen: false,
+
+    // Chat mode state
+    isEmote: false,
 
     // Item registry
     itemsById: {},
@@ -274,6 +281,9 @@ const useGameStore = create<GameStore>((set, get) => ({
     // Menu/Inventory actions
     setIsMenuOpen: (open) => set({ isMenuOpen: open }),
     setIsInventoryOpen: (open) => set({ isInventoryOpen: open }),
+
+    // Chat mode actions
+    setIsEmote: (isEmote) => set({ isEmote }),
 
     // Items registry actions
     upsertItems: (items: Item[]) => set((state) => {
