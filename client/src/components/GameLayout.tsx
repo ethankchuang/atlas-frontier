@@ -313,7 +313,7 @@ const GameLayout: React.FC<GameLayoutProps> = ({ playerId }) => {
     }
 
     return (
-        <div className="h-screen bg-black text-green-500 font-['VT323',monospace] relative overflow-hidden" style={{ height: '100dvh' }}>
+        <div className="h-screen bg-black text-green-500 font-['VT323',monospace] relative overflow-hidden" style={{ height: '100vh' }}>
             {/* Full-screen Room Display with border */}
             <div className="absolute inset-0">
                 <div className="absolute inset-0 border-4 md:border-8 border-double border-amber-900 pointer-events-none z-10" />
