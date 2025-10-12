@@ -313,7 +313,7 @@ const GameLayout: React.FC<GameLayoutProps> = ({ playerId }) => {
     }
 
     return (
-        <div className="h-screen bg-black text-green-500 font-['VT323',monospace] relative overflow-hidden" style={{ height: '100vh' }}>
+        <div className="h-screen bg-black text-green-500 font-['VT323',monospace] relative overflow-hidden" style={{ height: '100dvh' }}>
             {/* Full-screen Room Display with border */}
             <div className="absolute inset-0">
                 <div className="absolute inset-0 border-4 md:border-8 border-double border-amber-900 pointer-events-none z-10" />
@@ -348,57 +348,57 @@ const GameLayout: React.FC<GameLayoutProps> = ({ playerId }) => {
 
             {/* Duel Status Overlay */}
             {isInDuel && (
-                <div className="absolute top-3 left-1/2 -translate-x-1/2 z-30 bg-black/85 border border-amber-500 rounded px-3 py-2">
-                    <div className="text-amber-400 text-xs font-bold text-center">Duel vs {duelOpponent?.name || 'Opponent'}</div>
-                    <div className="mt-1 grid grid-cols-2 gap-6 text-[10px]">
+                <div className="absolute top-4 left-1/2 -translate-x-1/2 z-30 bg-black/90 border-2 border-amber-500 rounded-lg px-4 py-3 md:px-6 md:py-4 min-w-[90vw] md:min-w-[600px] max-w-[95vw]">
+                    <div className="text-amber-400 text-base md:text-lg font-bold text-center mb-2">Duel vs {duelOpponent?.name || 'Opponent'}</div>
+                    <div className="grid grid-cols-2 gap-4 md:gap-8 text-xs md:text-sm">
                         {/* You */}
                         <div>
-                            <div className="text-green-400 font-bold mb-0.5">You</div>
-                            <div className="space-y-1">
+                            <div className="text-green-400 font-bold mb-1 text-sm md:text-base">You</div>
+                            <div className="space-y-2">
                                 <div>
-                                    <div className="flex items-center gap-1 mb-0.5">
-                                        <span>❤️</span>
+                                    <div className="flex items-center gap-1 mb-1">
+                                        <span className="text-base md:text-lg">❤️</span>
                                         <span className="text-gray-200">Health</span>
                                         <span className="ml-auto text-gray-400">{Math.min(p1Max, Math.max(0, player1Vital))}/{p1Max}</span>
                                     </div>
-                                    <div className="w-24 md:w-40 h-1.5 bg-gray-700 rounded overflow-hidden">
-                                        <div className="h-1.5 bg-red-600" style={{width: `${Math.min(100, Math.max(0, ((Math.min(p1Max, Math.max(0, player1Vital))/p1Max)*100)))}%`}} />
+                                    <div className="w-full h-2 md:h-2.5 bg-gray-700 rounded overflow-hidden">
+                                        <div className="h-full bg-red-600" style={{width: `${Math.min(100, Math.max(0, ((Math.min(p1Max, Math.max(0, player1Vital))/p1Max)*100)))}%`}} />
                                     </div>
                                 </div>
                                 <div>
-                                    <div className="flex items-center gap-1 mb-0.5">
-                                        <span>🎯</span>
+                                    <div className="flex items-center gap-1 mb-1">
+                                        <span className="text-base md:text-lg">🎯</span>
                                         <span className="text-gray-200">Advantage</span>
                                         <span className="ml-auto text-gray-400">{Math.min(DUEL_MAX_ADVANTAGE, Math.max(0, player1Control))}/{DUEL_MAX_ADVANTAGE}</span>
                                     </div>
-                                    <div className="w-24 md:w-40 h-1.5 bg-gray-700 rounded overflow-hidden">
-                                        <div className="h-1.5 bg-blue-500" style={{width: `${Math.min(100, Math.max(0, (Math.min(DUEL_MAX_ADVANTAGE, Math.max(0, player1Control))/DUEL_MAX_ADVANTAGE)*100))}%`}} />
+                                    <div className="w-full h-2 md:h-2.5 bg-gray-700 rounded overflow-hidden">
+                                        <div className="h-full bg-blue-500" style={{width: `${Math.min(100, Math.max(0, (Math.min(DUEL_MAX_ADVANTAGE, Math.max(0, player1Control))/DUEL_MAX_ADVANTAGE)*100))}%`}} />
                                     </div>
                                 </div>
                             </div>
                         </div>
                         {/* Opponent */}
                         <div>
-                            <div className="text-red-400 font-bold mb-0.5">{duelOpponent?.name || 'Opponent'}</div>
-                            <div className="space-y-1">
+                            <div className="text-red-400 font-bold mb-1 text-sm md:text-base">{duelOpponent?.name || 'Opponent'}</div>
+                            <div className="space-y-2">
                                 <div>
-                                    <div className="flex items-center gap-1 mb-0.5">
-                                        <span>❤️</span>
+                                    <div className="flex items-center gap-1 mb-1">
+                                        <span className="text-base md:text-lg">❤️</span>
                                         <span className="text-gray-200">Health</span>
                                         <span className="ml-auto text-gray-400">{Math.min(p2Max, Math.max(0, player2Vital))}/{p2Max}</span>
                                     </div>
-                                    <div className="w-24 md:w-40 h-1.5 bg-gray-700 rounded overflow-hidden">
-                                        <div className="h-1.5 bg-red-400" style={{width: `${Math.min(100, Math.max(0, ((Math.min(p2Max, Math.max(0, player2Vital))/p2Max)*100)))}%`}} />
+                                    <div className="w-full h-2 md:h-2.5 bg-gray-700 rounded overflow-hidden">
+                                        <div className="h-full bg-red-400" style={{width: `${Math.min(100, Math.max(0, ((Math.min(p2Max, Math.max(0, player2Vital))/p2Max)*100)))}%`}} />
                                     </div>
                                 </div>
                                 <div>
-                                    <div className="flex items-center gap-1 mb-0.5">
-                                        <span>🎯</span>
+                                    <div className="flex items-center gap-1 mb-1">
+                                        <span className="text-base md:text-lg">🎯</span>
                                         <span className="text-gray-200">Advantage</span>
                                         <span className="ml-auto text-gray-400">{Math.min(DUEL_MAX_ADVANTAGE, Math.max(0, player2Control))}/{DUEL_MAX_ADVANTAGE}</span>
                                     </div>
-                                    <div className="w-24 md:w-40 h-1.5 bg-gray-700 rounded overflow-hidden">
-                                        <div className="h-1.5 bg-blue-300" style={{width: `${Math.min(100, Math.max(0, (Math.min(DUEL_MAX_ADVANTAGE, Math.max(0, player2Control))/DUEL_MAX_ADVANTAGE)*100))}%`}} />
+                                    <div className="w-full h-2 md:h-2.5 bg-gray-700 rounded overflow-hidden">
+                                        <div className="h-full bg-blue-300" style={{width: `${Math.min(100, Math.max(0, (Math.min(DUEL_MAX_ADVANTAGE, Math.max(0, player2Control))/DUEL_MAX_ADVANTAGE)*100))}%`}} />
                                     </div>
                                 </div>
                             </div>
