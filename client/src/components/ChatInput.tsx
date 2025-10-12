@@ -32,13 +32,8 @@ const ChatInput: React.FC = () => {
     } = useGameStore();
 
     useEffect(() => {
-        // Avoid auto-focus on touch devices (iOS Safari can scroll/jump on load)
-        if (typeof window !== 'undefined') {
-            const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
-            if (!isTouch) {
-                inputRef.current?.focus();
-            }
-        }
+        // Focus input on mount
+        inputRef.current?.focus();
     }, []);
 
     // Animate spinner when streaming
