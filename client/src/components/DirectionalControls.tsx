@@ -1,11 +1,51 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import useGameStore from '@/store/gameStore';
 import apiService from '@/services/api';
 import { ChevronUpIcon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, EyeIcon, ChatBubbleLeftIcon, BoltIcon } from '@heroicons/react/24/solid';
 
+// ASCII spinner frames like Claude Code
+const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+
 const DirectionalControls: React.FC = () => {
     const { player, currentRoom, addMessage, updateMessage, isInDuel, myDuelMove, bothMovesSubmitted, isEmote, setIsEmote } = useGameStore();
     const [isProcessing, setIsProcessing] = useState(false);
+    const [spinnerFrame, setSpinnerFrame] = useState(0);
+    const streamMessageIdRef = useRef<string | null>(null);
+    const spinnerIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+    // Animate spinner when processing
+    useEffect(() => {
+        if (isProcessing && streamMessageIdRef.current) {
+            spinnerIntervalRef.current = setInterval(() => {
+                setSpinnerFrame((prev) => (prev + 1) % SPINNER_FRAMES.length);
+            }, 80); // Update every 80ms for smooth animation
+        } else {
+            if (spinnerIntervalRef.current) {
+                clearInterval(spinnerIntervalRef.current);
+                spinnerIntervalRef.current = null;
+            }
+            setSpinnerFrame(0);
+        }
+
+        return () => {
+            if (spinnerIntervalRef.current) {
+                clearInterval(spinnerIntervalRef.current);
+            }
+        };
+    }, [isProcessing]);
+
+    // Update the spinner message when frame changes
+    useEffect(() => {
+        if (isProcessing && streamMessageIdRef.current) {
+            updateMessage(streamMessageIdRef.current, (msg) => {
+                // Only update if the message is still just a spinner frame
+                if (SPINNER_FRAMES.includes(msg.message)) {
+                    return { ...msg, message: SPINNER_FRAMES[spinnerFrame] };
+                }
+                return msg;
+            });
+        }
+    }, [spinnerFrame, isProcessing, updateMessage]);
 
     const handleDirection = async (direction: string) => {
         if (!player || !currentRoom || isProcessing) return;
@@ -24,11 +64,12 @@ const DirectionalControls: React.FC = () => {
 
         // Add streaming message with spinner
         const streamMessageId = `stream-${Date.now()}`;
+        streamMessageIdRef.current = streamMessageId;
         const streamingMessage = {
             id: streamMessageId,
             player_id: player.id,
             room_id: currentRoom.id,
-            message: '⠋',
+            message: SPINNER_FRAMES[0],
             message_type: 'system' as const,
             timestamp: new Date().toISOString(),
             isStreaming: true
@@ -45,7 +86,8 @@ const DirectionalControls: React.FC = () => {
                 (chunk: string) => {
                     updateMessage(streamMessageId, (prev) => ({
                         ...prev,
-                        message: prev.message === '⠋' ? chunk : prev.message + chunk
+                        // Replace spinner on first chunk, then append
+                        message: SPINNER_FRAMES.includes(prev.message) ? chunk : prev.message + chunk
                     }));
                 },
                 (response) => {
@@ -65,6 +107,7 @@ const DirectionalControls: React.FC = () => {
                     }
 
                     setIsProcessing(false);
+                    streamMessageIdRef.current = null;
                 },
                 () => {
                     updateMessage(streamMessageId, (prev) => ({
@@ -73,6 +116,7 @@ const DirectionalControls: React.FC = () => {
                         isStreaming: false
                     }));
                     setIsProcessing(false);
+                    streamMessageIdRef.current = null;
                 }
             );
         } catch (error) {

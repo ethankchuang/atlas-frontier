@@ -29,7 +29,7 @@ WORLD_CONFIG = {
     "game_type": "MUD / RPG / D&D style game",                 # e.g., "space adventure", "survival game"
 
     # Visual & Artistic Direction
-    "visual_style": "atmospheric medieval fantasy game backdrop, cinematic lighting, cozy video game style, 16bit retro graphics",
+    "visual_style": "atmospheric medieval fantasy game backdrop, cinematic lighting, cozy video game style, high res retro graphics",
     "architecture_style": "medieval architecture",
 
     # Tone & Content
