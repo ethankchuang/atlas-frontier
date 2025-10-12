@@ -6,6 +6,7 @@ import json
 import re
 import random
 from .base import ItemTemplate
+from ..ai_handler import WORLD_CONFIG
 
 
 class AIItemGenerator(ItemTemplate):
@@ -140,7 +141,7 @@ Mundane item:
         """Generate the prompt for the AI with world and situational context"""
         # Extract world context
         world_seed = context.get('world_seed', 'Unknown World')
-        world_theme = context.get('world_theme', 'fantasy')
+        world_theme = context.get('world_theme', WORLD_CONFIG['setting_secondary'])
         main_quest = context.get('main_quest', 'Unknown quest')
         
         # Extract situational context

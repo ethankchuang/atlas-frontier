@@ -2,6 +2,7 @@ import logging
 import random
 from typing import Dict, List, Any, Optional, Tuple
 from .models import Player, Room, Monster
+from .ai_handler import WORLD_CONFIG
 
 logger = logging.getLogger(__name__)
 
@@ -198,7 +199,7 @@ class MonsterBehaviorManager:
 
             # Build prompt for AI
             prompt = (
-                "You are a creature in a medieval fantasy MUD game. Stay in character and reply briefly.\n"
+                f"You are a {WORLD_CONFIG['creature_term'][:-1]} in a {WORLD_CONFIG['setting_primary']} {WORLD_CONFIG['setting_secondary']} {WORLD_CONFIG['game_type']}. Stay in character and reply briefly.\n"
                 "CONSTRAINTS:\n"
                 "- 1 sentence max (concise).\n"
                 "- Natural, varied wording (avoid repeating the exact same phrase across turns).\n"
