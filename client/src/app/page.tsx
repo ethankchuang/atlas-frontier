@@ -146,12 +146,13 @@ export default function Home() {
 
     // Background container component
     const BackgroundContainer = ({ children }: { children: React.ReactNode }) => (
-        <div className="flex items-center justify-center relative overflow-hidden" style={{ height: '100lvh' }}>
+        <div className="flex items-center justify-center relative overflow-hidden" style={{ minHeight: '100svh' }}>
             {/* Random background image */}
             <div 
                 className="absolute inset-0 bg-cover bg-center"
                 style={{
                     backgroundImage: `url(${randomBgImage})`,
+                    position: 'fixed',
                 }}
             />
             {/* Dark overlay for better readability */}
