@@ -253,6 +253,7 @@ const AuthForm: React.FC<AuthFormProps> = ({ onSuccess }) => {
                             value={formData.username}
                             onChange={handleInputChange}
                             className={getUsernameInputStyle()}
+                            placeholder="Enter your username"
                             required
                             maxLength={20}
                         />
@@ -280,6 +281,7 @@ const AuthForm: React.FC<AuthFormProps> = ({ onSuccess }) => {
                                 value={formData.email}
                                 onChange={handleInputChange}
                                 className="w-full px-4 py-2 bg-gray-700 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                placeholder="Enter your email"
                                 required
                             />
                         </div>
@@ -295,6 +297,7 @@ const AuthForm: React.FC<AuthFormProps> = ({ onSuccess }) => {
                                 value={formData.password}
                                 onChange={handleInputChange}
                                 className="w-full px-4 py-2 bg-gray-700 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                placeholder="Enter your password"
                                 required
                                 minLength={8}
                             />
