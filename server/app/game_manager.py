@@ -262,7 +262,7 @@ class GameManager:
         import random
         import uuid
         from .templates.monsters import GenericMonsterTemplate
-        
+
         # Use pre-determined number if provided, otherwise random
         monster_count = room_context.get('monster_count')
         if monster_count is None:
@@ -270,13 +270,13 @@ class GameManager:
             num_monsters = random.choice([0, 1, 1, 2, 2, 3])
         else:
             num_monsters = monster_count
-        
+
         if num_monsters == 0:
             return []
-            
+
         monster_template = GenericMonsterTemplate()
         monster_ids = []
-        
+
         for i in range(num_monsters):
             monster_id = None
             try:
@@ -289,21 +289,21 @@ class GameManager:
                     'biome': room_context.get('biome', '')
                     # Deliberately exclude aggressiveness, intelligence, size to force random generation
                 }
-                
+
                 # Generate base monster data with random attributes
                 base_data = monster_template.generate_monster_data(fresh_context)
                 # Enforce: no aggressive monsters in the starting room
                 if room_context.get('room_id') == 'room_start' and base_data.get('aggressiveness') == 'aggressive':
                     # Re-roll to a safe aggressiveness
                     base_data['aggressiveness'] = random.choice(['passive', 'neutral', 'territorial'])
-                
+
                 # Generate AI content (name, description, special effects)
                 # Use the fresh context that now includes the generated attributes
                 prompt = monster_template.generate_prompt(fresh_context)
                 ai_response = await self.ai_handler.generate_text(prompt)
-                
+
                 generated_data = await monster_template.parse_response(ai_response)
-                
+
                 # Validate generated data has required fields
                 if not generated_data.get('name') or not generated_data.get('name').strip():
                     logger.error(f"[Monsters] AI generation failed: missing or empty name")
@@ -311,7 +311,7 @@ class GameManager:
                 if not generated_data.get('description') or not generated_data.get('description').strip():
                     logger.error(f"[Monsters] AI generation failed: missing or empty description")
                     continue
-                
+
                 # Create complete monster data
                 monster_id = f"monster_{uuid.uuid4()}"
                 monster_data = {
@@ -327,14 +327,14 @@ class GameManager:
                     'is_alive': True,
                     'properties': {}
                 }
-                
+
                 # Validate monster data before saving (FIX #1 & #4)
                 is_valid, error_msg = self._validate_monster_data(monster_data)
                 if not is_valid:
                     logger.error(f"[Monsters] Monster validation failed: {error_msg}")
                     logger.error(f"[Monsters] Invalid monster data: {monster_data}")
                     continue
-                
+
                 # Store monster in database (atomic operation)
                 try:
                     await self.db.set_monster(monster_id, monster_data)
@@ -342,15 +342,15 @@ class GameManager:
                     verification = await self.db.get_monster(monster_id)
                     if not verification:
                         raise Exception("Failed to verify monster save")
-                    
+
                     monster_ids.append(monster_id)
                     logger.info(f"[Monsters] Generated and validated monster {generated_data['name']} ({monster_id}) for room {room_context.get('room_id', 'unknown')}")
-                    
+
                 except Exception as save_error:
                     logger.error(f"[Monsters] Failed to save monster to database: {str(save_error)}")
                     # If save failed, don't add to monster_ids
                     continue
-                
+
             except Exception as e:
                 logger.error(f"[Monsters] Error generating monster {i+1}: {str(e)}")
                 # If we created a partial monster, try to clean it up
@@ -361,8 +361,99 @@ class GameManager:
                     except Exception as cleanup_error:
                         logger.error(f"[Monsters] Failed to cleanup partial monster: {cleanup_error}")
                 continue
-        
+
         return monster_ids
+
+    async def generate_room_npcs(self, room_context: Dict[str, Any]) -> List[str]:
+        """Generate 0-2 NPCs for a room based on biome and environment"""
+        import random
+        import uuid
+        from .templates.npcs import GenericNPCTemplate
+
+        # Random NPC spawn: 0-2 NPCs per room (lower chance than monsters)
+        # 70% chance of 0, 20% chance of 1, 10% chance of 2
+        num_npcs = random.choices([0, 1, 2], weights=[70, 20, 10])[0]
+
+        if num_npcs == 0:
+            return []
+
+        npc_template = GenericNPCTemplate()
+        npc_ids = []
+
+        for i in range(num_npcs):
+            npc_id = None
+            try:
+                # Create a fresh context for each NPC to ensure diversity
+                fresh_context = {
+                    'room_id': room_context.get('room_id', ''),
+                    'room_title': room_context.get('room_title', ''),
+                    'room_description': room_context.get('room_description', ''),
+                    'biome': room_context.get('biome', '')
+                }
+
+                # Generate base NPC data
+                base_data = npc_template.generate_npc_data(fresh_context)
+
+                # Generate AI content (name, description, backstory, etc.)
+                prompt = npc_template.generate_prompt(fresh_context)
+                ai_response = await self.ai_handler.generate_text(prompt)
+
+                generated_data = await npc_template.parse_response(ai_response)
+
+                # Validate generated data has required fields
+                if not generated_data.get('name') or not generated_data.get('name').strip():
+                    logger.error(f"[NPCs] AI generation failed: missing or empty name")
+                    continue
+                if not generated_data.get('description') or not generated_data.get('description').strip():
+                    logger.error(f"[NPCs] AI generation failed: missing or empty description")
+                    continue
+
+                # Create complete NPC data
+                npc_id = f"npc_{uuid.uuid4()}"
+                npc_data = {
+                    'id': npc_id,
+                    'name': generated_data['name'].strip(),
+                    'description': generated_data['description'].strip(),
+                    'backstory': generated_data.get('backstory', '').strip(),
+                    'dialogue_style': generated_data.get('dialogue_style', 'speaks plainly').strip(),
+                    'knowledge': generated_data.get('knowledge', 'local area').strip(),
+                    'quest_hint': generated_data.get('quest_hint', '').strip(),
+                    'location': room_context.get('room_id', ''),
+                    'is_active': base_data.get('is_active', True),
+                    'interaction_count': base_data.get('interaction_count', 0),
+                    'mood': base_data.get('mood', 'neutral'),
+                    'properties': {}
+                }
+
+                # Store NPC in database (atomic operation)
+                try:
+                    await self.db.set_npc(npc_id, npc_data)
+                    # Verify the save was successful by reading it back
+                    verification = await self.db.get_npc(npc_id)
+                    if not verification:
+                        raise Exception("Failed to verify NPC save")
+
+                    npc_ids.append(npc_id)
+                    logger.info(f"[NPCs] Generated and validated NPC {generated_data['name']} ({npc_id}) for room {room_context.get('room_id', 'unknown')}")
+
+                except Exception as save_error:
+                    logger.error(f"[NPCs] Failed to save NPC to database: {str(save_error)}")
+                    # If save failed, don't add to npc_ids
+                    continue
+
+            except Exception as e:
+                logger.error(f"[NPCs] Error generating NPC {i+1}: {str(e)}")
+                # If we created a partial NPC, try to clean it up
+                if npc_id:
+                    try:
+                        # Assuming there's a delete_npc method, or we'll need to add one
+                        # For now, just log the error
+                        logger.warning(f"[NPCs] Could not cleanup partial NPC {npc_id}")
+                    except Exception as cleanup_error:
+                        logger.error(f"[NPCs] Failed to cleanup partial NPC: {cleanup_error}")
+                continue
+
+        return npc_ids
 
     def _build_room_generation_context(
         self,
@@ -1031,7 +1122,7 @@ class GameManager:
         logger.info(f"[GameManager] Creating room {room_id} with biome: {biome}")
         logger.info(f"[GameManager] kwargs: {kwargs}")
 
-        # Generate monsters for the room  
+        # Generate monsters for the room
         monster_context = {
             'room_id': room_id,
             'room_title': title,
@@ -1042,15 +1133,27 @@ class GameManager:
             'monster_count': kwargs.get('monster_count')  # Use pre-determined count if available
         }
         monsters = await self.generate_room_monsters(monster_context)
-        
+
+        # Generate NPCs for the room
+        npc_context = {
+            'room_id': room_id,
+            'room_title': title,
+            'room_description': description,
+            'biome': kwargs.get('biome', 'unknown'),
+            'x': x,
+            'y': y
+        }
+        npcs = await self.generate_room_npcs(npc_context)
+        logger.info(f"[Room Creation] Generated {len(npcs)} NPCs for room {room_id}: {npcs}")
+
         # Assign item distribution for this room
         item_distribution = await self._assign_room_item_distribution(kwargs.get('biome', 'unknown'), x, y)
         logger.info(f"[Room Creation] Item distribution for room {room_id}: {item_distribution}")
-        
+
         # Generate actual items for this room based on distribution
         room_items = await self._generate_room_items(room_id, item_distribution, kwargs.get('biome', 'unknown'), title, description)
         logger.info(f"[Room Creation] Generated {len(room_items)} items for room {room_id}: {room_items}")
-        
+
         # Create the room object
         room = Room(
             id=room_id,
@@ -1060,7 +1163,7 @@ class GameManager:
             y=y,
             image_url=image_url,
             connections={},
-            npcs=[],
+            npcs=npcs,  # Use the generated NPCs
             items=room_items,  # Use the generated items
             monsters=monsters,
             players=players,

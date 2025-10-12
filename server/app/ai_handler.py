@@ -412,6 +412,21 @@ class AIHandler:
             "",
         ]
 
+        # Add NPC description context if there are NPCs in the room
+        if npcs and len(npcs) > 0:
+            prompt_parts.extend([
+                "ROOM NPCs (Non-Player Characters):",
+                "- The following NPCs are present in this room:",
+            ])
+
+            # Add NPC details
+            for npc in npcs:
+                npc_dict = npc.dict() if hasattr(npc, 'dict') else npc
+                npc_name = npc_dict.get('name', 'Unknown Person')
+                npc_description = npc_dict.get('description', 'A mysterious figure')
+                npc_dialogue_style = npc_dict.get('dialogue_style', 'speaks plainly')
+                prompt_parts.append(f"  * {npc_name}: {npc_description} ({npc_dialogue_style})")
+
         # Add monster description context if there are NON-AGGRESSIVE monsters in the room
         non_aggressive_monsters = [m for m in monsters if m.get('aggressiveness') != 'aggressive'] if monsters else []
         if non_aggressive_monsters and len(non_aggressive_monsters) > 0:
@@ -451,6 +466,14 @@ class AIHandler:
             "  - Set updates.player.direction to one of: north, south, east, west, up, down.",
             "  - Keep narrative concise and focused on the movement/arrival; do not include extra exposition.",
             "  - Do NOT modify room state directly; the server handles movement and room updates.",
+            "",
+            "NPC DIALOGUE GUIDELINES:",
+            " If the player clearly speaks to an NPC (e.g., greets them, asks them something, tries to converse):",
+            "  - Describe the player's attempt to communicate with the NPC in your narrative response",
+            "  - The NPC will respond based on their personality, dialogue style, and knowledge areas",
+            "  - NPCs are friendly by default and will engage in conversation",
+            "  - Players can ask NPCs about quests, local knowledge, or just chat",
+            "  - Example: player says 'talk to the merchant' → 'You approach the merchant, who looks up from their wares with a welcoming smile'",
             "",
             f"{WORLD_CONFIG['creature_term'].upper()} DIALOGUE GUIDELINES:",
             f" If the player clearly speaks to a {WORLD_CONFIG['creature_term'][:-1]} (e.g., addresses it, asks it something, tries to converse):",
@@ -497,17 +520,19 @@ class AIHandler:
             "",
             "- **OBSERVATION ACTIONS** (look, examine, search, etc.):",
             "  * Think about how broad the players search is. Are they getting a general survey of the land? Are they investigating a specific point of interest? The amount of information you reveal will depend on this",
-            "  * The monsters and items exist in the room, but do not reference them directly",
+            "  * NPCs, monsters, and items exist in the room, but do not reference them directly as 'NPCs' or 'items'",
             "  * The rooms are big, the player cannot see everything at once. If the player doesn't specify a specific search, assume they are searching broadly and just give them an overview of the area. Do not give details like specific items and medium - small sized creatures in broad searches, only give those details in specific searches",
-            "  * For example if they just say look around, describe the room very broadly, like what the secenery looks like and maybe some big monsters in the room",
+            "  * For NPCs: ALWAYS mention them in broad searches since they are people standing in the room. Describe them naturally by their appearance/activity",
+            "  * For example if they just say look around, describe the room very broadly, like what the scenery looks like, any NPCs present, and maybe some big monsters in the room",
             "  * Do not give precise details for broad inspection, instead give points of interest for the player to specifically search",
-            "  * Compare the size of details to size of search. A broad search would reveal overall description of the land and maybe some big creatures standing out. A specific search would reveal specific items and smaller creatures to the player",            "  * Use the chat logs, make sure that the player eventually knows about all of the items and monsters",
-            "  * For example: player says 'look around' -> 'you see large trees and mountains in the back. A large dragon is flying around to you left",
-            "  * For example: player says 'investigate the trees' -> 'you see a rusty sword leaning against the tree. You also spot a small animal watching you form the distance",
-            "  * Describe the room based off the biome and room name"
+            "  * Compare the size of details to size of search. A broad search would reveal overall description of the land, NPCs present, and maybe some big creatures standing out. A specific search would reveal specific items and smaller creatures to the player",
+            "  * Use the chat logs, make sure that the player eventually knows about all of the NPCs, items and monsters",
+            "  * For example: player says 'look around' -> 'You see large trees and mountains in the back. A grizzled merchant stands near a wooden cart, sorting through wares. A large dragon is flying around to your left'",
+            "  * For example: player says 'investigate the trees' -> 'You see a rusty sword leaning against the tree. You also spot a small animal watching you from the distance'",
+            "  * Describe the room based off the biome and room name",
             "  * DESCRIBE the specific room items NOT by their actual names and instead JUST their descriptions",
             "  * DO NOT say 'no items besides the one listed' or reference game data",
-            "  * DO NOT directly refer to items as items, integrate them naturally into the scene. keep the immersion",
+            "  * DO NOT directly refer to items as items or NPCs as NPCs, integrate them naturally into the scene. keep the immersion",
             "  * Do NOT include item_award for observation actions",
             "  * ONLY reward items if the player explicitly tries to grab them",
             "  * DO NOT LIST OUT ALL OF THE ITEMS AND / OR MONSTERS IN THE ROOM"
@@ -778,9 +803,27 @@ class AIHandler:
         room: Room,
         relevant_memories: List[Dict[str, any]]
     ) -> Tuple[str, str]:
-        """Process NPC dialogue using the LLM"""
+        """Process NPC dialogue using the LLM with NPC personality"""
+        # Extract NPC personality data
+        npc_dict = npc.dict()
+        npc_name = npc_dict.get('name', 'Unknown NPC')
+        npc_description = npc_dict.get('description', 'A mysterious figure')
+        npc_backstory = npc_dict.get('backstory', 'Their past is unknown')
+        npc_dialogue_style = npc_dict.get('dialogue_style', 'speaks plainly')
+        npc_knowledge = npc_dict.get('knowledge', 'local area')
+        npc_quest_hint = npc_dict.get('quest_hint', '')
+        npc_mood = npc_dict.get('mood', 'neutral')
+
         context = {
-            "npc": npc.dict(),
+            "npc": {
+                "name": npc_name,
+                "description": npc_description,
+                "backstory": npc_backstory,
+                "dialogue_style": npc_dialogue_style,
+                "knowledge": npc_knowledge,
+                "quest_hint": npc_quest_hint,
+                "mood": npc_mood
+            },
             "player": player.dict(),
             "room": room.dict(),
             "message": message,
@@ -796,18 +839,36 @@ class AIHandler:
 '''
 
         prompt = f"""Process this player's interaction with an NPC in a {WORLD_CONFIG['setting_primary']} {WORLD_CONFIG['setting_secondary']} {WORLD_CONFIG['game_type']}.
-        Context: {json.dumps(context)}
 
-        CRITICAL: Keep NPC responses to 1-2 sentences maximum. Focus only on the most important information. Remove all fluff and unnecessary elaboration.
+NPC PERSONALITY:
+- Name: {npc_name}
+- Description: {npc_description}
+- Backstory: {npc_backstory}
+- Dialogue Style: {npc_dialogue_style}
+- Areas of Knowledge: {npc_knowledge}
+- Quest Hint (if relevant): {npc_quest_hint}
+- Current Mood: {npc_mood}
 
-        Return a JSON object with this exact structure:
-        {json_template}
-        """
+IMPORTANT:
+- Respond IN CHARACTER as {npc_name}
+- Use the dialogue style: "{npc_dialogue_style}"
+- Draw from your knowledge areas: {npc_knowledge}
+- Reference your backstory when appropriate: {npc_backstory}
+- If the player asks about quests or hints, you may subtly incorporate: {npc_quest_hint}
+- Speak according to your current mood: {npc_mood}
+
+Context: {json.dumps(context)}
+
+CRITICAL: Keep NPC responses to 1-2 sentences maximum. Focus only on the most important information. Remove all fluff and unnecessary elaboration. Stay in character as the NPC with their unique personality.
+
+Return a JSON object with this exact structure:
+{json_template}
+"""
 
         response = await client.chat.completions.create(
             model="gpt-4.1-nano-2025-04-14",
             messages=[
-                {"role": "system", "content": f"You are an NPC in a {WORLD_CONFIG['setting_primary']} {WORLD_CONFIG['setting_secondary']} {WORLD_CONFIG['game_type']}. Keep responses concise (1-2 sentences maximum). Focus only on essential information and remove all fluff. Always return clean JSON without any comments."},
+                {"role": "system", "content": f"You are {npc_name}, an NPC in a {WORLD_CONFIG['setting_primary']} {WORLD_CONFIG['setting_secondary']} {WORLD_CONFIG['game_type']}. Your dialogue style is: {npc_dialogue_style}. Your knowledge areas are: {npc_knowledge}. Keep responses concise (1-2 sentences maximum). Stay in character and use your unique personality traits. Focus only on essential information and remove all fluff. Always return clean JSON without any comments."},
                 {"role": "user", "content": prompt}
             ],
             temperature=0.7
