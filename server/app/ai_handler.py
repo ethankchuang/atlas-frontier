@@ -31,15 +31,15 @@ class AIHandler:
         json_template = '''
 {
     "title": "A short, evocative title",
-    "description": "A concise, creative, atmospheric description with randomly generated elements that fit the biome. (1-2 sentences max)",
-    "image_prompt": "A detailed prompt for image generation of this new room based on the context, surrounding rooms, biome, monsters, etc. It's important that it generally fits in with the biome. Be creative. (3-4 sentences)"
+    "description": "A concise, creative, atmospheric description with randomly generated elements, including any buildings, structures, or other elements that fit the biome. (1-2 sentences max)",
+    "image_prompt": "A detailed prompt for image generation of this new room based on the context, surrounding rooms, structures in the room, biome, monsters, etc. It's important that it generally fits in with the biome. Be creative and make the room feel alive and immersive and fun and visually stunning. (3-4 sentences)"
 }
 '''
         # Check if monsters will be present in the room
         monsters_info = ""
         monster_count = context.get("monster_count", 0)
         if monster_count > 0:
-            monsters_info = f"\nMonsters: {monster_count} creatures will inhabit this area. Show them as exactly {monster_count} hidden shadowy creatures."
+            monsters_info = f"\nMonsters: {monster_count} creatures will inhabit this area. Show them as exactly {monster_count} hidden shadowy and non-descript creatures. Don't make them look like human figures."
         
         prompt = f"""Generate a concise room description and detailed image prompt for a medieval fantasy MUD game.
         Context: {json.dumps(context)}
@@ -163,7 +163,7 @@ class AIHandler:
                 os.environ["REPLICATE_API_TOKEN"] = settings.REPLICATE_API_TOKEN
                 
                 # Enhanced prompt for better medieval fantasy game images
-                enhanced_prompt = f"A detailed, atmospheric medieval fantasy game backdrop, cinematic lighting, high quality, medieval architecture: {prompt}"
+                enhanced_prompt = f"A detailed, atmospheric medieval fantasy game backdrop, cinematic lighting, not too dark, high quality, medieval architecture: {prompt}"
                 
                 logger.info(f"[Replicate] Using model: {settings.REPLICATE_MODEL}")
                 logger.info(f"[Replicate] Image dimensions: {settings.REPLICATE_IMAGE_WIDTH}x{settings.REPLICATE_IMAGE_HEIGHT}")
@@ -362,10 +362,10 @@ class AIHandler:
 
         # Build the prompt without nested f-strings to avoid syntax errors
         prompt_parts = [
-            f"Process this player action in a fantasy MUD game.",
+            f"Process this player action in a multiplayer AI-powered RPG/MUD world.",
             f"Context: {json.dumps(context)}",
             "",
-            "Use the last 20 player messages in context.recent_chat (newest first) for continuity. Only reference them if relevant to the current action; do not restate them verbatim.",
+            "Use the last 20 player messages in context.recent_chat (newest first) for continuity. Only reference them if relevant to the current action; do not restate them verbatim. The current state of the player and the room is provided in the context too.",
             "",
         ]
         
@@ -390,7 +390,7 @@ class AIHandler:
             "BASIC MOVE VALIDATION:",
             "- If the player attempts an action requiring equipment they don't have, explain why it fails",
             "- Basic physical actions (punch, kick, dodge, block, etc.) are always valid",
-            "- Equipment-based actions (slash, shoot, cast spells) require appropriate items",
+            "- Equipment-based actions (slash, shoot, cast spells) require appropriate items in the player's inventory",
             "- If unsure about equipment requirements, err on the side of allowing the action",
             "- Keep validation explanations brief and helpful",
             "",
@@ -403,26 +403,26 @@ class AIHandler:
             "6. You handle ONLY narrative responses and simple state changes",
             "",
             "MOVEMENT INTENT POLICY (CRITICAL):",
-            "- If the player clearly intends to move in a direction (north/south/east/west/up/down):",
+            " If the player clearly intends to move in a direction (north/south/east/west/up/down):",
             "  - Set updates.player.direction to one of: north, south, east, west, up, down.",
             "  - Keep narrative concise and focused on the movement/arrival; do not include extra exposition.",
             "  - Do NOT modify room state directly; the server handles movement and room updates.",
             "",
             "MONSTER DIALOGUE GUIDELINES:",
-            "- If the player clearly speaks to a monster/creature (e.g., addresses it, asks it something, tries to converse):",
+            " If the player clearly speaks to a monster/creature (e.g., addresses it, asks it something, tries to converse):",
             "  - Set updates.monster_interaction with the player's spoken message and the target monster_id (if multiple present).",
             "  - Enemies should talk back to player with intelligence according to their data",
             "  - For rooms with exactly one monster, you may omit monster_id; the server will resolve it.",
             "  - Keep the narrative response concise; the server will produce the creature's actual reply.",
             "",
             "COMBAT INTENT POLICY (CRITICAL):",
-            "- If the player clearly intends to fight/attack/engage a creature:",
+            " If the player clearly intends to fight/attack/engage a creature:",
             "  - Set updates.combat with the target monster_id (omit if exactly one monster present) and a short action summary.",
             "  - Do NOT simulate the duel outcome here; the server will initiate combat and handle resolution.",
             "  - Keep the narrative to the immediate pre-fight moment (no long analyses).",
             "",
             "ITEM COMBINATION POLICY (CRITICAL):",
-            "- If the player clearly intends to craft/combine 2 or more items:",
+            " If the player clearly intends to craft/combine 2 or more items:",
             "  - Set updates.item_combination with the item_ids array and optional combination_description.",
             "  - The server will handle the actual item combination and creation.",
             "  - Keep the narrative focused on the crafting process and intent.",
@@ -553,7 +553,7 @@ class AIHandler:
             stream = await client.chat.completions.create(
                 model="gpt-4.1-nano-2025-04-14",
                 messages=[
-                    {"role": "system", "content": "You are the game master of a fantasy MUD game. Keep all responses concise (1-2 sentences maximum). Focus only on environmental details but remove all fluff. Make actions clear and direct. Be generous with item generation - when players grab/take anything, turn it into an item."},
+                    {"role": "system", "content": "You are the game master of a multiplayer AI-powered RPG/MUD world. Keep all responses concise (1-2 sentences maximum). Focus only on important environmental details but remove all fluff. Make actions clear and direct. Be generous with item generation - when players grab/take anything, turn it into an item. Be creative and engaging and make the world feel alive and immersive and fun."},
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0.7,
