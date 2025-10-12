@@ -66,7 +66,7 @@ const DirectionalControls: React.FC = () => {
 
                     setIsProcessing(false);
                 },
-                (error) => {
+                () => {
                     updateMessage(streamMessageId, (prev) => ({
                         ...prev,
                         message: "That didn't go through. Please try again.",
