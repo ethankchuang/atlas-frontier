@@ -21,13 +21,54 @@ client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
 if settings.REPLICATE_API_TOKEN:
     os.environ["REPLICATE_API_TOKEN"] = settings.REPLICATE_API_TOKEN
 
+# World Configuration - Customize this to create different game worlds
+WORLD_CONFIG = {
+    # Core World Identity
+    "setting_primary": "medieval",           # e.g., "modern", "futuristic", "ancient"
+    "setting_secondary": "fantasy adventure",          # e.g., "sci-fi", "realistic", "horror"
+    "game_type": "MUD / RPG / D&D style game",                 # e.g., "space adventure", "survival game"
+
+    # Visual & Artistic Direction
+    "visual_style": "atmospheric medieval fantasy game backdrop, cinematic lighting, cozy video game style, 16bit retro graphics",
+    "architecture_style": "medieval architecture",
+
+    # Tone & Content
+    "content_rating": "family-friendly fantasy",
+    "world_description": "classic medieval fantasy world",
+
+    # Creature/Entity Terminology
+    "creature_term": "creatures",            # e.g., "aliens", "robots", "zombies"
+
+    # World Generation Defaults
+    "starting_time": "dawn",
+    "starting_weather": "clear",
+    "starting_quest_stage": "beginning",
+
+    # Content Restrictions (what to avoid)
+    "avoid_themes": ["modern", "sci-fi", "futuristic"],  # Configurable per world
+
+    # Fallback Biomes (for error cases only)
+    "default_biomes": [
+        {"name": "forest", "description": "A dense forest with towering trees and dappled sunlight.", "color": "#228B22"},
+        {"name": "desert", "description": "A vast expanse of rolling sand dunes under a scorching sun.", "color": "#D2B48C"},
+        {"name": "mountain", "description": "Rugged peaks and rocky terrain with thin air and stunning vistas.", "color": "#696969"},
+        {"name": "swamp", "description": "A murky wetland with twisted trees and mysterious waters.", "color": "#556B2F"},
+        {"name": "tundra", "description": "A frozen landscape of ice and snow stretching to the horizon.", "color": "#F0F8FF"},
+        {"name": "plains", "description": "Endless grasslands swaying gently in the wind.", "color": "#90EE90"},
+        {"name": "volcano", "description": "A fiery landscape of molten rock and ash-covered slopes.", "color": "#8B0000"}
+    ]
+}
+
 class AIHandler:
     @staticmethod
     async def generate_room_description(
         context: Dict[str, any],
-        style: str = "medieval fantasy"
+        style: str = None
     ) -> Tuple[str, str, str]:
         """Generate a room title and description"""
+        if style is None:
+            style = f"{WORLD_CONFIG['setting_primary']} {WORLD_CONFIG['setting_secondary']}"
+
         json_template = '''
 {
     "title": "A short, evocative title",
@@ -39,9 +80,11 @@ class AIHandler:
         monsters_info = ""
         monster_count = context.get("monster_count", 0)
         if monster_count > 0:
-            monsters_info = f"\nMonsters: {monster_count} creatures will inhabit this area. Show them as exactly {monster_count} hidden shadowy and non-descript creatures. Don't make them look like human figures."
-        
-        prompt = f"""Generate a concise room description and detailed image prompt for a medieval fantasy MUD game.
+            monsters_info = f"\nMonsters: {monster_count} {WORLD_CONFIG['creature_term']} will inhabit this area. Show them as exactly {monster_count} hidden shadowy and non-descript {WORLD_CONFIG['creature_term']}. Don't make them look like human figures."
+
+        avoid_themes_str = ", ".join(WORLD_CONFIG['avoid_themes'])
+
+        prompt = f"""Generate a concise room description and detailed image prompt for a {WORLD_CONFIG['setting_primary']} {WORLD_CONFIG['setting_secondary']} {WORLD_CONFIG['game_type']}.
         Context: {json.dumps(context)}
         Style: {style}
         {monsters_info}
@@ -57,7 +100,7 @@ class AIHandler:
             response = await client.chat.completions.create(
                 model="gpt-4.1-nano-2025-04-14",
                 messages=[
-                    {"role": "system", "content": "You are a concise writer for a medieval fantasy MUD game. Always return clean JSON without comments. Focus only on essential details and remove all fluff. Avoid modern, sci-fi, or futuristic elements."},
+                    {"role": "system", "content": f"You are a concise writer for a {WORLD_CONFIG['setting_primary']} {WORLD_CONFIG['setting_secondary']} {WORLD_CONFIG['game_type']}. Always return clean JSON without comments. Focus only on essential details and remove all fluff. Avoid {avoid_themes_str} elements."},
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0.7
@@ -161,9 +204,9 @@ class AIHandler:
                 
                 # Set environment variable for Replicate client
                 os.environ["REPLICATE_API_TOKEN"] = settings.REPLICATE_API_TOKEN
-                
-                # Enhanced prompt for better medieval fantasy game images
-                enhanced_prompt = f"A detailed, atmospheric medieval fantasy game backdrop, cinematic lighting, not too dark, high quality, medieval architecture: {prompt}"
+
+                # Enhanced prompt for better game images
+                enhanced_prompt = f"A detailed, {WORLD_CONFIG['visual_style']}, high quality, {WORLD_CONFIG['architecture_style']}: {prompt}"
                 
                 logger.info(f"[Replicate] Using model: {settings.REPLICATE_MODEL}")
                 logger.info(f"[Replicate] Image dimensions: {settings.REPLICATE_IMAGE_WIDTH}x{settings.REPLICATE_IMAGE_HEIGHT}")
@@ -202,7 +245,7 @@ class AIHandler:
                 if "NSFW content detected" in error_msg and attempt < max_retries - 1:
                     logger.info(f"[Replicate] NSFW content detected, trying with modified prompt")
                     # Modify the prompt to be more family-friendly
-                    prompt = f"A family-friendly fantasy game scene, suitable for all ages: {prompt.replace('magical', 'peaceful').replace('mystical', 'beautiful')}"
+                    prompt = f"A {WORLD_CONFIG['content_rating']} game scene, suitable for all ages: {prompt.replace('magical', 'peaceful').replace('mystical', 'beautiful')}"
                     await asyncio.sleep(1)  # Wait before retrying
                     continue
                 elif attempt < max_retries - 1:
@@ -225,7 +268,7 @@ class AIHandler:
                 try:
                     response = await client.images.generate(
                         model="dall-e-3",
-                        prompt=f"A detailed, atmospheric medieval fantasy game scene: {prompt}",
+                        prompt=f"A detailed, atmospheric {WORLD_CONFIG['setting_primary']} {WORLD_CONFIG['setting_secondary']} game scene: {prompt}",
                         size="1024x1024",
                         quality="standard",
                         n=1
@@ -362,24 +405,25 @@ class AIHandler:
 
         # Build the prompt without nested f-strings to avoid syntax errors
         prompt_parts = [
-            f"Process this player action in a multiplayer AI-powered RPG/MUD world.",
+            f"Process this player action in a multiplayer AI-powered {WORLD_CONFIG['game_type']} world.",
             f"Context: {json.dumps(context)}",
             "",
             "Use the last 20 player messages in context.recent_chat (newest first) for continuity. Only reference them if relevant to the current action; do not restate them verbatim. The current state of the player and the room is provided in the context too.",
             "",
         ]
-        
+
         # Add monster description context if there are NON-AGGRESSIVE monsters in the room
         non_aggressive_monsters = [m for m in monsters if m.get('aggressiveness') != 'aggressive'] if monsters else []
         if non_aggressive_monsters and len(non_aggressive_monsters) > 0:
             prompt_parts.extend([
-                "ROOM CREATURES:",
-                "- The following creatures inhabit this room:",
+                f"ROOM {WORLD_CONFIG['creature_term'].upper()}:",
+                f"- The following {WORLD_CONFIG['creature_term']} inhabit this room:",
             ])
-            
+
             # Add creature details similar to items
             for monster in non_aggressive_monsters:
-                creature_desc = f"  * {monster.get('name', 'Unknown')}: {monster.get('description', 'A mysterious creature')}"
+                default_desc = f"A mysterious {WORLD_CONFIG['creature_term'][:-1]}"
+                creature_desc = f"  * {monster.get('name', 'Unknown')}: {monster.get('description', default_desc)}"
                 if monster.get('aggressiveness') == 'territorial':
                     # Add blocking direction if available
                     creature_desc += f" (guarding a passage)"
@@ -408,16 +452,16 @@ class AIHandler:
             "  - Keep narrative concise and focused on the movement/arrival; do not include extra exposition.",
             "  - Do NOT modify room state directly; the server handles movement and room updates.",
             "",
-            "MONSTER DIALOGUE GUIDELINES:",
-            " If the player clearly speaks to a monster/creature (e.g., addresses it, asks it something, tries to converse):",
+            f"{WORLD_CONFIG['creature_term'].upper()} DIALOGUE GUIDELINES:",
+            f" If the player clearly speaks to a {WORLD_CONFIG['creature_term'][:-1]} (e.g., addresses it, asks it something, tries to converse):",
             "  - Set updates.monster_interaction with the player's spoken message and the target monster_id (if multiple present).",
             "  - Enemies should talk back to player with intelligence according to their data",
-            "  - For rooms with exactly one monster, you may omit monster_id; the server will resolve it.",
-            "  - Keep the narrative response concise; the server will produce the creature's actual reply.",
+            f"  - For rooms with exactly one {WORLD_CONFIG['creature_term'][:-1]}, you may omit monster_id; the server will resolve it.",
+            f"  - Keep the narrative response concise; the server will produce the {WORLD_CONFIG['creature_term'][:-1]}'s actual reply.",
             "",
             "COMBAT INTENT POLICY (CRITICAL):",
-            " If the player clearly intends to fight/attack/engage a creature:",
-            "  - Set updates.combat with the target monster_id (omit if exactly one monster present) and a short action summary.",
+            f" If the player clearly intends to fight/attack/engage a {WORLD_CONFIG['creature_term'][:-1]}:",
+            f"  - Set updates.combat with the target monster_id (omit if exactly one {WORLD_CONFIG['creature_term'][:-1]} present) and a short action summary.",
             "  - Do NOT simulate the duel outcome here; the server will initiate combat and handle resolution.",
             "  - Keep the narrative to the immediate pre-fight moment (no long analyses).",
             "",
@@ -553,7 +597,7 @@ class AIHandler:
             stream = await client.chat.completions.create(
                 model="gpt-4.1-nano-2025-04-14",
                 messages=[
-                    {"role": "system", "content": "You are the game master of a multiplayer AI-powered RPG/MUD world. Keep all responses concise (1-2 sentences maximum). Focus only on important environmental details but remove all fluff. Make actions clear and direct. Be generous with item generation - when players grab/take anything, turn it into an item. Be creative and engaging and make the world feel alive and immersive and fun."},
+                    {"role": "system", "content": f"You are the game master of a multiplayer AI-powered {WORLD_CONFIG['game_type']} world. Keep all responses concise (1-2 sentences maximum). Focus only on important environmental details but remove all fluff. Make actions clear and direct. Be generous with item generation - when players grab/take anything, turn it into an item. Be creative and engaging and make the world feel alive and immersive and fun."},
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0.7,
@@ -751,7 +795,7 @@ class AIHandler:
 }
 '''
 
-        prompt = f"""Process this player's interaction with an NPC in a fantasy MUD game.
+        prompt = f"""Process this player's interaction with an NPC in a {WORLD_CONFIG['setting_primary']} {WORLD_CONFIG['setting_secondary']} {WORLD_CONFIG['game_type']}.
         Context: {json.dumps(context)}
 
         CRITICAL: Keep NPC responses to 1-2 sentences maximum. Focus only on the most important information. Remove all fluff and unnecessary elaboration.
@@ -763,7 +807,7 @@ class AIHandler:
         response = await client.chat.completions.create(
             model="gpt-4.1-nano-2025-04-14",
             messages=[
-                {"role": "system", "content": "You are an NPC in a fantasy MUD game. Keep responses concise (1-2 sentences maximum). Focus only on essential information and remove all fluff. Always return clean JSON without any comments."},
+                {"role": "system", "content": f"You are an NPC in a {WORLD_CONFIG['setting_primary']} {WORLD_CONFIG['setting_secondary']} {WORLD_CONFIG['game_type']}. Keep responses concise (1-2 sentences maximum). Focus only on essential information and remove all fluff. Always return clean JSON without any comments."},
                 {"role": "user", "content": prompt}
             ],
             temperature=0.7
@@ -819,7 +863,9 @@ class AIHandler:
 }
 '''
 
-        prompt = f"""Create a new classic medieval fantasy world and main quest for a MUD game.
+        avoid_themes_str = ", ".join(WORLD_CONFIG['avoid_themes'])
+
+        prompt = f"""Create a new {WORLD_CONFIG['world_description']} and main quest for a {WORLD_CONFIG['game_type']}.
 
         CRITICAL: Keep the main quest summary to 1-2 sentences maximum. Focus only on the essential quest details. Remove all fluff and unnecessary elaboration.
 
@@ -830,7 +876,7 @@ class AIHandler:
         response = await client.chat.completions.create(
             model="gpt-4.1-nano-2025-04-14",
             messages=[
-                {"role": "system", "content": "You are a medieval fantasy world creator. Keep descriptions concise (1-2 sentences maximum). Focus only on essential details and remove all fluff. Avoid modern or sci-fi elements. Always return clean JSON without any comments."},
+                {"role": "system", "content": f"You are a {WORLD_CONFIG['setting_primary']} {WORLD_CONFIG['setting_secondary']} world creator. Keep descriptions concise (1-2 sentences maximum). Focus only on essential details and remove all fluff. Avoid {avoid_themes_str} elements. Always return clean JSON without any comments."},
                 {"role": "user", "content": prompt}
             ],
             temperature=0.7
@@ -867,9 +913,9 @@ class AIHandler:
                         "world_seed": f"Fallback World {hash(str(time.time())) % 10000}",
                         "main_quest_summary": "Explore this mysterious realm and uncover its secrets.",
                         "starting_state": {
-                            "quest_stage": "beginning",
-                            "world_time": "dawn", 
-                            "weather": "clear"
+                            "quest_stage": WORLD_CONFIG['starting_quest_stage'],
+                            "world_time": WORLD_CONFIG['starting_time'],
+                            "weather": WORLD_CONFIG['starting_weather']
                         }
                     }
                     break
@@ -910,9 +956,9 @@ class AIHandler:
                                         "world_seed": f"Fallback World {hash(str(time.time())) % 10000}",
                                         "main_quest_summary": "Explore this mysterious realm and uncover its secrets.",
                                         "starting_state": {
-                                            "quest_stage": "beginning",
-                                            "world_time": "dawn", 
-                                            "weather": "clear"
+                                            "quest_stage": WORLD_CONFIG['starting_quest_stage'],
+                                            "world_time": WORLD_CONFIG['starting_time'],
+                                            "weather": WORLD_CONFIG['starting_weather']
                                         }
                                     }
                                     break
@@ -929,9 +975,9 @@ class AIHandler:
                                     "world_seed": f"Fallback World {hash(str(time.time())) % 10000}",
                                     "main_quest_summary": "Explore this mysterious realm and uncover its secrets.",
                                     "starting_state": {
-                                        "quest_stage": "beginning",
-                                        "world_time": "dawn",
-                                        "weather": "clear"
+                                        "quest_stage": WORLD_CONFIG['starting_quest_stage'],
+                                        "world_time": WORLD_CONFIG['starting_time'],
+                                        "weather": WORLD_CONFIG['starting_weather']
                                     }
                                 }
                                 break
@@ -949,9 +995,9 @@ class AIHandler:
                         "world_seed": f"Fallback World {hash(str(time.time())) % 10000}",
                         "main_quest_summary": "Explore this mysterious realm and uncover its secrets.",
                         "starting_state": {
-                            "quest_stage": "beginning",
-                            "world_time": "dawn",
-                            "weather": "clear"
+                            "quest_stage": WORLD_CONFIG['starting_quest_stage'],
+                            "world_time": WORLD_CONFIG['starting_time'],
+                            "weather": WORLD_CONFIG['starting_weather']
                         }
                     }
                     break
@@ -1020,15 +1066,17 @@ class AIHandler:
     "color": "A hex color code that represents this biome visually (e.g., '#228B22' for forest green, '#D2B48C' for desert tan)"
 }
 '''
+        avoid_themes_str = ", ".join(WORLD_CONFIG['avoid_themes'])
+
         prompt = f"""
-You are inventing a biome for a new region of a medieval fantasy world. The region is a contiguous block of land (a chunk).
+You are inventing a biome for a new region of a {WORLD_CONFIG['setting_primary']} {WORLD_CONFIG['setting_secondary']} world. The region is a contiguous block of land (a chunk).
 - The new biome must be visually and thematically DISTINCT from all adjacent biomes: {adj_biome_str}.
 - The biome must have a large, obvious impact on the image and name of all rooms within it (not just subtle differences).
 - The biome name must be short, evocative, and creative (e.g., 'crimson forest', 'ashen tundra', 'misty mountain', 'sunken swamp').
 - The description should be 1-2 sentences, concise, and evocative.
 - The color should be a hex code that visually represents the biome's appearance and feel.
 - Choose colors that are visually distinct from typical adjacent biomes (e.g., green for forests, brown/tan for deserts, blue for water, etc.).
-- IMPORTANT: Keep all details firmly medieval fantasy (no technology, no sci-fi, no modern references).
+- IMPORTANT: Keep all details firmly {WORLD_CONFIG['setting_primary']} {WORLD_CONFIG['setting_secondary']} (avoid {avoid_themes_str} elements).
 - Do not use elaborate or overly specific names.
 - Do not use any of these names for the biome: {adj_biome_str}.
 Return a JSON object with these exact fields:
@@ -1039,7 +1087,7 @@ Return a JSON object with these exact fields:
             response = await client.chat.completions.create(
                 model="gpt-4.1-nano-2025-04-14",
                 messages=[
-                    {"role": "system", "content": "You are a worldbuilder for a medieval fantasy MUD game. Always return clean JSON without comments. Keep all content medieval fantasy (no modern/sci-fi). Biome names must be short and generic. Descriptions must be concise and evocative. Colors must be valid hex codes that visually represent the biome. Biomes must be visually and thematically distinct from neighbors, and must have a large impact on the image and name of all rooms within them."},
+                    {"role": "system", "content": f"You are a worldbuilder for a {WORLD_CONFIG['setting_primary']} {WORLD_CONFIG['setting_secondary']} {WORLD_CONFIG['game_type']}. Always return clean JSON without comments. Keep all content {WORLD_CONFIG['setting_primary']} {WORLD_CONFIG['setting_secondary']} (avoid {avoid_themes_str} elements). Biome names must be short and generic. Descriptions must be concise and evocative. Colors must be valid hex codes that visually represent the biome. Biomes must be visually and thematically distinct from neighbors, and must have a large impact on the image and name of all rooms within them."},
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0.7
@@ -1075,17 +1123,8 @@ Return a JSON object with these exact fields:
                         continue
         except Exception as e:
             logger.error(f"[Biome Generation] Error generating biome chunk: {str(e)}")
-            # Generate a simple fallback biome without hardcoded names
+            # Use fallback biomes from world config
             import random
-            fallback_biomes = [
-                {"name": "forest", "description": "A dense forest with towering trees and dappled sunlight.", "color": "#228B22"},
-                {"name": "desert", "description": "A vast expanse of rolling sand dunes under a scorching sun.", "color": "#D2B48C"},
-                {"name": "mountain", "description": "Rugged peaks and rocky terrain with thin air and stunning vistas.", "color": "#696969"},
-                {"name": "swamp", "description": "A murky wetland with twisted trees and mysterious waters.", "color": "#556B2F"},
-                {"name": "tundra", "description": "A frozen landscape of ice and snow stretching to the horizon.", "color": "#F0F8FF"},
-                {"name": "plains", "description": "Endless grasslands swaying gently in the wind.", "color": "#90EE90"},
-                {"name": "volcano", "description": "A fiery landscape of molten rock and ash-covered slopes.", "color": "#8B0000"}
-            ]
-            biome = random.choice(fallback_biomes)
+            biome = random.choice(WORLD_CONFIG['default_biomes'])
             biome["name"] = biome["name"].lower()  # Ensure lowercase
             return biome

@@ -44,6 +44,7 @@ from .api_key_auth import api_key_auth
 import os
 from .monster_behavior import monster_behavior_manager
 from . import combat
+from .ai_handler import WORLD_CONFIG
 import uuid
 from pydantic import BaseModel
 from typing import Optional, Dict, Any, List
@@ -382,7 +383,7 @@ async def detect_monster_attack(action_text: str, player_id: str, room_data: Dic
                     for (mid, mdata) in monsters_in_room
                 ]
                 prompt = (
-                    "You are an impartial combat intent classifier for a medieval fantasy MUD.\n"
+                    f"You are an impartial combat intent classifier for a {WORLD_CONFIG['setting_primary']} {WORLD_CONFIG['setting_secondary']} {WORLD_CONFIG['game_type']}.\n"
                     f"Player action: {json.dumps(action_text)}\n"
                     f"Monsters present: {json.dumps(monsters_context)}\n"
                     "Task: Determine if the player intends to ATTACK any of the listed monsters right now.\n"
@@ -2096,7 +2097,7 @@ async def process_action_stream(
                                                 
                                                 item_context = {
                                                     'world_seed': game_state.world_seed,
-                                                    'world_theme': 'fantasy',
+                                                    'world_theme': WORLD_CONFIG['setting_secondary'],
                                                     'main_quest': game_state.main_quest_summary,
                                                     'room_description': room.description,
                                                     'room_biome': room.biome or 'unknown',

@@ -10,7 +10,7 @@ import os # Added for local image saving
 
 from .models import Room, Player, NPC, GameState, Direction, ActionRecord
 from .hybrid_database import HybridDatabase as Database
-from .ai_handler import AIHandler
+from .ai_handler import AIHandler, WORLD_CONFIG
 from .rate_limiter import RateLimiter
 from .biome_manager import BiomeManager
 from .image_storage import is_temporary_image_url
@@ -963,7 +963,7 @@ class GameManager:
             try:
                 item_context = {
                     'world_seed': 'room_generation',  # We'll get the actual world seed later
-                    'world_theme': 'fantasy',
+                    'world_theme': WORLD_CONFIG['setting_secondary'],
                     'room_description': room_description,
                     'room_biome': biome,
                     'room_title': room_title,
@@ -987,7 +987,7 @@ class GameManager:
             try:
                 item_context = {
                     'world_seed': 'room_generation',
-                    'world_theme': 'fantasy',
+                    'world_theme': WORLD_CONFIG['setting_secondary'],
                     'room_description': room_description,
                     'room_biome': biome,
                     'room_title': room_title,
@@ -1564,7 +1564,7 @@ class GameManager:
             image_prompt = f"{description}"
             if not image_prompt or len(image_prompt) < 10:
                 # Fallback if description is missing
-                image_prompt = f"A {biome} landscape in a medieval fantasy world"
+                image_prompt = f"A {biome} landscape in a {WORLD_CONFIG['setting_primary']} {WORLD_CONFIG['setting_secondary']} world"
             
             logger.info(f"[Image Retry] Generated image prompt for {room_id}: {image_prompt[:100]}...")
             
@@ -1979,7 +1979,7 @@ class GameManager:
             # Create context for item combination
             item_context = {
                 'world_seed': 'item_combination',
-                'world_theme': 'fantasy',
+                'world_theme': WORLD_CONFIG['setting_secondary'],
                 'room_description': 'crafting',
                 'room_biome': 'workshop',
                 'player_action': f"combine {', '.join([item['name'] for item in items_data])}",
