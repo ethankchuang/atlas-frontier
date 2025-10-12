@@ -22,6 +22,15 @@ const vt323 = VT323({
 export const metadata: Metadata = {
   title: "Worlds AI",
   description: "Worlds AI",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "Worlds AI",
+  },
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#000000" },
+    { media: "(prefers-color-scheme: dark)", color: "#000000" },
+  ],
 };
 
 export const viewport: Viewport = {
@@ -30,6 +39,7 @@ export const viewport: Viewport = {
   maximumScale: 1,
   userScalable: false,
   viewportFit: "cover", // Allows content to extend under iOS UI
+  interactiveWidget: "resizes-visual",
 };
 
 export default function RootLayout({

@@ -30,7 +30,8 @@ html, body {
   color: var(--foreground);
   font-family: var(--font-vt323), monospace;
   height: 100vh; /* Fallback */
-  height: 100dvh; /* Dynamic viewport height for iOS */
+  height: 100dvh; /* Dynamic viewport height */
+  height: 100lvh; /* Large viewport height for iOS Safari URL bar */
   overflow: hidden;
   color: rgb(var(--foreground-rgb));
   background: linear-gradient(
