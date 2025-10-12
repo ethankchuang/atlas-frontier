@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState } from 'react';
 import useGameStore from '@/store/gameStore';
 import apiService from '@/services/api';
 import { ChevronUpIcon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, EyeIcon, ChatBubbleLeftIcon, BoltIcon } from '@heroicons/react/24/solid';
