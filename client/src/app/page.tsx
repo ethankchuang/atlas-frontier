@@ -146,7 +146,7 @@ export default function Home() {
 
     // Background container component
     const BackgroundContainer = ({ children }: { children: React.ReactNode }) => (
-        <div className="min-h-screen flex items-center justify-center relative overflow-hidden">
+        <div className="min-h-screen flex items-center justify-center relative overflow-hidden" style={{ minHeight: '100vh' }}>
             {/* Random background image */}
             <div 
                 className="absolute inset-0 bg-cover bg-center"
@@ -161,7 +161,7 @@ export default function Home() {
                 {children}
             </div>
             {/* Footer with social links */}
-            <div className="absolute bottom-4 right-4 z-20">
+            <div className="absolute right-4 z-20" style={{ bottom: 'max(1rem, env(safe-area-inset-bottom))' }}>
                 <div className="flex items-center gap-2 text-xs text-gray-400 bg-black/60 backdrop-blur-sm px-3 py-2 rounded-lg border border-gray-700/50">
                     <span className="hidden sm:inline">crafted with love by Ethan Chuang - follow & contact:</span>
                     <span className="sm:hidden">by Ethan Chuang</span>
