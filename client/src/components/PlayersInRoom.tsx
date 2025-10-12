@@ -4,7 +4,7 @@ import { UserCircleIcon } from '@heroicons/react/24/solid';
 import websocketService from '@/services/websocket';
 
 const PlayersInRoom: React.FC = () => {
-    const { playersInRoom, player } = useGameStore();
+    const { playersInRoom, player, npcs } = useGameStore();
     const [selectedPlayer, setSelectedPlayer] = useState<string | null>(null);
     const [menuPosition, setMenuPosition] = useState({ x: 0, y: 0 });
     const [showMenu, setShowMenu] = useState(false);
@@ -64,7 +64,7 @@ const PlayersInRoom: React.FC = () => {
         }
     };
 
-    if (otherPlayers.length === 0) {
+    if (otherPlayers.length === 0 && npcs.length === 0) {
         return null;
     }
 
@@ -75,9 +75,22 @@ const PlayersInRoom: React.FC = () => {
                 <span className="text-amber-500 font-bold text-xs">Also here:</span>
             </div>
             <div className="flex flex-wrap gap-1">
+                {/* NPCs - shown in cyan/blue color */}
+                {npcs.map(npc => (
+                    <div
+                        key={npc.id}
+                        className="flex items-center bg-cyan-900 bg-opacity-50 rounded px-2 py-0.5 border border-cyan-600"
+                        title={npc.description || 'An NPC'}
+                    >
+                        <UserCircleIcon className="h-3 w-3 mr-1 text-cyan-400" />
+                        <span className="text-cyan-100 text-xs font-medium">{npc.name}</span>
+                    </div>
+                ))}
+
+                {/* Other Players - shown in amber color */}
                 {otherPlayers.map(player => (
-                    <div 
-                        key={player.id} 
+                    <div
+                        key={player.id}
                         ref={(el) => { playerRefs.current[player.id] = el; }}
                         className="flex items-center bg-amber-900 bg-opacity-50 rounded px-2 py-0.5 border border-amber-700 cursor-pointer hover:bg-amber-800 hover:border-amber-600 transition-colors"
                         onClick={(e) => handlePlayerClick(e, player.id)}
