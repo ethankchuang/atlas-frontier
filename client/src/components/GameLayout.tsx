@@ -408,11 +408,19 @@ const GameLayout: React.FC<GameLayoutProps> = ({ playerId }) => {
             )}
 
             {/* Chat Display Overlay (bottom portion, translucent) */}
-            <div className={`absolute left-0 right-0 flex flex-col z-20 p-3 md:p-6 transition-all duration-300 ${
-                isChatExpanded ? 'top-16' : 'h-[40vh]'
-            }`} style={{
-                bottom: 'max(env(safe-area-inset-bottom), 0px)'
-            }}>
+            <div
+                className={`absolute bottom-0 left-0 right-0 flex flex-col z-20 transition-all duration-300 ${
+                    isChatExpanded ? 'top-16' : 'h-[40vh]'
+                }`}
+                style={{
+                    paddingLeft: window.innerWidth >= 768 ? '1.5rem' : '0.75rem',
+                    paddingRight: window.innerWidth >= 768 ? '1.5rem' : '0.75rem',
+                    paddingTop: window.innerWidth >= 768 ? '1.5rem' : '0.75rem',
+                    paddingBottom: window.innerWidth >= 768
+                        ? 'max(1.5rem, env(safe-area-inset-bottom))'
+                        : 'max(0.75rem, env(safe-area-inset-bottom))'
+                }}
+            >
                 <div className="w-full max-w-4xl mx-auto bg-black/60 backdrop-blur-md rounded-lg flex flex-col h-full relative">
                     {/* Expand/Collapse Button */}
                     <button
