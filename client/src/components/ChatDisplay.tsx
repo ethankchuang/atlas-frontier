@@ -61,7 +61,7 @@ const ChatDisplay: React.FC<ChatDisplayProps> = ({ onScrollToTop }) => {
                 // Check if this is a player action (starts with ">")
                 if (message.message.startsWith('> ')) {
                     return (
-                        <div className="mb-3 text-amber-400 font-mono text-sm md:text-xl italic">
+                        <div className="mb-3 text-amber-400 font-mono text-base md:text-xl italic">
                             {playerName} {message.message.substring(2)}
                         </div>
                     );
@@ -70,17 +70,17 @@ const ChatDisplay: React.FC<ChatDisplayProps> = ({ onScrollToTop }) => {
                 // Regular chat message
                 return (
                     <div className="flex items-start gap-2 md:gap-3 mb-3 font-mono">
-                        <UserCircleIcon className="w-4 h-4 md:w-6 md:h-6 text-amber-500 flex-shrink-0 mt-1" />
+                        <UserCircleIcon className="w-5 h-5 md:w-6 md:h-6 text-amber-500 flex-shrink-0 mt-1" />
                         <div>
-                            <span className="font-bold text-amber-500 text-sm md:text-xl">{playerName}: </span>
-                            <span className="text-green-400 text-sm md:text-xl">{message.message}</span>
+                            <span className="font-bold text-amber-500 text-base md:text-xl">{playerName}: </span>
+                            <span className="text-green-400 text-base md:text-xl">{message.message}</span>
                         </div>
                     </div>
                 );
 
             case 'emote':
                 return (
-                    <div className="mb-3 text-yellow-500 italic font-mono text-sm md:text-xl">
+                    <div className="mb-3 text-yellow-500 italic font-mono text-base md:text-xl">
                         * {playerName} {message.message}
                     </div>
                 );
@@ -89,14 +89,14 @@ const ChatDisplay: React.FC<ChatDisplayProps> = ({ onScrollToTop }) => {
                 // Check if this is a user command (starts with ">>")
                 if (message.message.startsWith('>> ')) {
                     return (
-                        <div className="mb-3 text-gray-500 font-mono text-sm md:text-xl">
+                        <div className="mb-3 text-gray-500 font-mono text-base md:text-xl">
                             {message.message}
                         </div>
                     );
                 }
 
                 return (
-                    <div className="mb-3 text-cyan-400 font-mono text-sm md:text-xl">
+                    <div className="mb-3 text-cyan-400 font-mono text-base md:text-xl">
                         <span className={message.isStreaming ? 'animate-pulse' : ''}>{'>'}</span>{' '}
                         <span className={message.isStreaming && message.message === '▮' ? 'animate-blink' : ''}>
                             {message.message}
@@ -106,7 +106,7 @@ const ChatDisplay: React.FC<ChatDisplayProps> = ({ onScrollToTop }) => {
 
             case 'ai_response':
                 return (
-                    <div className="mb-3 text-green-400 font-mono text-sm md:text-xl">
+                    <div className="mb-3 text-green-400 font-mono text-base md:text-xl">
                         {message.message}
                     </div>
                 );
@@ -135,7 +135,7 @@ const ChatDisplay: React.FC<ChatDisplayProps> = ({ onScrollToTop }) => {
 
             case 'item_obtained':
                 return (
-                    <div className="mb-3 text-purple-400 font-mono text-sm md:text-xl font-bold bg-purple-900 bg-opacity-30 px-3 md:px-4 py-2 rounded border border-purple-500">
+                    <div className="mb-3 text-purple-400 font-mono text-base md:text-xl font-bold bg-purple-900 bg-opacity-30 px-3 md:px-4 py-2 rounded border border-purple-500">
                         {message.message}
                     </div>
                 );
@@ -152,7 +152,7 @@ const ChatDisplay: React.FC<ChatDisplayProps> = ({ onScrollToTop }) => {
 
             <div
                 ref={scrollContainerRef}
-                className="h-full overflow-y-auto p-3 md:p-4 font-mono text-sm md:text-xl leading-5 md:leading-7"
+                className="h-full overflow-y-auto p-3 md:p-4 font-mono text-base md:text-xl leading-6 md:leading-7"
             >
                 {messages.map((message, index) => (
                     <div key={`${message.timestamp}-${index}`} className="px-2 md:px-3 transition-opacity duration-200">
