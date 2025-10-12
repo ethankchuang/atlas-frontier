@@ -7,6 +7,7 @@ import Minimap from './Minimap';
 import FullscreenMinimap from './FullscreenMinimap';
 import PlayersInRoom from './PlayersInRoom';
 import DuelChallengePopup from './DuelChallengePopup';
+import DirectionalControls from './DirectionalControls';
 import apiService from '@/services/api';
 import websocketService from '@/services/websocket';
 import { ChatMessage, Room } from '@/types/game';
@@ -328,9 +329,10 @@ const GameLayout: React.FC<GameLayoutProps> = ({ playerId }) => {
                 <Bars3Icon className="w-5 h-5 md:w-6 md:h-6 text-amber-500" />
             </button>
 
-            {/* Minimap - positioned in top-right corner */}
+            {/* Minimap with directional controls - positioned in top-right corner */}
             <div className="absolute top-2 right-2 md:top-4 md:right-4 z-20 bg-black bg-opacity-80 p-2 md:p-3 border border-green-700 rounded text-xs md:text-sm">
                 <Minimap />
+                <DirectionalControls />
             </div>
 
             {/* Players in Room - positioned below minimap */}
