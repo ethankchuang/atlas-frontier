@@ -1,10 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import useGameStore from '@/store/gameStore';
 import apiService from '@/services/api';
-import { ChevronUpIcon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon } from '@heroicons/react/24/solid';
+import { ChevronUpIcon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, EyeIcon, ChatBubbleLeftIcon, BoltIcon } from '@heroicons/react/24/solid';
 
 const DirectionalControls: React.FC = () => {
-    const { player, currentRoom, addMessage, updateMessage, isInDuel, myDuelMove, bothMovesSubmitted } = useGameStore();
+    const { player, currentRoom, addMessage, updateMessage, isInDuel, myDuelMove, bothMovesSubmitted, isEmote, setIsEmote } = useGameStore();
     const [isProcessing, setIsProcessing] = useState(false);
 
     const handleDirection = async (direction: string) => {
@@ -84,25 +84,59 @@ const DirectionalControls: React.FC = () => {
     // Disable buttons when processing, in duel, or duel move already submitted
     const isDisabled = isProcessing || (isInDuel && (!!myDuelMove && !bothMovesSubmitted));
 
+    const toggleChatMode = () => {
+        setIsEmote(!isEmote);
+    };
+
     return (
         <div className="flex flex-col items-center gap-1 mt-2">
-            {/* Up arrow */}
-            <button
-                onClick={() => handleDirection('north')}
-                disabled={isDisabled}
-                className="w-6 h-6 flex items-center justify-center bg-green-900 bg-opacity-30 border border-green-700 border-opacity-40 rounded hover:bg-opacity-50 hover:border-opacity-60 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
-                aria-label="Go North"
-                title="North"
-            >
-                <ChevronUpIcon className="w-4 h-4 text-green-500 opacity-50" />
-            </button>
+            {/* Eye button, Up arrow, and Chat mode toggle */}
+            <div className="flex gap-1 items-center">
+                <button
+                    onClick={() => handleDirection('look around')}
+                    disabled={isDisabled}
+                    className="w-6 h-6 flex items-center justify-center bg-amber-900 bg-opacity-30 border border-amber-700 border-opacity-40 rounded hover:bg-opacity-50 hover:border-opacity-60 transition-all disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+                    aria-label="Look Around"
+                    title="Look Around"
+                >
+                    <EyeIcon className="w-4 h-4 text-amber-500 opacity-50" />
+                </button>
+
+                <button
+                    onClick={() => handleDirection('north')}
+                    disabled={isDisabled}
+                    className="w-6 h-6 flex items-center justify-center bg-green-900 bg-opacity-30 border border-green-700 border-opacity-40 rounded hover:bg-opacity-50 hover:border-opacity-60 transition-all disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+                    aria-label="Go North"
+                    title="North"
+                >
+                    <ChevronUpIcon className="w-4 h-4 text-green-500 opacity-50" />
+                </button>
+
+                <button
+                    onClick={toggleChatMode}
+                    disabled={isInDuel}
+                    className={`w-6 h-6 flex items-center justify-center rounded transition-all cursor-pointer ${
+                        isEmote
+                            ? 'bg-gray-800 bg-opacity-30 border border-gray-600 border-opacity-40 hover:bg-opacity-50 hover:border-opacity-60'
+                            : 'bg-gray-800 bg-opacity-30 border border-gray-600 border-opacity-40 hover:bg-opacity-50 hover:border-opacity-60'
+                    } disabled:opacity-30 disabled:cursor-not-allowed`}
+                    aria-label={isEmote ? "Switch to Action Mode" : "Switch to Chat Mode"}
+                    title={isEmote ? "Action Mode" : "Chat Mode"}
+                >
+                    {isEmote ? (
+                        <BoltIcon className="w-4 h-4 text-gray-400 opacity-60" />
+                    ) : (
+                        <ChatBubbleLeftIcon className="w-4 h-4 text-gray-400 opacity-60" />
+                    )}
+                </button>
+            </div>
 
             {/* Left, Down, Right arrows */}
             <div className="flex gap-1">
                 <button
                     onClick={() => handleDirection('west')}
                     disabled={isDisabled}
-                    className="w-6 h-6 flex items-center justify-center bg-green-900 bg-opacity-30 border border-green-700 border-opacity-40 rounded hover:bg-opacity-50 hover:border-opacity-60 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+                    className="w-6 h-6 flex items-center justify-center bg-green-900 bg-opacity-30 border border-green-700 border-opacity-40 rounded hover:bg-opacity-50 hover:border-opacity-60 transition-all disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
                     aria-label="Go West"
                     title="West"
                 >
@@ -112,7 +146,7 @@ const DirectionalControls: React.FC = () => {
                 <button
                     onClick={() => handleDirection('south')}
                     disabled={isDisabled}
-                    className="w-6 h-6 flex items-center justify-center bg-green-900 bg-opacity-30 border border-green-700 border-opacity-40 rounded hover:bg-opacity-50 hover:border-opacity-60 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+                    className="w-6 h-6 flex items-center justify-center bg-green-900 bg-opacity-30 border border-green-700 border-opacity-40 rounded hover:bg-opacity-50 hover:border-opacity-60 transition-all disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
                     aria-label="Go South"
                     title="South"
                 >
@@ -122,7 +156,7 @@ const DirectionalControls: React.FC = () => {
                 <button
                     onClick={() => handleDirection('east')}
                     disabled={isDisabled}
-                    className="w-6 h-6 flex items-center justify-center bg-green-900 bg-opacity-30 border border-green-700 border-opacity-40 rounded hover:bg-opacity-50 hover:border-opacity-60 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+                    className="w-6 h-6 flex items-center justify-center bg-green-900 bg-opacity-30 border border-green-700 border-opacity-40 rounded hover:bg-opacity-50 hover:border-opacity-60 transition-all disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
                     aria-label="Go East"
                     title="East"
                 >

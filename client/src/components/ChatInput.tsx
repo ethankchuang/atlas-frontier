@@ -10,7 +10,6 @@ const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', 
 
 const ChatInput: React.FC = () => {
     const [input, setInput] = useState('');
-    const [isEmote, setIsEmote] = useState(false);
     const [isStreaming, setIsStreaming] = useState(false);
     const [spinnerFrame, setSpinnerFrame] = useState(0);
     const streamMessageIdRef = useRef<string | null>(null);
@@ -28,7 +27,9 @@ const ChatInput: React.FC = () => {
         currentRound,
         addMessage,
         updateMessage,
-        submitDuelMove
+        submitDuelMove,
+        isEmote,
+        setIsEmote
     } = useGameStore();
 
     useEffect(() => {
@@ -337,6 +338,8 @@ const ChatInput: React.FC = () => {
 
     const toggleEmote = () => {
         setIsEmote(!isEmote);
+        // Focus the input when toggling
+        inputRef.current?.focus();
     };
 
     return (
