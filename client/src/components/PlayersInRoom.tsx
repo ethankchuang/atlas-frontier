@@ -69,7 +69,7 @@ const PlayersInRoom: React.FC = () => {
     }
 
     return (
-        <div className="absolute top-4 left-4 bg-black bg-opacity-80 border border-amber-500 rounded-lg p-2 z-20">
+        <div className="absolute top-16 left-2 md:top-20 md:left-4 bg-black bg-opacity-80 border border-amber-500 rounded-lg p-2 z-20">
             <div className="flex items-center gap-1 mb-1">
                 <UserCircleIcon className="h-3 w-3 text-amber-500" />
                 <span className="text-amber-500 font-bold text-xs">Also here:</span>
