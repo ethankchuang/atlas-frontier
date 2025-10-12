@@ -20,12 +20,12 @@ const vt323 = VT323({
 });
 
 export const metadata: Metadata = {
-  title: "Worlds AI",
-  description: "Worlds AI",
+  title: "Eternal Engine - Infinite AI-Powered Multiplayer World",
+  description: "The Infinite AI-Powered Multiplayer World and Sandbox Game",
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
-    title: "Worlds AI",
+    title: "Eternal Engine - Infinite AI-Powered Multiplayer World",
   },
   themeColor: [
     { media: "(prefers-color-scheme: light)", color: "#000000" },
