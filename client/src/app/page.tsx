@@ -163,8 +163,8 @@ export default function Home() {
             {/* Footer with social links */}
             <div className="fixed right-4 z-20" style={{ bottom: 'max(1rem, env(safe-area-inset-bottom))' }}>
                 <div className="flex items-center gap-2 text-xs text-gray-400 bg-black/60 backdrop-blur-sm px-3 py-2 rounded-lg border border-gray-700/50">
-                    <span className="hidden sm:inline">crafted with love by Ethan Chuang - follow & contact:</span>
-                    <span className="sm:hidden">by Ethan Chuang</span>
+                    <span className="hidden sm:inline">follow & contact:</span>
+                    <span className="sm:hidden">follow & contact:</span>
                     <div className="flex gap-2">
                         <a
                             href="https://twitter.com/EternalEngineGG"
