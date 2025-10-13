@@ -98,12 +98,12 @@ class AIHandler:
         logger.debug(f"[Room Description] Sending prompt to OpenAI: {prompt}")
         try:
             response = await client.chat.completions.create(
-                model="gpt-4.1-nano-2025-04-14",
+                model="gpt-5-nano-2025-08-07",
                 messages=[
                     {"role": "system", "content": f"You are a concise writer for a {WORLD_CONFIG['setting_primary']} {WORLD_CONFIG['setting_secondary']} {WORLD_CONFIG['game_type']}. Always return clean JSON without comments. Focus only on essential details and remove all fluff. Avoid {avoid_themes_str} elements."},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.7
+                temperature=1
             )
 
             content = response.choices[0].message.content
@@ -620,12 +620,12 @@ class AIHandler:
         try:
             logger.info(f"⏱️ [TIMING] AI request starting...")
             stream = await client.chat.completions.create(
-                model="gpt-4.1-nano-2025-04-14",
+                model="gpt-5-nano-2025-08-07",
                 messages=[
                     {"role": "system", "content": f"You are the game master of a multiplayer AI-powered {WORLD_CONFIG['game_type']} world. Keep all responses concise (1-2 sentences maximum). Focus only on important environmental details but remove all fluff. Make actions clear and direct. Be generous with item generation - when players grab/take anything, turn it into an item. Be creative and engaging and make the world feel alive and immersive and fun."},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.7,
+                temperature=1,
                 stream=True
             )
 
@@ -866,12 +866,12 @@ Return a JSON object with this exact structure:
 """
 
         response = await client.chat.completions.create(
-            model="gpt-4.1-nano-2025-04-14",
+            model="gpt-5-nano-2025-08-07",
             messages=[
                 {"role": "system", "content": f"You are {npc_name}, an NPC in a {WORLD_CONFIG['setting_primary']} {WORLD_CONFIG['setting_secondary']} {WORLD_CONFIG['game_type']}. Your dialogue style is: {npc_dialogue_style}. Your knowledge areas are: {npc_knowledge}. Keep responses concise (1-2 sentences maximum). Stay in character and use your unique personality traits. Focus only on essential information and remove all fluff. Always return clean JSON without any comments."},
                 {"role": "user", "content": prompt}
             ],
-            temperature=0.7
+            temperature=1
         )
 
         # Clean the response content to handle potential control characters
@@ -935,12 +935,12 @@ Return a JSON object with this exact structure:
         """
 
         response = await client.chat.completions.create(
-            model="gpt-4.1-nano-2025-04-14",
+            model="gpt-5-nano-2025-08-07",
             messages=[
                 {"role": "system", "content": f"You are a {WORLD_CONFIG['setting_primary']} {WORLD_CONFIG['setting_secondary']} world creator. Keep descriptions concise (1-2 sentences maximum). Focus only on essential details and remove all fluff. Avoid {avoid_themes_str} elements. Always return clean JSON without any comments."},
                 {"role": "user", "content": prompt}
             ],
-            temperature=0.7
+            temperature=1
         )
 
         # Clean the response content to handle potential control characters
@@ -1084,12 +1084,12 @@ Return a JSON object with this exact structure:
         """Generate text using OpenAI"""
         try:
             response = await client.chat.completions.create(
-                model="gpt-4.1-nano-2025-04-14",
+                model="gpt-5-nano-2025-08-07",
                 messages=[
                     {"role": "system", "content": "You are a helpful assistant. Keep responses concise (1-2 sentences maximum). Focus only on essential information and remove all fluff. Always return clean, valid responses."},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.7
+                temperature=1
             )
             return response.choices[0].message.content
         except Exception as e:
@@ -1101,7 +1101,7 @@ Return a JSON object with this exact structure:
         """Analyze a duel between two players and determine the outcome"""
         try:
             response = await client.chat.completions.create(
-                model="gpt-4.1-nano-2025-04-14",
+                model="gpt-5-nano-2025-08-07",
                 messages=[
                     {"role": "system", "content": "You are a fantasy duel referee. Analyze the moves of two players and determine who wins. Be dramatic and engaging, but keep the analysis concise (2-3 sentences). Consider the effectiveness, creativity, and interaction of the moves. Always clearly state who wins."},
                     {"role": "user", "content": prompt}
@@ -1146,12 +1146,12 @@ Return a JSON object with these exact fields:
         logger.debug(f"[Biome Generation] Sending biome chunk prompt to OpenAI: {prompt}")
         try:
             response = await client.chat.completions.create(
-                model="gpt-4.1-nano-2025-04-14",
+                model="gpt-5-nano-2025-08-07",
                 messages=[
                     {"role": "system", "content": f"You are a worldbuilder for a {WORLD_CONFIG['setting_primary']} {WORLD_CONFIG['setting_secondary']} {WORLD_CONFIG['game_type']}. Always return clean JSON without comments. Keep all content {WORLD_CONFIG['setting_primary']} {WORLD_CONFIG['setting_secondary']} (avoid {avoid_themes_str} elements). Biome names must be short and generic. Descriptions must be concise and evocative. Colors must be valid hex codes that visually represent the biome. Biomes must be visually and thematically distinct from neighbors, and must have a large impact on the image and name of all rooms within them."},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.7
+                temperature=1
             )
             content = response.choices[0].message.content
             logger.debug(f"[Biome Generation] Received biome chunk response: {content}")
