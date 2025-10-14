@@ -2028,7 +2028,20 @@ async def process_action_stream(
                         additional_content = ""
                         
                         # Also check if this was a movement action by looking at the original action
-                        is_movement_action = action_request.action.lower().startswith(("move ", "go ", "walk ", "run ", "head "))
+                        action_lower = (action_request.action or "").lower()
+                        cardinal_dirs = {"north", "south", "east", "west", "up", "down"}
+                        is_movement_action = action_lower in cardinal_dirs or action_lower.startswith(("move ", "go ", "walk ", "run ", "head "))
+
+                        # If user sent a bare cardinal direction (e.g. button press) and AI omitted updates,
+                        # inject a movement update so retreat logic runs.
+                        if (not is_movement) and (action_lower in cardinal_dirs):
+                            logger.info(f"[Stream] Injecting movement update for bare cardinal action '{action_lower}'")
+                            if "updates" not in chunk or not isinstance(chunk.get("updates"), dict):
+                                chunk["updates"] = {}
+                            if "player" not in chunk["updates"] or not isinstance(chunk["updates"].get("player"), dict):
+                                chunk["updates"]["player"] = {}
+                            chunk["updates"]["player"]["direction"] = action_lower
+                            is_movement = True
                         
                         logger.info(f"[Stream] Action analysis: is_movement={is_movement}, is_movement_action={is_movement_action}, action='{action_request.action}'")
 
