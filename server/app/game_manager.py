@@ -286,7 +286,9 @@ class GameManager:
                     'room_id': room_context.get('room_id', ''),
                     'room_title': room_context.get('room_title', ''),
                     'room_description': room_context.get('room_description', ''),
-                    'biome': room_context.get('biome', '')
+                    'biome': room_context.get('biome', ''),
+                    'x': room_context.get('x', 0),
+                    'y': room_context.get('y', 0)
                     # Deliberately exclude aggressiveness, intelligence, size to force random generation
                 }
 
