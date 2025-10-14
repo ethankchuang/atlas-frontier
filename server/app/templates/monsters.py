@@ -79,6 +79,24 @@ Example response:
             attributes_info += f"INTELLIGENCE: {context['intelligence']}\n"
         if "size" in context:
             attributes_info += f"SIZE: {context['size']}\n"
+        # Provide guidance for number of special effects to include
+        if "effect_count" in context:
+            ec = int(context.get("effect_count", 0) or 0)
+            if ec <= 0:
+                attributes_info += (
+                    "SPECIAL_EFFECTS POLICY: This monster should have no special effects. "
+                    "Set special_effects to 'no special effects'.\n"
+                )
+            elif ec == 1:
+                attributes_info += (
+                    "SPECIAL_EFFECTS POLICY: Include exactly ONE concise ability (e.g., 'can breathe fire'). "
+                    "Keep it short and in present tense.\n"
+                )
+            else:
+                attributes_info += (
+                    "SPECIAL_EFFECTS POLICY: Include exactly TWO concise abilities (e.g., 'can breathe fire' and 'can fly fast'). "
+                    "Use ' and ' between them.\n"
+                )
         
         # Add naming style guidance
         naming_guidance = self._get_naming_guidance(naming_style, context.get('biome', 'unknown'))
@@ -206,19 +224,74 @@ Example response:
         if context is None:
             context = {}
         
-        # Define attribute options with weighted distributions for better variety
+        # Define attribute options
         aggressiveness_options = ["passive", "aggressive", "neutral", "territorial"]
         intelligence_options = ["human", "subhuman", "animal", "omnipotent"]
         size_options = ["colossal", "dinosaur", "horse", "human", "chicken", "insect"]
-        
-        # Use weighted selection to ensure better distribution
-        # Avoid too many colossal/omnipotent monsters
-        size_weights = [1, 2, 3, 3, 2, 1]  # Less colossal/insect, more human/horse sized
-        intelligence_weights = [2, 3, 4, 1]  # Less omnipotent, more animal intelligence
-        
-        aggressiveness = context.get("aggressiveness", random.choice(aggressiveness_options))
-        intelligence = context.get("intelligence", random.choices(intelligence_options, weights=intelligence_weights)[0])
-        size = context.get("size", random.choices(size_options, weights=size_weights)[0])
+
+        # Compute difficulty ring by distance from center; every 6 rooms increases difficulty by 1
+        try:
+            x = int(context.get('x', 0) or 0)
+            y = int(context.get('y', 0) or 0)
+        except Exception:
+            x, y = 0, 0
+        ring = max(abs(x) // 6, abs(y) // 6)
+        if ring < 0:
+            ring = 0
+        if ring > 8:
+            # Clamp to avoid extreme weights far away
+            ring = 8
+
+        # Base weights biased toward easier encounters near center
+        # Aggressiveness: favor passive/neutral near center; push to aggressive/territorial as ring grows
+        base_aggr_weights = {
+            'passive': 6,
+            'aggressive': 2,
+            'neutral': 6,
+            'territorial': 1
+        }
+        # Intelligence: favor animal/subhuman; increase human/omnipotent as ring grows
+        base_intel_weights = {
+            'human': 2,
+            'subhuman': 4,
+            'animal': 7,
+            'omnipotent': 1
+        }
+        # Size: favor smaller sizes near center; shift to larger outward
+        base_size_weights = {
+            'colossal': 1,
+            'dinosaur': 1,
+            'horse': 2,
+            'human': 3,
+            'chicken': 5,
+            'insect': 5,
+        }
+
+        # Apply difficulty shift per ring
+        def shifted(value_map: Dict[str, int], easy_keys: list, hard_keys: list, per_step: int = 1) -> Dict[str, int]:
+            """Shift weights from easy_keys toward hard_keys by ring steps."""
+            result = dict(value_map)
+            shift_total = ring * per_step
+            for k in easy_keys:
+                result[k] = max(1, result[k] - shift_total)
+            for k in hard_keys:
+                result[k] = result[k] + shift_total
+            return result
+
+        aggr_w = shifted(base_aggr_weights, easy_keys=['passive', 'neutral'], hard_keys=['aggressive', 'territorial'], per_step=1)
+        intel_w = shifted(base_intel_weights, easy_keys=['animal', 'subhuman'], hard_keys=['human', 'omnipotent'], per_step=1)
+        # For size, treat human as mid; shift from insect/chicken/human toward horse/dinosaur/colossal
+        size_w = shifted(base_size_weights, easy_keys=['insect', 'chicken', 'human'], hard_keys=['horse', 'dinosaur', 'colossal'], per_step=1)
+
+        # Normalize into lists in the order of options
+        aggr_weights_list = [aggr_w[o] for o in aggressiveness_options]
+        intel_weights_list = [intel_w[o] for o in intelligence_options]
+        size_weights_list = [size_w[o] for o in size_options]
+
+        # Perform weighted selections; allow explicit override via context
+        aggressiveness = context.get("aggressiveness", random.choices(aggressiveness_options, weights=aggr_weights_list)[0])
+        intelligence = context.get("intelligence", random.choices(intelligence_options, weights=intel_weights_list)[0])
+        size = context.get("size", random.choices(size_options, weights=size_weights_list)[0])
         
         # Calculate health based on size
         health = self._calculate_health(size)
@@ -227,7 +300,15 @@ Example response:
         context["aggressiveness"] = aggressiveness
         context["intelligence"] = intelligence
         context["size"] = size
+        context["difficulty_ring"] = ring
         
+        # Decide special effects count with weighted probability that ramps up with distance
+        # Near center: almost always 0; mid-distance: mostly 1; far: many 1 and some 2
+        w0 = max(10, 85 - 8 * ring)
+        w1 = min(60, 12 + 5 * ring)
+        w2 = min(35, 3 + 3 * ring)
+        effect_count = random.choices([0, 1, 2], weights=[w0, w1, w2])[0]
+
         # Generate base monster data
         base_data = {
             "aggressiveness": aggressiveness,
@@ -236,6 +317,9 @@ Example response:
             "health": health,
             "is_alive": True
         }
+        
+        # Add effect count to context for prompt construction
+        context["effect_count"] = effect_count
         
         return base_data
     
