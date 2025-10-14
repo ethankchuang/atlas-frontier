@@ -1930,10 +1930,25 @@ async def process_action_stream(
                                     logger.error(f"[Stream] Error sending room_update: {str(e)}")
 
                                 # CRITICAL: Update player data in database BEFORE broadcasting
+                                # Preserve latest inventory unless explicitly updated to avoid stale overwrites
                                 db_update_start = time.time()
-                                updated_player = Player(**{**player.dict(), **player_updates})
+                                try:
+                                    latest_player_data = await game_manager.db.get_player(action_request.player_id)
+                                except Exception:
+                                    latest_player_data = None
+                                base_player_dict = player.dict()
+                                if latest_player_data and isinstance(latest_player_data, dict):
+                                    # Prefer the most recent inventory from DB if not included in updates
+                                    if 'player' in chunk.get('updates', {}) and 'inventory' not in chunk['updates']['player']:
+                                        base_player_dict['inventory'] = latest_player_data.get('inventory', base_player_dict.get('inventory', []))
+                                # Build updated player preserving inventory when not sent by updates
+                                merged_player_dict = {**base_player_dict, **player_updates}
+                                # If updates explicitly include inventory, trust it
+                                if 'player' in chunk.get('updates', {}) and 'inventory' in chunk['updates']['player']:
+                                    merged_player_dict['inventory'] = chunk['updates']['player']['inventory']
+                                updated_player = Player(**merged_player_dict)
                                 await game_manager.db.set_player(action_request.player_id, updated_player.dict())
-                                logger.info(f"⏱️ [TIMING] Update player in DB: {(time.time() - db_update_start)*1000:.2f}ms")
+                                logger.info(f"⏱️ [TIMING] Update player in DB (inventory-safe): {(time.time() - db_update_start)*1000:.2f}ms; inv_count={len(updated_player.inventory) if hasattr(updated_player, 'inventory') else 'n/a'}")
 
                                 # CRITICAL: Update room player lists in database
                                 db_update_start = time.time()
