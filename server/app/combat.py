@@ -706,7 +706,7 @@ async def send_duel_results(
                 logger.error(f"[Combat] Error recording monster combat history: {str(e)}")
             
             # FUTURE: Replace immediate removal with corpse/loot persistence and respawn timers.
-            # Temporary behavior: if a monster loses a duel, remove it from the room for now
+            # Temporary behavior: if a monster loses a duel, remove it from the room and clear territorial block
             try:
                 if loser_id and isinstance(loser_id, str) and loser_id.startswith("monster_"):
                     room_data = await game_manager.db.get_room(room_id)
@@ -717,6 +717,13 @@ async def send_duel_results(
                             room_data['monsters'] = monsters_list
                             # Persist updated room
                             await game_manager.db.set_room(room_id, room_data)
+
+                            # Clear any territorial block for this monster so it won't re-block
+                            try:
+                                from .monster_behavior import monster_behavior_manager
+                                monster_behavior_manager.clear_territorial_block_for_monster(room_id, loser_id)
+                            except Exception as e:
+                                logger.error(f"[Duel] Failed to clear territorial block for defeated monster {loser_id}: {str(e)}")
 
                             # Let players know this is a temporary behavior
                             await manager.broadcast_to_room(room_id, {
@@ -752,7 +759,7 @@ async def send_duel_results(
             except Exception as e:
                 logger.error(f"[Duel] Error cleaning up duel state for {duel_id}: {str(e)}")
         else:
-            # No clear winner; treat as draw and clean up
+            # No clear winner; treat as draw: teleport player to spawn (same as defeat), then clean up
             try:
                 outcome_message = {
                     "type": "duel_outcome",
@@ -765,6 +772,67 @@ async def send_duel_results(
                 }
                 await manager.send_to_player(room_id, player1_id, outcome_message)
                 await manager.send_to_player(room_id, player2_id, outcome_message)
+
+                # If this is a monster duel, teleport the player back to spawn on draw
+                try:
+                    monster_id = None
+                    if isinstance(player1_id, str) and player1_id.startswith("monster_"):
+                        monster_id = player1_id
+                        defeated_player_id = player2_id
+                    elif isinstance(player2_id, str) and player2_id.startswith("monster_"):
+                        monster_id = player2_id
+                        defeated_player_id = player1_id
+                    else:
+                        defeated_player_id = None
+
+                    if monster_id and defeated_player_id:
+                        try:
+                            defeated_player_data = await game_manager.db.get_player(defeated_player_id)
+                            if defeated_player_data:
+                                old_room_id = defeated_player_data.get('current_room')
+                                spawn_room_id = 'room_start'
+                                defeated_player_data['current_room'] = spawn_room_id
+                                defeated_player_data['health'] = 5
+                                defeated_player_data['rejoin_immunity'] = True
+                                await game_manager.db.set_player(defeated_player_id, defeated_player_data)
+
+                                # Update room player lists
+                                await game_manager.db.remove_from_room_players(old_room_id, defeated_player_id)
+                                await game_manager.db.add_to_room_players(spawn_room_id, defeated_player_id)
+
+                                # Send teleport/death-like message
+                                spawn_room_data = await game_manager.db.get_room(spawn_room_id)
+                                if spawn_room_data:
+                                    from .models import Room
+                                    spawn_room = Room(**spawn_room_data)
+                                    spawn_room.players = await game_manager.db.get_room_players(spawn_room_id)
+                                    spawn_room_dict = spawn_room.dict()
+                                    for key, value in spawn_room_dict.items():
+                                        if isinstance(value, bytes):
+                                            spawn_room_dict[key] = value.decode('utf-8')
+                                    await manager.send_to_player(old_room_id, defeated_player_id, {
+                                        "type": "player_death",
+                                        "message": "The clash ends in a draw. You find yourself back at spawn...",
+                                        "new_room": spawn_room_dict,
+                                        "player": defeated_player_data,
+                                        "timestamp": datetime.now().isoformat()
+                                    })
+
+                                    # Broadcast presence updates
+                                    await manager.broadcast_to_room(old_room_id, {
+                                        "type": "presence",
+                                        "player_id": defeated_player_id,
+                                        "status": "left"
+                                    }, exclude_player=defeated_player_id)
+                                    await manager.broadcast_to_room(spawn_room_id, {
+                                        "type": "presence",
+                                        "player_id": defeated_player_id,
+                                        "status": "joined"
+                                    }, exclude_player=defeated_player_id)
+                        except Exception as e:
+                            logger.error(f"[Duel] Error teleporting player to spawn on draw: {str(e)}")
+                except Exception as e:
+                    logger.error(f"[Duel] Error handling draw teleport logic: {str(e)}")
             except Exception as e:
                 logger.error(f"[Duel] Error sending draw outcome for {duel_id}: {str(e)}")
             finally:
