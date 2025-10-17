@@ -3,6 +3,9 @@ import useGameStore, { DUEL_MAX_HEALTH, DUEL_MAX_ADVANTAGE } from '@/store/gameS
 import RoomDisplay from './RoomDisplay';
 import ChatDisplay from './ChatDisplay';
 import ChatInput from './ChatInput';
+import MinimizedChat from './MinimizedChat';
+import NotificationToast from './NotificationToast';
+import QuestStorylineOverlay from './QuestStorylineOverlay';
 import Minimap from './Minimap';
 import FullscreenMinimap from './FullscreenMinimap';
 import PlayersInRoom from './PlayersInRoom';
@@ -25,6 +28,11 @@ const GameLayout: React.FC<GameLayoutProps> = ({ playerId }) => {
     const [isChatExpanded, setIsChatExpanded] = useState(false);
     const [isQuestLogOpen, setIsQuestLogOpen] = useState(false);
     const [isBadgeCollectionOpen, setIsBadgeCollectionOpen] = useState(false);
+    
+    // State for managing active toasts and overlays
+    const [activeQuestMessage, setActiveQuestMessage] = useState<ChatMessage | null>(null);
+    const [activeToasts, setActiveToasts] = useState<ChatMessage[]>([]);
+    const [dismissedMessageIds, setDismissedMessageIds] = useState<Set<string>>(new Set());
 
     const {
         player,
@@ -297,6 +305,44 @@ const GameLayout: React.FC<GameLayoutProps> = ({ playerId }) => {
         return () => window.removeEventListener('keydown', onKeyDown);
     }, [setIsMenuOpen]);
 
+    // Watch for new important messages and display them as toasts/overlays
+    const { messages } = useGameStore();
+    useEffect(() => {
+        messages.forEach((message) => {
+            const messageId = `${message.timestamp}-${message.message_type}`;
+            
+            // Skip if already dismissed
+            if (dismissedMessageIds.has(messageId)) return;
+
+            // Handle quest storyline messages
+            if (message.message_type === 'quest_storyline' && !activeQuestMessage) {
+                setActiveQuestMessage(message);
+                setDismissedMessageIds(prev => new Set(prev).add(messageId));
+                return;
+            }
+
+            // Handle room descriptions and item obtained as toasts
+            if (['room_description', 'item_obtained'].includes(message.message_type)) {
+                const isAlreadyInToasts = activeToasts.some(
+                    t => `${t.timestamp}-${t.message_type}` === messageId
+                );
+                
+                if (!isAlreadyInToasts) {
+                    setActiveToasts(prev => [...prev, message]);
+                    setDismissedMessageIds(prev => new Set(prev).add(messageId));
+                }
+            }
+        });
+    }, [messages, activeQuestMessage, activeToasts, dismissedMessageIds]);
+
+    const handleDismissToast = (message: ChatMessage) => {
+        setActiveToasts(prev => prev.filter(t => t.timestamp !== message.timestamp));
+    };
+
+    const handleDismissQuest = () => {
+        setActiveQuestMessage(null);
+    };
+
     if (!player || !currentRoom) {
         return (
             <div className="flex items-center justify-center h-screen bg-black">
@@ -408,40 +454,99 @@ const GameLayout: React.FC<GameLayoutProps> = ({ playerId }) => {
                 </div>
             )}
 
-            {/* Chat Display Overlay (bottom portion, translucent) */}
-            <div
-                className={`absolute bottom-0 left-0 right-0 flex flex-col z-20 transition-all duration-300 ${
-                    isChatExpanded ? 'top-16' : 'h-[40vh]'
-                }`}
-                style={{
-                    paddingLeft: typeof window !== 'undefined' && window.innerWidth >= 768 ? '1.5rem' : '0.75rem',
-                    paddingRight: typeof window !== 'undefined' && window.innerWidth >= 768 ? '1.5rem' : '0.75rem',
-                    paddingTop: typeof window !== 'undefined' && window.innerWidth >= 768 ? '1.5rem' : '0.75rem',
-                    paddingBottom: typeof window !== 'undefined' && window.innerWidth >= 768
-                        ? 'max(1.5rem, env(safe-area-inset-bottom))'
-                        : 'max(0.75rem, env(safe-area-inset-bottom))'
-                }}
-            >
-                <div className="w-full max-w-4xl mx-auto bg-black/60 backdrop-blur-md rounded-lg flex flex-col h-full relative">
-                    {/* Expand/Collapse Button */}
-                    <button
-                        onClick={() => setIsChatExpanded(!isChatExpanded)}
-                        className="absolute -top-2 left-1/2 -translate-x-1/2 bg-black/60 backdrop-blur-md border border-amber-900/50 rounded-full p-1.5 hover:bg-black/80 transition-colors z-30"
-                        aria-label={isChatExpanded ? "Collapse chat" : "Expand chat"}
-                    >
-                        {isChatExpanded ? (
-                            <ChevronDownIcon className="w-4 h-4 text-amber-400" />
-                        ) : (
-                            <ChevronUpIcon className="w-4 h-4 text-amber-400" />
-                        )}
-                    </button>
+            {/* Quest Storyline Overlay */}
+            {activeQuestMessage && (
+                <QuestStorylineOverlay
+                    message={activeQuestMessage}
+                    onDismiss={handleDismissQuest}
+                />
+            )}
 
-                    <div className="flex-1 overflow-hidden">
-                        <ChatDisplay />
-                    </div>
-                    <ChatInput />
+            {/* Notification Toasts Container */}
+            <div className="fixed top-16 left-0 right-0 z-40 pointer-events-none">
+                <div className="w-full max-w-4xl mx-auto px-4 space-y-3">
+                    {activeToasts.map((toast, index) => (
+                        <div key={`${toast.timestamp}-${index}`} className="pointer-events-auto">
+                            {toast.message_type === 'room_description' && (
+                                <NotificationToast
+                                    message={toast}
+                                    onDismiss={() => handleDismissToast(toast)}
+                                    autoDismissMs={8000}
+                                />
+                            )}
+                        </div>
+                    ))}
                 </div>
             </div>
+
+            {/* Item Obtained Toasts - Right Side */}
+            <div className="fixed top-16 right-4 z-40 pointer-events-none">
+                <div className="space-y-3">
+                    {activeToasts.map((toast, index) => (
+                        toast.message_type === 'item_obtained' && (
+                            <div key={`${toast.timestamp}-${index}`} className="pointer-events-auto">
+                                <NotificationToast
+                                    message={toast}
+                                    onDismiss={() => handleDismissToast(toast)}
+                                    autoDismissMs={5000}
+                                />
+                            </div>
+                        )
+                    ))}
+                </div>
+            </div>
+
+            {/* Chat Display - Minimized or Expanded */}
+            {isChatExpanded ? (
+                <div
+                    className="absolute top-16 bottom-0 left-0 right-0 flex flex-col z-20 transition-all duration-300"
+                    style={{
+                        paddingLeft: typeof window !== 'undefined' && window.innerWidth >= 768 ? '1.5rem' : '0.75rem',
+                        paddingRight: typeof window !== 'undefined' && window.innerWidth >= 768 ? '1.5rem' : '0.75rem',
+                        paddingTop: typeof window !== 'undefined' && window.innerWidth >= 768 ? '1.5rem' : '0.75rem',
+                        paddingBottom: typeof window !== 'undefined' && window.innerWidth >= 768
+                            ? 'max(1.5rem, env(safe-area-inset-bottom))'
+                            : 'max(0.75rem, env(safe-area-inset-bottom))'
+                    }}
+                >
+                    <div className="w-full max-w-4xl mx-auto bg-black/60 backdrop-blur-md rounded-lg flex flex-col h-full relative">
+                        {/* Collapse Button */}
+                        <button
+                            onClick={() => setIsChatExpanded(false)}
+                            className="absolute -top-2 left-1/2 -translate-x-1/2 bg-black/60 backdrop-blur-md border border-amber-900/50 rounded-full p-1.5 hover:bg-black/80 transition-colors z-30"
+                            aria-label="Collapse chat"
+                        >
+                            <ChevronDownIcon className="w-4 h-4 text-amber-400" />
+                        </button>
+
+                        <div className="flex-1 overflow-hidden">
+                            <ChatDisplay />
+                        </div>
+                        <ChatInput />
+                    </div>
+                </div>
+            ) : (
+                <div className="absolute bottom-0 left-0 right-0 z-20">
+                    <div 
+                        className="w-full max-w-4xl mx-auto"
+                        style={{
+                            paddingLeft: typeof window !== 'undefined' && window.innerWidth >= 768 ? '1.5rem' : '0.75rem',
+                            paddingRight: typeof window !== 'undefined' && window.innerWidth >= 768 ? '1.5rem' : '0.75rem',
+                            paddingBottom: typeof window !== 'undefined' && window.innerWidth >= 768
+                                ? 'max(1.5rem, env(safe-area-inset-bottom))'
+                                : 'max(0.75rem, env(safe-area-inset-bottom))'
+                        }}
+                    >
+                        <div className="bg-black/60 backdrop-blur-md rounded-lg overflow-hidden">
+                            <MinimizedChat
+                                messages={messages}
+                                onExpand={() => setIsChatExpanded(true)}
+                            />
+                            <ChatInput />
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Pause Menu Overlay */}
             <PauseMenu

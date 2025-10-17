@@ -647,7 +647,7 @@ class AIHandler:
             stream = await client.chat.completions.create(
                 model="gpt-4.1-nano-2025-04-14",
                 messages=[
-                    {"role": "system", "content": f"You are the game master of a multiplayer AI-powered {WORLD_CONFIG['game_type']} world. Keep all responses concise (1-2 sentences maximum). Focus only on important environmental details but remove all fluff. Make actions clear and direct. Be generous with item generation - when players grab/take anything, turn it into an item. Be creative and engaging and make the world feel alive and immersive and fun."},
+                    {"role": "system", "content": f"You are the game master of a multiplayer AI-powered {WORLD_CONFIG['game_type']} world. Keep all responses to exactly 1 short sentence. Be extremely concise and direct - focus only on the immediate action result. Remove all fluff and extra description. Be generous with item generation - when players grab/take anything, turn it into an item. Make the world feel alive and fun."},
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0.7,

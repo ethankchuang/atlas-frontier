@@ -89,6 +89,14 @@ html, body {
   .movement-spinner {
     animation: spin 1s linear infinite;
   }
+
+  .animate-bounce-once {
+    animation: bounce-once 0.6s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+  }
+
+  .animate-pulse-slow {
+    animation: pulse-slow 3s ease-in-out infinite;
+  }
 }
 
 @keyframes pulse {
@@ -154,5 +162,34 @@ html, body {
   }
   to {
     transform: rotate(360deg);
+  }
+}
+
+@keyframes bounce-once {
+  0% {
+    transform: translateY(0) scale(1);
+  }
+  30% {
+    transform: translateY(-20px) scale(1.05);
+  }
+  50% {
+    transform: translateY(0) scale(0.95);
+  }
+  70% {
+    transform: translateY(-10px) scale(1.02);
+  }
+  100% {
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes pulse-slow {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.85;
+    transform: scale(1.02);
   }
 }
