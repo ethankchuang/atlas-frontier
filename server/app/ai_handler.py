@@ -826,7 +826,8 @@ class AIHandler:
         npc: NPC,
         player: Player,
         room: Room,
-        relevant_memories: List[Dict[str, any]]
+        relevant_memories: List[Dict[str, any]],
+        recent_chat_context: str = None
     ) -> Tuple[str, str]:
         """Process NPC dialogue using the LLM with NPC personality"""
         # Extract NPC personality data
@@ -838,6 +839,14 @@ class AIHandler:
         npc_knowledge = npc_dict.get('knowledge', 'local area')
         npc_quest_hint = npc_dict.get('quest_hint', '')
         npc_mood = npc_dict.get('mood', 'neutral')
+
+        # Parse recent chat context if provided
+        recent_chat = []
+        if recent_chat_context:
+            try:
+                recent_chat = json.loads(recent_chat_context)
+            except:
+                pass
 
         context = {
             "npc": {
@@ -853,6 +862,7 @@ class AIHandler:
             "room": room.dict(),
             "message": message,
             "memories": relevant_memories,
+            "recent_chat": recent_chat,
             "timestamp": datetime.utcnow().isoformat()
         }
 
@@ -862,6 +872,15 @@ class AIHandler:
     "memory": "A brief memory to store about this interaction"
 }
 '''
+
+        # Build recent chat history section
+        chat_history_section = ""
+        if recent_chat and len(recent_chat) > 0:
+            chat_history_section = "\n\nRECENT CONVERSATION HISTORY (last 20 messages):\n"
+            for chat_msg in recent_chat:
+                role_label = "You" if chat_msg.get('role') == 'npc' else "Player"
+                chat_history_section += f"{role_label}: {chat_msg.get('content', '')}\n"
+            chat_history_section += "\nUse this conversation history to maintain continuity and remember what you've discussed!\n"
 
         prompt = f"""Process this player's interaction with an NPC in a {WORLD_CONFIG['setting_primary']} {WORLD_CONFIG['setting_secondary']} {WORLD_CONFIG['game_type']}.
 
@@ -873,7 +892,7 @@ NPC PERSONALITY:
 - Areas of Knowledge: {npc_knowledge}
 - Quest Hint (if relevant): {npc_quest_hint}
 - Current Mood: {npc_mood}
-
+{chat_history_section}
 IMPORTANT:
 - Respond IN CHARACTER as {npc_name}
 - Use the dialogue style: "{npc_dialogue_style}"
@@ -884,6 +903,7 @@ IMPORTANT:
 - Be conversational and engaging - NPCs should feel alive and have personality!
 - Include actual dialogue in quotes when appropriate
 - Add personality flourishes, reactions, and character details
+- Reference previous conversation if relevant (see conversation history above)
 
 Context: {json.dumps(context)}
 
@@ -894,6 +914,7 @@ DIALOGUE GUIDELINES:
 - Let the NPC's personality shine through their word choice and manner
 - Make conversations feel natural and immersive, not robotic
 - NPCs can ask questions back, express opinions, or share brief insights
+- Remember what was said earlier in the conversation and reference it naturally
 
 Return a JSON object with this exact structure:
 {json_template}

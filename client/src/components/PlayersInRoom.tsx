@@ -151,8 +151,12 @@ const PlayersInRoom: React.FC = () => {
                 {npcs.map(npc => (
                     <div
                         key={npc.id}
-                        className="flex items-center bg-cyan-900 bg-opacity-50 rounded px-2 py-1 border border-cyan-600"
-                        title={npc.description || 'An NPC'}
+                        className="flex items-center bg-cyan-900 bg-opacity-50 rounded px-2 py-1 border border-cyan-600 cursor-pointer hover:bg-cyan-800 hover:border-cyan-500 transition-colors"
+                        title={`Chat with ${npc.name}${npc.description ? ': ' + npc.description : ''}`}
+                        onClick={() => {
+                            const store = useGameStore.getState();
+                            store.setChatInputPrefill(`@${npc.name} `);
+                        }}
                     >
                         <UserCircleIcon className="h-3.5 w-3.5 mr-1 text-cyan-400" />
                         <span className="text-cyan-100 text-sm font-medium">{npc.name}</span>

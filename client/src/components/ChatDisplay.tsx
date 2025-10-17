@@ -1,16 +1,19 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import useGameStore from '@/store/gameStore';
 import { ChatMessage } from '@/types/game';
-import { UserCircleIcon } from '@heroicons/react/24/solid';
+import { UserCircleIcon, FunnelIcon } from '@heroicons/react/24/solid';
 
 interface ChatDisplayProps {
     onScrollToTop?: () => void;
 }
 
+type FilterType = 'all' | 'actions' | 'npcs';
+
 const ChatDisplay: React.FC<ChatDisplayProps> = ({ onScrollToTop }) => {
     const { messages, playersInRoom, player } = useGameStore();
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const scrollContainerRef = useRef<HTMLDivElement>(null);
+    const [filter, setFilter] = useState<FilterType>('all');
 
     // Auto-scroll to bottom when new messages arrive
     useEffect(() => {
@@ -156,6 +159,19 @@ const ChatDisplay: React.FC<ChatDisplayProps> = ({ onScrollToTop }) => {
                     </div>
                 );
 
+            case 'npc_dialogue':
+                return (
+                    <div className="mb-4 font-mono bg-cyan-900/40 px-3 md:px-4 py-2.5 rounded-lg border-l-4 border-cyan-400">
+                        <div className="flex items-start gap-2">
+                            <span className="text-xl">💬</span>
+                            <div className="flex-1">
+                                <span className="font-bold text-cyan-300 text-sm md:text-base">{message.npc_name || 'NPC'}: </span>
+                                <span className="text-cyan-100 text-sm md:text-base leading-relaxed">{message.message}</span>
+                            </div>
+                        </div>
+                    </div>
+                );
+
             default:
                 return null;
         }
@@ -163,12 +179,40 @@ const ChatDisplay: React.FC<ChatDisplayProps> = ({ onScrollToTop }) => {
 
     // Filter out messages that are ONLY shown elsewhere (quest_storyline full overlay, room_description toast)
     // Keep item_obtained and quest_completion in chat for history log
-    const transientMessages = messages.filter(m => 
+    let transientMessages = messages.filter(m => 
         !['quest_storyline', 'room_description'].includes(m.message_type)
     );
 
+    // Apply user-selected filter
+    if (filter === 'actions') {
+        // Show only system messages and AI responses (game actions)
+        transientMessages = transientMessages.filter(m =>
+            ['system', 'ai_response', 'item_obtained', 'quest_completion'].includes(m.message_type)
+        );
+    } else if (filter === 'npcs') {
+        // Show only NPC dialogue and player messages to NPCs
+        transientMessages = transientMessages.filter(m =>
+            m.message_type === 'npc_dialogue' || 
+            (m.message_type === 'chat' && m.message.startsWith('@'))
+        );
+    }
+
     return (
         <div className="relative h-full w-full">
+            {/* Filter dropdown */}
+            <div className="absolute top-2 right-2 z-20 flex items-center gap-2">
+                <FunnelIcon className="w-3 h-3 text-amber-400" />
+                <select
+                    value={filter}
+                    onChange={(e) => setFilter(e.target.value as FilterType)}
+                    className="bg-black/80 text-amber-400 text-xs border border-amber-500/50 rounded px-2 py-1 focus:outline-none focus:border-amber-500 cursor-pointer hover:bg-black/90 transition-colors"
+                >
+                    <option value="all">All</option>
+                    <option value="actions">Actions</option>
+                    <option value="npcs">NPCs</option>
+                </select>
+            </div>
+
             {/* Gradient overlay for fade effect */}
             <div className="absolute top-0 left-0 right-0 h-24 bg-gradient-to-b from-black/40 to-transparent z-10 pointer-events-none" />
 

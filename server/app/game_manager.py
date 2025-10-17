@@ -1963,7 +1963,8 @@ class GameManager:
         self,
         player_id: str,
         npc_id: str,
-        message: str
+        message: str,
+        context: Dict[str, str] = None
     ) -> str:
         """Handle player interaction with an NPC"""
         # Get current state
@@ -1995,7 +1996,8 @@ class GameManager:
             npc=npc,
             player=player,
             room=room,
-            relevant_memories=relevant_memories
+            relevant_memories=relevant_memories,
+            recent_chat_context=context.get('recent_chat') if context else None
         )
 
         # Store the new memory

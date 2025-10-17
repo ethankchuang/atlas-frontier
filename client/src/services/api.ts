@@ -489,8 +489,8 @@ class APIService {
     // NPC interaction
     async interactWithNPC(
         interaction: NPCInteraction
-    ): Promise<{ success: boolean; response: string }> {
-        return this.request<{ success: boolean; response: string }>('/npc', {
+    ): Promise<{ success: boolean; response: string; quest_completion?: any }> {
+        return this.request<{ success: boolean; response: string; quest_completion?: any }>('/npc', {
             method: 'POST',
             body: JSON.stringify(interaction),
         });
