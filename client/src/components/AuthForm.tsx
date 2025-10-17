@@ -122,6 +122,10 @@ const AuthForm: React.FC<AuthFormProps> = ({ onSuccess }) => {
                     localStorage.setItem('auth_token', data.session.access_token);
                 }
                 
+                // Store player ID for session restoration
+                localStorage.setItem('player_id', guestResponse.player.id);
+                console.log('[Session] Saved guest player on creation:', guestResponse.player.id);
+                
                 setUser({
                     id: data.user.id,
                     username: guestResponse.player.name,

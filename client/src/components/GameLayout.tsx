@@ -20,6 +20,15 @@ import { ChatMessage, Room } from '@/types/game';
 import PauseMenu from '@/components/PauseMenu';
 import { ChevronDownIcon, Bars3Icon } from '@heroicons/react/24/solid';
 
+// Background images from public/images/background
+const BACKGROUND_IMAGES = [
+    '/images/background/a.png',
+    '/images/background/b.png',
+    '/images/background/c.png',
+    '/images/background/d.png',
+    '/images/background/e.png',
+];
+
 interface GameLayoutProps {
     playerId: string;
 }
@@ -28,6 +37,9 @@ const GameLayout: React.FC<GameLayoutProps> = ({ playerId }) => {
     const [isChatExpanded, setIsChatExpanded] = useState(false);
     const [isQuestLogOpen, setIsQuestLogOpen] = useState(false);
     const [isBadgeCollectionOpen, setIsBadgeCollectionOpen] = useState(false);
+    const [loadingBgImage] = useState(() => 
+        BACKGROUND_IMAGES[Math.floor(Math.random() * BACKGROUND_IMAGES.length)]
+    );
     
     // State for managing active toasts and overlays
     const [activeQuestMessage, setActiveQuestMessage] = useState<ChatMessage | null>(null);
@@ -345,7 +357,10 @@ const GameLayout: React.FC<GameLayoutProps> = ({ playerId }) => {
 
     if (!player || !currentRoom) {
         return (
-            <div className="flex items-center justify-center h-screen bg-[url('/images/background/a.png')] bg-cover bg-center">
+            <div 
+                className="flex items-center justify-center h-screen bg-cover bg-center"
+                style={{ backgroundImage: `url(${loadingBgImage})` }}
+            >
                 <div className="text-white text-xl drop-shadow-lg">Loading...</div>
             </div>
         );

@@ -53,7 +53,7 @@ export default function Home() {
         setRandomBgImage(BACKGROUND_IMAGES[Math.floor(Math.random() * BACKGROUND_IMAGES.length)]);
     }, []);
 
-    // Check for existing auth token on page load
+    // Check for existing auth token and player session on page load
     useEffect(() => {
         const checkAuthStatus = async () => {
             try {
@@ -62,12 +62,34 @@ export default function Home() {
                     setUser(userProfile);
                     setIsAuthenticated(true);
                     
-                    // Player will be loaded when joining the game
+                    // Try to restore player session from localStorage
+                    const storedPlayerId = localStorage.getItem('player_id');
+                    if (storedPlayerId) {
+                        try {
+                            console.log('[Session] Restoring player session:', storedPlayerId);
+                            // Try to fetch the player data to restore the session
+                            const playerData = await apiService.getPlayer(storedPlayerId);
+                            if (playerData && playerData.current_room) {
+                                console.log('[Session] Successfully restored player session');
+                                setPlayer(playerData);
+                                // Player is in a room, they'll be taken directly to the game
+                            } else {
+                                console.log('[Session] Player data found but no current room');
+                                // Clear invalid player ID
+                                localStorage.removeItem('player_id');
+                            }
+                        } catch (error) {
+                            console.warn('[Session] Failed to restore player session:', error);
+                            // Clear invalid player ID
+                            localStorage.removeItem('player_id');
+                        }
+                    }
                 }
             } catch (error) {
                 console.warn('Auth check failed:', error);
                 // Token might be expired, clear it
                 apiService.logout();
+                localStorage.removeItem('player_id');
                 setIsAuthenticated(false);
                 setUser(null);
             } finally {
@@ -105,6 +127,10 @@ export default function Home() {
                 // Join the game with the guest player
                 const result = await apiService.joinGame(guestPlayer.id);
                 setPlayer(result.player);
+                
+                // Persist player ID for session restoration
+                localStorage.setItem('player_id', result.player.id);
+                console.log('[Session] Saved guest player session:', result.player.id);
             } else {
                 // Get user's players
                 const playersData = await apiService.getPlayers();
@@ -124,6 +150,10 @@ export default function Home() {
                 // Join game with the player
                 const result = await apiService.joinGame(playerId);
                 setPlayer(result.player);
+                
+                // Persist player ID for session restoration
+                localStorage.setItem('player_id', result.player.id);
+                console.log('[Session] Saved player session:', result.player.id);
             }
             
         } catch (error) {
@@ -139,9 +169,11 @@ export default function Home() {
 
     const handleLogout = () => {
         apiService.logout();
+        localStorage.removeItem('player_id');
         setUser(null);
         setPlayer(null);
         setIsAuthenticated(false);
+        console.log('[Session] Cleared player session on logout');
     };
 
     // Background container component
