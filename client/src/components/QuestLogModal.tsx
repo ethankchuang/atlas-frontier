@@ -106,7 +106,7 @@ const QuestLogModal: React.FC<QuestLogModalProps> = ({ playerId, isOpen, onClose
                     <h3 className="text-lg font-bold text-amber-400 mb-1">
                         {questData.quest.name}
                     </h3>
-                    <p className="text-sm text-gray-400 italic">
+                    <p className="text-sm text-amber-200/80 italic">
                         {questData.quest.description}
                     </p>
                 </div>
@@ -118,7 +118,7 @@ const QuestLogModal: React.FC<QuestLogModalProps> = ({ playerId, isOpen, onClose
             {/* Progress Bar (only for current quests) */}
             {!isCompleted && (
                 <div className="mb-3">
-                    <div className="flex justify-between text-xs text-gray-400 mb-1">
+                    <div className="flex justify-between text-xs text-amber-300/90 mb-1">
                         <span>Progress</span>
                         <span>{questData.progress.completed}/{questData.progress.total}</span>
                     </div>
@@ -133,15 +133,15 @@ const QuestLogModal: React.FC<QuestLogModalProps> = ({ playerId, isOpen, onClose
 
             {/* Objectives */}
             <div className="mb-3 space-y-2">
-                <div className="text-xs font-bold text-gray-400 uppercase tracking-wider">
+                <div className="text-xs font-bold text-amber-300/90 uppercase tracking-wider">
                     Objectives
                 </div>
                 {questData.objectives.map((objective) => (
                     <div key={objective.id} className="flex items-start gap-2 text-sm">
-                        <div className={`mt-0.5 ${objective.player_progress.is_completed ? 'text-green-400' : 'text-gray-500'}`}>
+                        <div className={`mt-0.5 ${objective.player_progress.is_completed ? 'text-green-400' : 'text-amber-400/50'}`}>
                             {objective.player_progress.is_completed ? '✓' : '○'}
                         </div>
-                        <div className={objective.player_progress.is_completed ? 'text-gray-400 line-through' : 'text-gray-300'}>
+                        <div className={objective.player_progress.is_completed ? 'text-green-300/70 line-through' : 'text-green-200'}>
                             {objective.description}
                         </div>
                     </div>
@@ -150,13 +150,13 @@ const QuestLogModal: React.FC<QuestLogModalProps> = ({ playerId, isOpen, onClose
 
             {/* Rewards */}
             <div className="pt-3 border-t border-amber-900/30 flex items-center gap-4 text-sm">
-                <div className="text-gray-400 font-bold">Rewards:</div>
-                <div className="flex items-center gap-1 text-yellow-500">
+                <div className="text-amber-300 font-bold">Rewards:</div>
+                <div className="flex items-center gap-1 text-yellow-400">
                     <span>💰</span>
                     <span>{questData.quest.gold_reward} gold</span>
                 </div>
                 {questData.quest.badge_name && (
-                    <div className="flex items-center gap-1 text-purple-400">
+                    <div className="flex items-center gap-1 text-purple-300">
                         <span>🏅</span>
                         <span>{questData.quest.badge_name}</span>
                     </div>
@@ -165,7 +165,7 @@ const QuestLogModal: React.FC<QuestLogModalProps> = ({ playerId, isOpen, onClose
 
             {/* Completion Date */}
             {isCompleted && questData.player_quest.completed_at && (
-                <div className="mt-2 text-xs text-gray-500">
+                <div className="mt-2 text-xs text-amber-300/70">
                     Completed: {new Date(questData.player_quest.completed_at).toLocaleDateString()}
                 </div>
             )}
@@ -232,7 +232,7 @@ const QuestLogModal: React.FC<QuestLogModalProps> = ({ playerId, isOpen, onClose
                                 questLog.current_quests.length > 0 ? (
                                     questLog.current_quests.map((quest) => renderQuestCard(quest, false))
                                 ) : (
-                                    <div className="text-center text-gray-400 py-8">
+                                    <div className="text-center text-amber-300/70 py-8">
                                         No active quests
                                     </div>
                                 )
@@ -240,7 +240,7 @@ const QuestLogModal: React.FC<QuestLogModalProps> = ({ playerId, isOpen, onClose
                                 questLog.completed_quests.length > 0 ? (
                                     questLog.completed_quests.map((quest) => renderQuestCard(quest, true))
                                 ) : (
-                                    <div className="text-center text-gray-400 py-8">
+                                    <div className="text-center text-amber-300/70 py-8">
                                         No completed quests yet
                                     </div>
                                 )

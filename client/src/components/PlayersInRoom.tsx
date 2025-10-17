@@ -8,11 +8,35 @@ const PlayersInRoom: React.FC = () => {
     const [selectedPlayer, setSelectedPlayer] = useState<string | null>(null);
     const [menuPosition, setMenuPosition] = useState({ x: 0, y: 0 });
     const [showMenu, setShowMenu] = useState(false);
+    const [isExpanded, setIsExpanded] = useState(false);
+    const [opacity, setOpacity] = useState(1);
     const menuRef = useRef<HTMLDivElement>(null);
     const playerRefs = useRef<{ [key: string]: HTMLDivElement | null }>({});
+    const fadeTimerRef = useRef<NodeJS.Timeout | null>(null);
 
     // Filter out the current player from the display
     const otherPlayers = playersInRoom.filter(p => p.id !== player?.id);
+    const totalCount = otherPlayers.length + npcs.length;
+
+    // Auto-fade after 10 seconds of inactivity
+    useEffect(() => {
+        const resetFadeTimer = () => {
+            if (fadeTimerRef.current) {
+                clearTimeout(fadeTimerRef.current);
+            }
+            setOpacity(1);
+            fadeTimerRef.current = setTimeout(() => {
+                setOpacity(0.3);
+            }, 10000);
+        };
+
+        resetFadeTimer();
+        return () => {
+            if (fadeTimerRef.current) {
+                clearTimeout(fadeTimerRef.current);
+            }
+        };
+    }, [totalCount, isExpanded]);
 
     // Close menu when clicking outside
     useEffect(() => {
@@ -64,15 +88,63 @@ const PlayersInRoom: React.FC = () => {
         }
     };
 
-    if (otherPlayers.length === 0 && npcs.length === 0) {
+    if (totalCount === 0) {
         return null;
     }
 
+    const handleMouseEnter = () => {
+        setOpacity(1);
+        if (fadeTimerRef.current) {
+            clearTimeout(fadeTimerRef.current);
+        }
+    };
+
+    const handleMouseLeave = () => {
+        fadeTimerRef.current = setTimeout(() => {
+            setOpacity(0.3);
+        }, 10000);
+    };
+
+    // Compact view
+    if (!isExpanded) {
+        return (
+            <div 
+                className="transition-opacity duration-300 cursor-pointer w-auto"
+                style={{ opacity }}
+                onMouseEnter={handleMouseEnter}
+                onMouseLeave={handleMouseLeave}
+                onClick={() => setIsExpanded(true)}
+            >
+                <div className="bg-black/80 border border-amber-500 rounded-lg px-2 py-1.5 hover:bg-black/90 transition-colors">
+                    <div className="flex items-center gap-1.5">
+                        <UserCircleIcon className="h-4 w-4 text-amber-500" />
+                        <span className="text-amber-400 font-bold text-sm">{totalCount}</span>
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
+    // Expanded view
     return (
-        <div className="absolute top-16 left-2 md:top-20 md:left-4 bg-black bg-opacity-80 border border-amber-500 rounded-lg p-2 z-20">
-            <div className="flex items-center gap-1 mb-1">
-                <UserCircleIcon className="h-3 w-3 text-amber-500" />
-                <span className="text-amber-500 font-bold text-xs">Also here:</span>
+        <div 
+            className="bg-black/90 border border-amber-500 rounded-lg p-2 transition-opacity duration-300 w-auto min-w-[160px]"
+            style={{ opacity }}
+            onMouseEnter={handleMouseEnter}
+            onMouseLeave={handleMouseLeave}
+        >
+            <div className="flex items-center justify-between gap-2 mb-1">
+                <div className="flex items-center gap-1">
+                    <UserCircleIcon className="h-3 w-3 text-amber-500" />
+                    <span className="text-amber-500 font-bold text-xs">Also here:</span>
+                </div>
+                <button
+                    onClick={() => setIsExpanded(false)}
+                    className="text-amber-400 hover:text-amber-300 text-xs font-bold"
+                    title="Minimize"
+                >
+                    ✕
+                </button>
             </div>
             <div className="flex flex-wrap gap-1">
                 {/* NPCs - shown in cyan/blue color */}

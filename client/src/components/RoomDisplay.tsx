@@ -104,12 +104,6 @@ const RoomDisplay: React.FC = () => {
                         <div className="absolute top-4 right-4 w-8 h-8 border-r-4 border-t-4 border-amber-500 movement-overlay"></div>
                         <div className="absolute bottom-4 left-4 w-8 h-8 border-l-4 border-b-4 border-amber-500 movement-overlay"></div>
                         <div className="absolute bottom-4 right-4 w-8 h-8 border-r-4 border-b-4 border-amber-500 movement-overlay"></div>
-
-                        {/* Scanning line effect */}
-                        <div className="absolute inset-0 overflow-hidden">
-                            <div className="absolute inset-x-0 h-1 bg-gradient-to-r from-transparent via-amber-500 to-transparent movement-overlay"
-                                 style={{ top: '50%', transform: 'translateY(-50%)' }}></div>
-                        </div>
                     </div>
                 )}
 

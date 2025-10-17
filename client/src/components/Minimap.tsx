@@ -69,8 +69,8 @@ const Minimap: React.FC<MinimapProps> = ({ className = '' }) => {
             title="Click to expand map"
         >
             <div className="text-xs text-green-500 mb-2 font-mono border-b border-green-700 pb-1 flex items-center justify-between">
-                <span>MINIMAP</span>
-                <span className="text-green-400 text-xs">[CLICK]</span>
+                <span>({playerX}, {playerY})</span>
+                <span className="text-green-400 text-xs">[MAP]</span>
             </div>
             <div className="grid grid-cols-5 gap-1">
                 {grid.map((row) =>
@@ -128,12 +128,9 @@ const Minimap: React.FC<MinimapProps> = ({ className = '' }) => {
                         <span className="text-xs">You</span>
                     </div>
                 </div>
-                <div className="text-xs text-green-400 mt-1 font-mono">
-                    Position: ({playerX}, {playerY})
-                </div>
                 {currentRoom?.biome && (
-                    <div className="text-xs text-green-500 mt-0.5 font-mono truncate" title={currentRoom.biome}>
-                        Biome: {currentRoom.biome}
+                    <div className="text-xs text-green-500 mt-1 font-mono truncate" title={currentRoom.biome}>
+                        {currentRoom.biome}
                     </div>
                 )}
             </div>
