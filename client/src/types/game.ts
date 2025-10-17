@@ -77,7 +77,7 @@ export interface ActionResponse {
     image_url?: string;
 }
 
-export type ChatMessageType = 'chat' | 'emote' | 'system' | 'room_description' | 'action_result' | 'narration' | 'item_found' | 'item_obtained' | 'duel_outcome' | 'monster_combat_outcome' | 'ai_response' | 'quest_storyline' | 'quest_completion';
+export type ChatMessageType = 'chat' | 'emote' | 'system' | 'room_description' | 'action_result' | 'narration' | 'item_found' | 'item_obtained' | 'duel_outcome' | 'monster_combat_outcome' | 'ai_response' | 'quest_storyline' | 'quest_completion' | 'npc_dialogue';
 
 export interface Monster {
     id: string;
@@ -114,6 +114,8 @@ export interface ChatMessage {
     item_type?: string;
     rarity_stars?: string;
     quest_data?: Record<string, unknown>;
+    npc_id?: string;
+    npc_name?: string;
 }
 
 export interface NPCInteraction {

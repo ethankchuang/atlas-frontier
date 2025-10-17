@@ -43,6 +43,10 @@ interface GameStore {
     messages: ExtendedChatMessage[];
     addMessage: (message: ExtendedChatMessage) => void;
     updateMessage: (id: string, updater: (prev: ExtendedChatMessage) => ExtendedChatMessage) => void;
+    
+    // Chat input prefill (for NPC interactions)
+    chatInputPrefill: string;
+    setChatInputPrefill: (text: string) => void;
 
     // Minimap state - track visited coordinates
     visitedCoordinates: Set<string>;
@@ -176,6 +180,7 @@ const useGameStore = create<GameStore>((set, get) => ({
 
     // Chat mode state
     isEmote: false,
+    chatInputPrefill: '',
 
     // Item registry
     itemsById: {},
@@ -235,6 +240,7 @@ const useGameStore = create<GameStore>((set, get) => ({
             msg.id === id ? updater(msg) : msg
         )
     })),
+    setChatInputPrefill: (text) => set({ chatInputPrefill: text }),
     // Minimap functions
     addVisitedCoordinate: (x: number, y: number, biome?: string) => set((state) => {
         const coordKey = `${x},${y}`;

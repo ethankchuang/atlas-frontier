@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { BookOpenIcon } from '@heroicons/react/24/solid';
 import apiService from '@/services/api';
+import useGameStore from '@/store/gameStore';
 
 interface QuestObjective {
     id: string;
@@ -45,6 +46,8 @@ const QuestSummaryPanel: React.FC<QuestSummaryPanelProps> = ({ playerId, onOpenQ
     const [isExpanded, setIsExpanded] = useState(true); // Start expanded for new players
     const [opacity, setOpacity] = useState(1);
     const fadeTimerRef = useRef<NodeJS.Timeout | null>(null);
+    const { messages } = useGameStore();
+    const lastQuestCompletionRef = useRef<string | null>(null);
 
     // Auto-fade after 10 seconds of inactivity
     useEffect(() => {
@@ -66,14 +69,48 @@ const QuestSummaryPanel: React.FC<QuestSummaryPanelProps> = ({ playerId, onOpenQ
         };
     }, [questStatus, isExpanded]);
 
+    // Watch for quest completion messages and refresh immediately
+    useEffect(() => {
+        const latestQuestCompletion = messages
+            .filter(m => m.message_type === 'quest_completion')
+            .pop();
+        
+        if (latestQuestCompletion && latestQuestCompletion.timestamp !== lastQuestCompletionRef.current) {
+            console.log('[QuestSummaryPanel] Quest completion detected!', latestQuestCompletion);
+            console.log('[QuestSummaryPanel] Quest data from completion:', latestQuestCompletion.quest_data);
+            lastQuestCompletionRef.current = latestQuestCompletion.timestamp;
+            
+            // Fetch immediately after a short delay to allow server to update
+            setTimeout(async () => {
+                console.log('[QuestSummaryPanel] Fetching updated quest status after completion...');
+                try {
+                    const data = await apiService.getPlayerQuestStatus(playerId);
+                    console.log('[QuestSummaryPanel] After completion fetch:', data);
+                    if (data && data.quest && data.quest.id) {
+                        setQuestStatus(data);
+                        console.log('[QuestSummaryPanel] Quest status refreshed to:', data.quest.name, 'Progress:', data.progress);
+                    } else {
+                        console.log('[QuestSummaryPanel] No quest returned after completion');
+                        setQuestStatus(null);
+                    }
+                } catch (error) {
+                    console.error('[QuestSummaryPanel] Failed to refresh quest status after completion:', error);
+                }
+            }, 1000); // 1 second delay to allow server to process
+        }
+    }, [messages, playerId]);
+
     useEffect(() => {
         const fetchQuestStatus = async (isInitial = false) => {
             try {
                 const data = await apiService.getPlayerQuestStatus(playerId);
+                console.log('[QuestSummaryPanel] Fetched quest status:', data);
                 // Check if data contains a valid quest
                 if (data && data.quest && data.quest.id) {
+                    console.log('[QuestSummaryPanel] Setting quest:', data.quest.name, 'Progress:', data.progress);
                     setQuestStatus(data);
                 } else {
+                    console.log('[QuestSummaryPanel] No active quest');
                     setQuestStatus(null);
                 }
             } catch (error) {

@@ -3053,8 +3053,32 @@ async def interact_with_npc(
         response = await game_manager.handle_npc_interaction(
             player_id=interaction.player_id,
             npc_id=interaction.npc_id,
-            message=interaction.message
+            message=interaction.message,
+            context=interaction.context
         )
+
+        # Track quest objectives for NPC interaction
+        quest_completion_data = None
+        try:
+            from .quest_manager import QuestManager
+            quest_manager = QuestManager(game_manager.db)
+            
+            # Get NPC name for quest tracking
+            npc_data = await game_manager.db.get_npc(interaction.npc_id)
+            if npc_data:
+                npc_name = npc_data.get('name', '')
+                quest_result = await quest_manager.check_objectives(
+                    interaction.player_id, 
+                    interaction.message, 
+                    'talk_npc', 
+                    {'npc_name': npc_name}
+                )
+                
+                if quest_result and quest_result.get('type') == 'quest_completed':
+                    logger.info(f"[Quest] Player {interaction.player_id} completed quest via NPC interaction")
+                    quest_completion_data = quest_result
+        except Exception as e:
+            logger.error(f"[Quest] Error tracking NPC quest objective: {str(e)}")
 
         # Broadcast the interaction to other players in the room
         await manager.broadcast_to_room(
@@ -3071,7 +3095,8 @@ async def interact_with_npc(
 
         return {
             "success": True,
-            "response": response
+            "response": response,
+            "quest_completion": quest_completion_data
         }
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
