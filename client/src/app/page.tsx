@@ -250,7 +250,7 @@ export default function Home() {
                                     : 'bg-blue-600 hover:bg-blue-700 focus:ring-blue-500'
                             }`}
                         >
-                            {isLoading ? 'Entering world...' : isAnonymous ? 'Start Playing as Guest' : 'Begin Adventure'}
+                            {isLoading ? 'Entering world...' : isAnonymous ? 'Continue Playing as Guest' : 'Begin Adventure'}
                         </button>
                         
                         <button

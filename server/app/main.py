@@ -588,7 +588,40 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, player_id: str)
                     "room": room_dict
                 })
                 logger.info(f"[WebSocket] Successfully sent initial room state for {room_id}")
-                
+
+                # Check for active quest and send storyline if not shown
+                try:
+                    player_data = await game_manager.db.get_player(player_id)
+                    if player_data and player_data.get('active_quest_id'):
+                        from .quest_manager import QuestManager
+                        quest_manager = QuestManager(game_manager.db)
+
+                        player_quest = await quest_manager._get_player_quest(
+                            player_id,
+                            player_data['active_quest_id']
+                        )
+
+                        if player_quest and not player_quest.get('storyline_shown', False):
+                            # Send storyline in chunks for typewriter effect
+                            chunks = await quest_manager.get_storyline_chunks(
+                                player_data['active_quest_id'],
+                                chunk_size=80
+                            )
+
+                            for chunk in chunks:
+                                await websocket.send_json({
+                                    'type': 'quest_storyline',
+                                    'message': chunk
+                                })
+                                await asyncio.sleep(0.3)  # Delay between chunks for typewriter effect
+
+                            # Mark storyline as shown
+                            player_quest['storyline_shown'] = True
+                            await quest_manager._save_player_quest(player_quest)
+                            logger.info(f"[Quest] Sent storyline for quest {player_data['active_quest_id']} to player {player_id}")
+                except Exception as e:
+                    logger.error(f"[Quest] Error sending quest storyline: {str(e)}")
+
                 # Aggressive monster descriptions are now included in atmospheric_presence via room info
             except Exception as e:
                 logger.error(f"[WebSocket] Error preparing room state: {str(e)}")
@@ -782,8 +815,8 @@ async def create_guest_player(
     try:
         # Use the anonymous user ID from Supabase
         anonymous_user_id = request.anonymous_user_id
-        guest_player_id = f"guest_{anonymous_user_id[:6]}"
-        
+        guest_player_id = f"guest_{anonymous_user_id}"
+
         # Check if guest player already exists
         existing_player = await game_manager.db.get_player(guest_player_id)
         if existing_player:
@@ -795,7 +828,28 @@ async def create_guest_player(
         
         # Get starting room
         starting_room = await game_manager.ensure_starting_room()
-        
+
+        # Create user profile in Supabase for guest user (if it doesn't exist)
+        try:
+            from .supabase_client import get_supabase_client
+            client = get_supabase_client()
+
+            # Check if profile exists
+            profile_check = client.table('user_profiles').select('id').eq('id', anonymous_user_id).execute()
+
+            if not profile_check.data or len(profile_check.data) == 0:
+                # Create the user profile (guests have username starting with "Anon_")
+                # Use a placeholder email for guest users
+                client.table('user_profiles').insert({
+                    'id': anonymous_user_id,
+                    'username': f"Anon_{anonymous_user_id[:6]}",
+                    'email': f"guest_{anonymous_user_id[:6]}@anonymous.local"
+                }).execute()
+                logger.info(f"[create_guest_player] Created user profile for guest user {anonymous_user_id}")
+        except Exception as profile_err:
+            logger.error(f"[create_guest_player] Failed to create user profile: {profile_err}")
+            # Continue anyway - will fall back to Redis
+
         # Create new guest player with anonymous user ID
         player = Player(
             id=guest_player_id,
@@ -808,13 +862,32 @@ async def create_guest_player(
             last_action=None,
             last_action_text=None
         )
-        
+
         # Save the guest player
         await game_manager.db.set_player(guest_player_id, player.dict())
-        
+
         # Add player to the starting room's player list
         await game_manager.db.add_to_room_players(starting_room.id, guest_player_id)
-        
+
+        # Assign tutorial quest to new guest player
+        try:
+            from app.quest_manager import QuestManager
+            quest_manager = QuestManager(game_manager.db)
+            quest_result = await quest_manager.assign_tutorial_quest(guest_player_id)
+
+            if quest_result:
+                logger.info(f"[Quest] Assigned tutorial quest to new guest player {guest_player_id}")
+
+                # Spawn quest items if quest has spawn config
+                quest_data = quest_result.get('quest')
+                if quest_data and quest_data.get('spawn_config'):
+                    await game_manager.spawn_quest_items(guest_player_id, starting_room.id, quest_data['spawn_config'])
+            else:
+                logger.warning(f"[Quest] Failed to assign tutorial quest to guest player {guest_player_id}")
+        except Exception as e:
+            logger.error(f"[Quest] Error assigning tutorial quest to guest player: {str(e)}")
+            # Don't fail player creation if quest assignment fails
+
         logger.info(f"Created new guest player {guest_player_id}")
         return {
             'player': player,
@@ -941,35 +1014,34 @@ async def convert_guest_to_user(
                 detail="Guest player not found"
             )
         
-        # Create user profile in Supabase
-        # This is crucial - without this, the user can't log in later!
+        # Update the existing guest user profile in Supabase with real username and email
+        # The guest already has a profile created when they first connected
         supabase = get_supabase_client()
-        profile_data = {
-            'id': request.new_user_id,
+        guest_user_id = guest_player_data['user_id']
+
+        # Update the existing guest profile with real credentials
+        profile_result = supabase.table('user_profiles').update({
             'username': request.username.lower(),  # Store as lowercase for consistency
             'email': request.email
-        }
-        
-        profile_result = supabase.table('user_profiles').insert(profile_data).execute()
-        
+        }).eq('id', guest_user_id).execute()
+
         if not profile_result.data:
-            logger.error(f"Failed to create user profile: {profile_result}")
+            logger.error(f"Failed to update user profile for guest {guest_user_id}: {profile_result}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to create user profile"
+                detail="Failed to update user profile"
             )
-        
-        # Update the player to belong to the new user ID (from Supabase)
-        guest_player_data['user_id'] = request.new_user_id
+
+        # Note: We keep the same user_id - no need to update it since we're updating the existing profile
         guest_player_data['name'] = request.username  # Update player name to match username
         
         # Save the updated player
         await game_manager.db.set_player(request.guest_player_id, guest_player_data)
         
         logger.info(f"Successfully converted guest player {request.guest_player_id} to user {request.username}")
-        
+
         return {
-            'user_id': request.new_user_id,
+            'user_id': guest_user_id,
             'username': request.username,
             'email': request.email,
             'guest_converted': True,
@@ -1296,6 +1368,97 @@ async def combine_player_items(
     
     logger.info(f"[Combine Items] Player {player_id} combined {len(item_ids)} items")
     return result
+
+# ============================================
+# QUEST SYSTEM ENDPOINTS
+# ============================================
+
+@app.get("/player/{player_id}/quest-status")
+async def get_player_quest_status(
+    player_id: str,
+    current_user: Optional[Dict[str, Any]] = Depends(get_optional_current_user),
+    game_manager: GameManager = Depends(get_game_manager)
+):
+    """Get player's current active quest status"""
+    from .quest_manager import QuestManager
+
+    # Get the player and verify ownership
+    player = await game_manager.get_player(player_id)
+    if not player:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Player not found"
+        )
+
+    # Verify ownership (skip for anonymous users)
+    if not current_user or player.user_id != current_user['id']:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only access your own player's quest data"
+        )
+
+    quest_manager = QuestManager(game_manager.db)
+    quest_status = await quest_manager.get_player_quest_status(player_id)
+
+    return quest_status if quest_status else {"quest": None}
+
+@app.get("/player/{player_id}/quest-log")
+async def get_player_quest_log(
+    player_id: str,
+    current_user: Optional[Dict[str, Any]] = Depends(get_optional_current_user),
+    game_manager: GameManager = Depends(get_game_manager)
+):
+    """Get player's quest log (current and completed quests)"""
+    from .quest_manager import QuestManager
+
+    # Get the player and verify ownership
+    player = await game_manager.get_player(player_id)
+    if not player:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Player not found"
+        )
+
+    # Verify ownership (skip for anonymous users)
+    if not current_user or player.user_id != current_user['id']:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only access your own player's quest log"
+        )
+
+    quest_manager = QuestManager(game_manager.db)
+    quest_log = await quest_manager.get_player_quest_log(player_id)
+
+    return quest_log
+
+@app.get("/player/{player_id}/badges")
+async def get_player_badges(
+    player_id: str,
+    current_user: Optional[Dict[str, Any]] = Depends(get_optional_current_user),
+    game_manager: GameManager = Depends(get_game_manager)
+):
+    """Get player's earned badges"""
+    from .quest_manager import QuestManager
+
+    # Get the player and verify ownership
+    player = await game_manager.get_player(player_id)
+    if not player:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Player not found"
+        )
+
+    # Verify ownership (skip for anonymous users)
+    if not current_user or player.user_id != current_user['id']:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only access your own player's badges"
+        )
+
+    quest_manager = QuestManager(game_manager.db)
+    badges = await quest_manager.get_player_badges(player_id)
+
+    return {"badges": badges}
 
 # Get player visited coordinates endpoint (requires auth)
 @app.get("/player/{player_id}/visited-coordinates")
@@ -1901,6 +2064,7 @@ async def process_action_stream(
 
                                 # Update player's destination to the actual room ID
                                 player_updates["current_room"] = actual_room_id
+                                player.current_room = actual_room_id  # CRITICAL: Also update the player object itself
                                 new_room_id = actual_room_id
 
                                 logger.info(f"[Stream] Player moving to room: {new_room_id}")
@@ -2350,6 +2514,167 @@ async def process_action_stream(
 
                         # NOW yield the final response with updated player data (default path)
                         try:
+                            # Quest tracking integration
+                            quest_completion_message = None
+                            try:
+                                from .quest_manager import QuestManager
+                                quest_manager = QuestManager(game_manager.db)
+
+                                # Track movement (only if direction variable exists in scope)
+                                if 'direction' in locals() and direction:
+                                    quest_result = await quest_manager.check_objectives(
+                                        action_request.player_id, action_request.action, 'move', {}
+                                    )
+                                    if quest_result and quest_result.get('type') == 'quest_completed':
+                                        quest_completion_message = quest_result
+
+                                # Track "look" command
+                                if 'look' in action_request.action.lower():
+                                    quest_result = await quest_manager.check_objectives(
+                                        action_request.player_id, action_request.action, 'command', {'command': 'look'}
+                                    )
+                                    if quest_result and quest_result.get('type') == 'quest_completed':
+                                        quest_completion_message = quest_result
+
+                                # Track NPC interactions (talk to, speak with, etc.)
+                                npc_interaction_keywords = ['talk', 'speak', 'chat', 'converse', 'ask', 'tell', 'greet']
+                                if any(keyword in action_request.action.lower() for keyword in npc_interaction_keywords):
+                                    # Check if there's an NPC in the response (can be 'npc' or 'npcs')
+                                    npc_data = None
+                                    if chunk.get('updates', {}).get('npc'):
+                                        npc_data = chunk['updates']['npc']
+                                    elif chunk.get('updates', {}).get('npcs') and len(chunk['updates']['npcs']) > 0:
+                                        npc_data = chunk['updates']['npcs'][0]  # Get first NPC
+
+                                    if npc_data:
+                                        npc_name = npc_data.get('name', '')
+                                        if npc_name:
+                                            quest_result = await quest_manager.check_objectives(
+                                                action_request.player_id, action_request.action, 'talk_npc', {'npc_name': npc_name}
+                                            )
+                                            if quest_result and quest_result.get('type') == 'quest_completed':
+                                                quest_completion_message = quest_result
+                                            logger.info(f"[Quest] Tracked NPC interaction with '{npc_name}' for player {action_request.player_id}")
+
+                                # Track item taken (check if item was awarded and variables exist)
+                                if 'item_id' in locals() and 'item_data' in locals() and item_id and item_data:
+                                    quest_result = await quest_manager.check_objectives(
+                                        action_request.player_id, action_request.action, 'take_item', {'item_name': item_data.get('name', '')}
+                                    )
+                                    if quest_result and quest_result.get('type') == 'quest_completed':
+                                        quest_completion_message = quest_result
+
+                                # Track biome visit (on room entry after movement - only if variables exist)
+                                if 'direction' in locals() and 'new_room' in locals() and direction and new_room:
+                                    biome = new_room.biome
+                                    if biome:
+                                        quest_result = await quest_manager.check_objectives(
+                                            action_request.player_id, action_request.action, 'visit_biome', {'biome': biome}
+                                        )
+                                        if quest_result and quest_result.get('type') == 'quest_completed':
+                                            quest_completion_message = quest_result
+
+                                # Track find_item (when entering a room with quest items)
+                                # Check both new_room (after movement) and current room (for look/other actions)
+                                check_room = None
+                                if 'new_room' in locals() and new_room:
+                                    check_room = new_room
+                                else:
+                                    # For non-movement actions, check current room
+                                    check_room = room
+
+                                if check_room and check_room.items:
+                                    for room_item_id in check_room.items[:]:
+                                        try:
+                                            room_item_data = await game_manager.db.get_item(room_item_id)
+                                            if not room_item_data:
+                                                logger.warning(f"[Quest] Item {room_item_id} not found in database")
+                                                continue
+
+                                            # Check if it's a quest item (stored as string "True")
+                                            quest_item_value = room_item_data.get('properties', {}).get('quest_item')
+                                            is_quest_item = quest_item_value in ['True', 'true', True]
+
+                                            logger.debug(f"[Quest] Checking item {room_item_data.get('name')} - quest_item={quest_item_value}, is_quest_item={is_quest_item}, properties={room_item_data.get('properties')}")
+
+                                            if is_quest_item:
+                                                # Check if this quest item belongs to this player
+                                                spawned_for = room_item_data.get('properties', {}).get('spawned_for_player_id')
+
+                                                # Only process if it's the player's item or it's a shared quest item (no owner)
+                                                if spawned_for and spawned_for != action_request.player_id:
+                                                    logger.debug(f"[Quest] Item '{room_item_data.get('name')}' belongs to player {spawned_for}, skipping for {action_request.player_id}")
+                                                    continue
+
+                                                # This is a quest item for this player - check if it completes an objective
+                                                logger.info(f"[Quest] Found quest item '{room_item_data.get('name')}' for player {action_request.player_id} - checking objectives")
+                                                quest_result = await quest_manager.check_objectives(
+                                                    action_request.player_id,
+                                                    action_request.action,
+                                                    'room_has_item',
+                                                    {'item_name': room_item_data.get('name', '')}
+                                                )
+                                                logger.info(f"[Quest] check_objectives returned: {quest_result}")
+
+                                                if quest_result:
+                                                    # Quest objective completed - auto-take the quest item
+                                                    logger.info(f"[Quest] Player {action_request.player_id} found quest item '{room_item_data.get('name')}' - auto-taking")
+
+                                                    # Remove from room
+                                                    check_room.items.remove(room_item_id)
+                                                    await game_manager.db.set_room(check_room.id, check_room.dict())
+
+                                                    # Add to player inventory
+                                                    player.inventory.append(room_item_id)
+                                                    await game_manager.db.set_player(action_request.player_id, player.dict())
+
+                                                    # Update chunk to reflect inventory change
+                                                    if "updates" not in chunk:
+                                                        chunk["updates"] = {}
+                                                    if "player" not in chunk["updates"]:
+                                                        chunk["updates"]["player"] = {}
+                                                    chunk["updates"]["player"]["inventory"] = player.inventory
+
+                                                    # Add discovery notification to updates
+                                                    chunk["updates"]["quest_item_found"] = {
+                                                        "id": room_item_id,
+                                                        "name": room_item_data['name'],
+                                                        "description": room_item_data['description'],
+                                                        "rarity": room_item_data.get('rarity', 1)
+                                                    }
+
+                                                    # Send item obtained notification via WebSocket (same as regular items)
+                                                    # Use the player's current room (where they're still connected) not the new room
+                                                    websocket_room = room.id if room else check_room.id
+                                                    try:
+                                                        await manager.send_to_player(websocket_room, action_request.player_id, {
+                                                            "type": "item_obtained",
+                                                            "player_id": action_request.player_id,
+                                                            "item_id": room_item_id,
+                                                            "item_name": room_item_data['name'],
+                                                            "item_rarity": room_item_data.get('rarity', 1),
+                                                            "rarity_stars": "★" * room_item_data.get('rarity', 1) + "☆" * (4 - room_item_data.get('rarity', 1)),
+                                                            "message": f"📦 You obtained: {'★' * room_item_data.get('rarity', 1)}{'☆' * (4 - room_item_data.get('rarity', 1))} {room_item_data['name']}",
+                                                            "timestamp": datetime.now().isoformat()
+                                                        })
+                                                        logger.info(f"[Quest] Sent item_obtained WebSocket notification for '{room_item_data['name']}' to player {action_request.player_id} in room {websocket_room}")
+                                                    except Exception as ws_error:
+                                                        logger.error(f"[Quest] Failed to send item_obtained WebSocket notification: {str(ws_error)}")
+
+                                                    logger.info(f"[Quest] Successfully auto-took quest item '{room_item_data.get('name')}' for player {action_request.player_id}")
+
+                                                    # Check if quest was completed
+                                                    if quest_result.get('type') == 'quest_completed':
+                                                        quest_completion_message = quest_result
+
+                                                    # Only process one quest item per action
+                                                    break
+                                        except Exception as e:
+                                            logger.warning(f"[Quest] Error checking room item {room_item_id} for quest: {str(e)}")
+
+                            except Exception as e:
+                                logger.error(f"[Quest] Error tracking quest objectives: {str(e)}")
+
                             # Extract only the narrative response, not the full JSON structure
                             narrative_response = chunk.get("response", "")
                             if not narrative_response:
@@ -2357,6 +2682,7 @@ async def process_action_stream(
                                 narrative_response = "You perform the action."
 
                             final_content = narrative_response + (f"\n\n{additional_content}" if additional_content else "")
+
                             final_response_time = time.time()
                             logger.info(f"⏱️ [TIMING] About to send final response to client: {(final_response_time - request_start)*1000:.2f}ms from request start")
                             yield json.dumps({
@@ -2365,6 +2691,72 @@ async def process_action_stream(
                                 "updates": chunk.get("updates", {})
                             })
                             logger.info(f"⏱️ [TIMING] Final response sent to client")
+
+                            # Send quest completion as a separate message if quest was completed
+                            if quest_completion_message:
+                                quest_data = quest_completion_message.get('quest', {})
+                                quest_name = quest_data.get('name', 'Unknown Quest') if quest_data else 'Unknown Quest'
+                                gold_reward = quest_completion_message.get('gold_reward', 0)
+                                badge_id = quest_completion_message.get('badge_id', '')
+                                # Get badge name if badge_id exists (for now just use badge_id)
+                                badge_name = badge_id if badge_id else ''
+
+                                completion_text = f"🎉 **Quest Complete: {quest_name}**\n"
+                                completion_text += f"💰 Earned {gold_reward} gold"
+                                if badge_name:
+                                    completion_text += f" and the '{badge_name}' badge!"
+                                else:
+                                    completion_text += "!"
+
+                                # Get next quest details with objectives for the client
+                                next_quest_info = None
+                                next_quest = quest_completion_message.get('next_quest')
+                                if next_quest:
+                                    try:
+                                        # Get objectives for the next quest
+                                        next_objectives = await quest_manager._get_quest_objectives(next_quest['id'])
+                                        next_quest_info = {
+                                            'quest': next_quest,
+                                            'objectives': next_objectives
+                                        }
+                                        logger.info(f"[Quest] Including next quest info: {next_quest['name']} with {len(next_objectives)} objectives")
+                                    except Exception as e:
+                                        logger.error(f"[Quest] Error getting next quest objectives: {str(e)}")
+
+                                logger.info(f"[Quest] Player {action_request.player_id} completed quest: {quest_name}")
+
+                                yield json.dumps({
+                                    "type": "quest_complete",
+                                    "content": completion_text,
+                                    "quest_data": quest_completion_message,
+                                    "next_quest_info": next_quest_info
+                                })
+
+                                # Send next quest storyline immediately after completion if available
+                                if next_quest:
+                                    try:
+                                        storyline_chunks = await quest_manager.get_storyline_chunks(
+                                            next_quest['id'],
+                                            chunk_size=80
+                                        )
+
+                                        for chunk in storyline_chunks:
+                                            yield json.dumps({
+                                                'type': 'quest_storyline',
+                                                'message': chunk
+                                            })
+
+                                        # Mark storyline as shown for the new quest
+                                        player_quest = await quest_manager._get_player_quest(
+                                            action_request.player_id,
+                                            next_quest['id']
+                                        )
+                                        if player_quest:
+                                            player_quest['storyline_shown'] = True
+                                            await quest_manager._save_player_quest(player_quest)
+                                            logger.info(f"[Quest] Sent storyline for new quest {next_quest['name']} to player {action_request.player_id}")
+                                    except Exception as e:
+                                        logger.error(f"[Quest] Error sending next quest storyline: {str(e)}")
                         except Exception as e:
                             logger.error(f"[Stream] Error generating final response: {str(e)}")
                             # Fallback response to prevent freezing

@@ -8,6 +8,9 @@ import FullscreenMinimap from './FullscreenMinimap';
 import PlayersInRoom from './PlayersInRoom';
 import DuelChallengePopup from './DuelChallengePopup';
 import DirectionalControls from './DirectionalControls';
+import QuestSummaryPanel from './QuestSummaryPanel';
+import QuestLogModal from './QuestLogModal';
+import BadgeCollectionModal from './BadgeCollectionModal';
 import apiService from '@/services/api';
 import websocketService from '@/services/websocket';
 import { ChatMessage, Room } from '@/types/game';
@@ -20,6 +23,8 @@ interface GameLayoutProps {
 
 const GameLayout: React.FC<GameLayoutProps> = ({ playerId }) => {
     const [isChatExpanded, setIsChatExpanded] = useState(false);
+    const [isQuestLogOpen, setIsQuestLogOpen] = useState(false);
+    const [isBadgeCollectionOpen, setIsBadgeCollectionOpen] = useState(false);
 
     const {
         player,
@@ -48,18 +53,6 @@ const GameLayout: React.FC<GameLayoutProps> = ({ playerId }) => {
     } = useGameStore();
     const p1Max = player1MaxVital ?? DUEL_MAX_HEALTH;
     const p2Max = player2MaxVital ?? DUEL_MAX_HEALTH;
-
-    // Check if first-time user and show tutorial
-    useEffect(() => {
-        const hasSeenTutorial = localStorage.getItem('tutorial_seen');
-        if (!hasSeenTutorial) {
-            // Wait a bit for the game to initialize, then show tutorial
-            const timer = setTimeout(() => {
-                setIsMenuOpen(true);
-            }, 1000);
-            return () => clearTimeout(timer);
-        }
-    }, [setIsMenuOpen]);
 
     // Initialize game state
     useEffect(() => {
@@ -335,8 +328,16 @@ const GameLayout: React.FC<GameLayoutProps> = ({ playerId }) => {
                 <DirectionalControls />
             </div>
 
-            {/* Players in Room - positioned below minimap */}
+            {/* Players in Room - positioned below menu button */}
             <PlayersInRoom />
+
+            {/* Quest Summary Panel - positioned below "Also here" on left side */}
+            <div className="absolute top-36 left-2 md:top-40 md:left-4 z-20 w-48">
+                <QuestSummaryPanel
+                    playerId={playerId}
+                    onOpenQuestLog={() => setIsQuestLogOpen(true)}
+                />
+            </div>
 
             {/* Fullscreen Minimap */}
             {isMinimapFullscreen && (
@@ -443,7 +444,24 @@ const GameLayout: React.FC<GameLayoutProps> = ({ playerId }) => {
             </div>
 
             {/* Pause Menu Overlay */}
-            <PauseMenu />
+            <PauseMenu
+                onOpenQuestLog={() => setIsQuestLogOpen(true)}
+                onOpenBadges={() => setIsBadgeCollectionOpen(true)}
+            />
+
+            {/* Quest Log Modal */}
+            <QuestLogModal
+                playerId={playerId}
+                isOpen={isQuestLogOpen}
+                onClose={() => setIsQuestLogOpen(false)}
+            />
+
+            {/* Badge Collection Modal */}
+            <BadgeCollectionModal
+                playerId={playerId}
+                isOpen={isBadgeCollectionOpen}
+                onClose={() => setIsBadgeCollectionOpen(false)}
+            />
         </div>
     );
 };
