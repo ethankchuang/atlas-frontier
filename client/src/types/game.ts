@@ -77,7 +77,7 @@ export interface ActionResponse {
     image_url?: string;
 }
 
-export type ChatMessageType = 'chat' | 'emote' | 'system' | 'room_description' | 'action_result' | 'narration' | 'item_found' | 'item_obtained' | 'duel_outcome' | 'monster_combat_outcome' | 'ai_response';
+export type ChatMessageType = 'chat' | 'emote' | 'system' | 'room_description' | 'action_result' | 'narration' | 'item_found' | 'item_obtained' | 'duel_outcome' | 'monster_combat_outcome' | 'ai_response' | 'quest_storyline';
 
 export interface Monster {
     id: string;

@@ -61,7 +61,7 @@ const ChatDisplay: React.FC<ChatDisplayProps> = ({ onScrollToTop }) => {
                 // Check if this is a player action (starts with ">")
                 if (message.message.startsWith('> ')) {
                     return (
-                        <div className="mb-3 text-amber-400 font-mono text-base md:text-xl italic">
+                        <div className="mb-4 text-amber-300 font-mono text-sm md:text-lg italic bg-amber-900/30 px-3 py-2 rounded-lg border-l-2 border-amber-400">
                             {playerName} {message.message.substring(2)}
                         </div>
                     );
@@ -69,18 +69,18 @@ const ChatDisplay: React.FC<ChatDisplayProps> = ({ onScrollToTop }) => {
 
                 // Regular chat message
                 return (
-                    <div className="flex items-start gap-2 md:gap-3 mb-3 font-mono">
-                        <UserCircleIcon className="w-5 h-5 md:w-6 md:h-6 text-amber-500 flex-shrink-0 mt-1" />
-                        <div>
-                            <span className="font-bold text-amber-500 text-base md:text-xl">{playerName}: </span>
-                            <span className="text-green-400 text-base md:text-xl">{message.message}</span>
+                    <div className="flex items-start gap-2 md:gap-3 mb-4 font-mono bg-black/40 px-3 py-2.5 rounded-lg border border-gray-700/50">
+                        <UserCircleIcon className="w-4 h-4 md:w-5 md:h-5 text-amber-400 flex-shrink-0 mt-0.5" />
+                        <div className="flex-1">
+                            <span className="font-bold text-amber-400 text-sm md:text-base">{playerName}: </span>
+                            <span className="text-green-300 text-sm md:text-base leading-relaxed">{message.message}</span>
                         </div>
                     </div>
                 );
 
             case 'emote':
                 return (
-                    <div className="mb-3 text-yellow-500 italic font-mono text-base md:text-xl">
+                    <div className="mb-4 text-yellow-300 italic font-mono text-sm md:text-lg bg-yellow-900/30 px-3 py-2 rounded-lg border border-yellow-700/30">
                         * {playerName} {message.message}
                     </div>
                 );
@@ -89,14 +89,14 @@ const ChatDisplay: React.FC<ChatDisplayProps> = ({ onScrollToTop }) => {
                 // Check if this is a user command (starts with ">>")
                 if (message.message.startsWith('>> ')) {
                     return (
-                        <div className="mb-3 text-gray-500 font-mono text-base md:text-xl">
+                        <div className="mb-3 text-gray-400 font-mono text-xs md:text-sm italic px-2">
                             {message.message}
                         </div>
                     );
                 }
 
                 return (
-                    <div className="mb-3 text-cyan-400 font-mono text-base md:text-xl">
+                    <div className="mb-4 text-cyan-300 font-mono text-sm md:text-lg bg-cyan-900/30 px-3 py-2.5 rounded-lg border-l-3 border-cyan-400 leading-relaxed">
                         <span className={message.isStreaming ? 'animate-pulse' : ''}>{'>'}</span>{' '}
                         <span className={message.isStreaming && message.message === '▮' ? 'animate-blink' : ''}>
                             {message.message}
@@ -106,7 +106,7 @@ const ChatDisplay: React.FC<ChatDisplayProps> = ({ onScrollToTop }) => {
 
             case 'ai_response':
                 return (
-                    <div className="mb-3 text-green-400 font-mono text-base md:text-xl">
+                    <div className="mb-4 text-green-300 font-mono text-sm md:text-lg bg-green-900/30 px-3 py-2.5 rounded-lg border border-green-700/30 leading-relaxed">
                         {message.message}
                     </div>
                 );
@@ -154,20 +154,31 @@ const ChatDisplay: React.FC<ChatDisplayProps> = ({ onScrollToTop }) => {
         }
     };
 
+    // Filter out important messages that are shown elsewhere (toasts/overlays)
+    const transientMessages = messages.filter(m => 
+        !['quest_storyline', 'room_description', 'item_obtained'].includes(m.message_type)
+    );
+
     return (
         <div className="relative h-full w-full">
             {/* Gradient overlay for fade effect */}
-            <div className="absolute top-0 left-0 right-0 h-32 bg-gradient-to-b from-black/30 to-transparent z-10 pointer-events-none" />
+            <div className="absolute top-0 left-0 right-0 h-24 bg-gradient-to-b from-black/40 to-transparent z-10 pointer-events-none" />
 
             <div
                 ref={scrollContainerRef}
-                className="h-full overflow-y-auto p-3 md:p-4 font-mono text-base md:text-xl leading-6 md:leading-7"
+                className="h-full overflow-y-auto p-4 md:p-6 font-mono"
             >
-                {messages.map((message, index) => (
-                    <div key={`${message.timestamp}-${index}`} className="px-2 md:px-3 transition-opacity duration-200">
-                        {renderMessage(message)}
+                {transientMessages.length === 0 ? (
+                    <div className="text-center text-gray-400 mt-12 text-sm md:text-base">
+                        No messages yet. Start your adventure!
                     </div>
-                ))}
+                ) : (
+                    transientMessages.map((message, index) => (
+                        <div key={`${message.timestamp}-${index}`} className="transition-opacity duration-200">
+                            {renderMessage(message)}
+                        </div>
+                    ))
+                )}
                 <div ref={messagesEndRef} />
             </div>
         </div>
