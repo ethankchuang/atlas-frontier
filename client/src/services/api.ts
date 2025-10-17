@@ -82,7 +82,12 @@ class APIService {
     // Room information
     async getRoomInfo(roomId: string): Promise<RoomInfo> {
         try {
-            return await this.request<RoomInfo>(`/room/${roomId}`);
+            // Include current player id so server can filter per-player quest items
+            const store = useGameStore.getState();
+            const playerId = store.player?.id;
+            return await this.request<RoomInfo>(`/room/${roomId}`, {
+                headers: playerId ? { 'X-Player-Id': playerId } : undefined,
+            });
         } catch (error) {
             console.error('[API] Failed to get room info:', error);
             // If room not found, try to get player's current room

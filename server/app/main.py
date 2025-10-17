@@ -2261,6 +2261,17 @@ async def process_action_stream(
                                                     try:
                                                         room_item_data = await game_manager.db.get_item(room_item_id)
                                                         if room_item_data and room_item_data['name'] == awarded_item_name:
+                                                            # If it's a quest item assigned to another player, skip
+                                                            try:
+                                                                props = (room_item_data.get('properties') or {})
+                                                                quest_flag = props.get('quest_item')
+                                                                is_quest_item = quest_flag in ['True', 'true', True]
+                                                                spawned_for = props.get('spawned_for_player_id')
+                                                                if is_quest_item and spawned_for and spawned_for != action_request.player_id:
+                                                                    logger.info(f"[Item System] Skipping quest room item '{room_item_data['name']}' not assigned to player {action_request.player_id}")
+                                                                    continue
+                                                            except Exception:
+                                                                pass
                                                             # Award this specific room item
                                                             item_id = room_item_id
                                                             item_data = room_item_data
@@ -2850,7 +2861,7 @@ async def process_action_stream(
 
 # Room information endpoint
 @app.get("/room/{room_id}")
-async def get_room_info(room_id: str, game_manager: GameManager = Depends(get_game_manager)):
+async def get_room_info(room_id: str, request: Request, game_manager: GameManager = Depends(get_game_manager)):
     """Get room information including players, NPCs, and items"""
     try:
         # Get room data
@@ -2876,10 +2887,24 @@ async def get_room_info(room_id: str, game_manager: GameManager = Depends(get_ga
         
         # Get items in room
         items = []
+        # Optional player id for filtering quest items
+        requester_player_id = request.headers.get('x-player-id') or request.headers.get('X-Player-Id')
         for item_id in room.items:
             item_data = await game_manager.db.get_item(item_id)
-            if item_data:
-                items.append(Item(**item_data))
+            if not item_data:
+                continue
+            # Filter quest items not assigned to this player (if player header provided)
+            try:
+                props = (item_data.get('properties') or {})
+                quest_flag = props.get('quest_item')
+                is_quest_item = quest_flag in ['True', 'true', True]
+                spawned_for = props.get('spawned_for_player_id')
+                if requester_player_id and is_quest_item and spawned_for and spawned_for != requester_player_id:
+                    # Skip items belonging to other players
+                    continue
+            except Exception:
+                pass
+            items.append(Item(**item_data))
         
         # Get monsters in room
         monsters = []

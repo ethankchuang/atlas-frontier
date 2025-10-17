@@ -7,16 +7,17 @@ const InventoryList: React.FC = () => {
     const { player, itemsById, setPlayer, setCurrentRoom, upsertItems } = useGameStore();
     const [selectedItems, setSelectedItems] = React.useState<string[]>([]);
     const [isCombining, setIsCombining] = React.useState(false);
+    const [confirmDrop, setConfirmDrop] = React.useState<{ itemId: string; itemName: string; rarity?: number } | null>(null);
 
     const handleDropItem = async (itemId: string, itemName: string, rarity?: number) => {
         if (!player) return;
-        
+
         // Double-check that the item is still in the inventory
         if (!player.inventory.includes(itemId)) {
             console.error(`[Inventory] Item ${itemId} not found in current inventory:`, player.inventory);
             return;
         }
-        
+
         console.log(`[Inventory] Attempting to drop item:`, {
             itemId,
             itemName,
@@ -24,16 +25,16 @@ const InventoryList: React.FC = () => {
             playerId: player.id,
             currentInventory: player.inventory
         });
-        
+
         try {
             // For 1-star items, always delete (dropToRoom = false)
             // For other items, drop to room (dropToRoom = true)
             const dropToRoom = rarity !== 1;
-            
+
             console.log(`[Inventory] Drop parameters:`, { dropToRoom, rarity });
-            
+
             const result = await apiService.dropPlayerItem(player.id, itemId, dropToRoom);
-            
+
             if (result.success) {
                 // Update the store with the new player data
                 if (result.updates.player) {
@@ -44,14 +45,25 @@ const InventoryList: React.FC = () => {
                 if (result.updates.room) {
                     setCurrentRoom(result.updates.room as Room);
                 }
-                
+
                 console.log(`[Inventory] ${result.message}`);
             } else {
                 console.error(`[Inventory] Failed to drop item: ${result.message}`);
             }
         } catch (error) {
             console.error('[Inventory] Error dropping item:', error);
+        } finally {
+            // Clear confirmation dialog
+            setConfirmDrop(null);
         }
+    };
+
+    const requestDropConfirmation = (itemId: string, itemName: string, rarity?: number) => {
+        setConfirmDrop({ itemId, itemName, rarity });
+    };
+
+    const cancelDrop = () => {
+        setConfirmDrop(null);
     };
 
     const handleCombineItems = async () => {
@@ -97,19 +109,34 @@ const InventoryList: React.FC = () => {
         });
     };
 
-    // Debug logging for inventory changes
+    // Load missing item data when inventory changes
     useEffect(() => {
         console.log('[InventoryList] Player inventory updated:', player?.inventory);
         console.log('[InventoryList] ItemsById updated:', Object.keys(itemsById));
-        
-        // Check for missing items
+
+        // Check for missing items and load them
         if (player?.inventory) {
             const missingItems = player.inventory.filter(itemId => !itemsById[itemId]);
             if (missingItems.length > 0) {
                 console.warn('[InventoryList] Missing item data for:', missingItems);
+
+                // Load missing items from the API
+                const loadMissingItems = async () => {
+                    try {
+                        const response = await apiService.getPlayerInventory(player.id);
+                        if (response.items && response.items.length > 0) {
+                            console.log('[InventoryList] Loaded', response.items.length, 'items from API');
+                            upsertItems(response.items);
+                        }
+                    } catch (error) {
+                        console.error('[InventoryList] Error loading missing items:', error);
+                    }
+                };
+
+                loadMissingItems();
             }
         }
-    }, [player?.inventory, itemsById]);
+    }, [player?.inventory, player?.id, itemsById, upsertItems]);
 
     if (!player) {
         return <div className="text-gray-400">No player loaded.</div>;
@@ -247,7 +274,7 @@ const InventoryList: React.FC = () => {
                                     </button>
                                 )}
                                 <button
-                                    onClick={() => handleDropItem(itemId, item?.name || 'Unknown Item', item?.rarity)}
+                                    onClick={() => requestDropConfirmation(itemId, item?.name || 'Unknown Item', item?.rarity)}
                                     className="flex items-center justify-center w-8 h-8 bg-red-600 hover:bg-red-700 text-white rounded-full transition-colors duration-200 text-sm font-bold"
                                     title={item?.rarity === 1 ? "Discard item (1-star items are deleted)" : "Drop item to room"}
                                 >
@@ -322,6 +349,38 @@ const InventoryList: React.FC = () => {
                     </div>
                 );
             })}
+            {/* Drop confirmation modal */}
+            {confirmDrop && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center">
+                    {/* Backdrop */}
+                    <div className="absolute inset-0 bg-black/70" onClick={cancelDrop} />
+                    {/* Modal */}
+                    <div className="relative w-full max-w-md mx-auto bg-black border border-red-700 rounded-lg p-6 shadow-xl">
+                        <div className="mb-4">
+                            <h3 className="text-xl font-mono text-red-300 mb-1">Confirm {confirmDrop.rarity === 1 ? 'Discard' : 'Drop'}</h3>
+                            <p className="text-amber-200 font-mono text-sm">
+                                {confirmDrop.rarity === 1
+                                    ? `Are you sure you want to permanently delete "${confirmDrop.itemName}"? This cannot be undone.`
+                                    : `Are you sure you want to drop "${confirmDrop.itemName}" into the room?`}
+                            </p>
+                        </div>
+                        <div className="flex items-center justify-end gap-2">
+                            <button
+                                onClick={cancelDrop}
+                                className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded font-mono text-sm"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={() => handleDropItem(confirmDrop.itemId, confirmDrop.itemName, confirmDrop.rarity)}
+                                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded font-mono text-sm"
+                            >
+                                {confirmDrop.rarity === 1 ? 'Delete' : 'Drop'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

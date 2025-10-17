@@ -328,6 +328,18 @@ class AIHandler:
                 try:
                     item_data = await db.get_item(item_id)
                     if item_data:
+                        # Filter out quest items not assigned to this player
+                        try:
+                            props = (item_data.get('properties') or {})
+                            quest_flag = props.get('quest_item')
+                            is_quest_item = quest_flag in ['True', 'true', True]
+                            spawned_for = props.get('spawned_for_player_id')
+                            if is_quest_item and spawned_for and spawned_for != player.id:
+                                logger.info(f"[AI Context] Skipping quest item not for player: {item_data.get('name', 'Unknown')} (owner {spawned_for}, player {player.id})")
+                                continue
+                        except Exception:
+                            pass
+
                         logger.info(f"[AI Context] Loaded room item: {item_data.get('name', 'Unknown')} (ID: {item_id})")
                         room_items.append(item_data)
                     else:

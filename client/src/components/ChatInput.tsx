@@ -276,13 +276,26 @@ const ChatInput: React.FC = () => {
                         if (response.updates?.player) {
                             console.log('[ChatInput] Processing player updates:', response.updates.player);
                             const store = useGameStore.getState();
-                            
+
                             // Update player state with any changes
                             if (store.player) {
                                 const updatedPlayer = { ...store.player, ...(response.updates.player as Partial<Player>) };
                                 store.setPlayer(updatedPlayer);
                                 console.log('[ChatInput] Updated player state, new current_room:', updatedPlayer.current_room);
                                 console.log('[ChatInput] Updated player inventory:', updatedPlayer.inventory);
+                            }
+                        }
+
+                        // Handle quest item found - load the item data into the store
+                        if (response.updates?.quest_item_found) {
+                            console.log('[ChatInput] Quest item found:', response.updates.quest_item_found);
+                            const store = useGameStore.getState();
+                            const questItem = response.updates.quest_item_found as any;
+
+                            // Add the quest item data to the items store
+                            if (questItem.id && questItem.name) {
+                                store.upsertItems([questItem]);
+                                console.log('[ChatInput] Loaded quest item data into store:', questItem.name);
                             }
                         }
 
