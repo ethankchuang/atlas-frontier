@@ -77,6 +77,9 @@ class Player(BaseModel):
     biome_colors: Dict[str, str] = Field(default_factory=dict)  # {"forest": "#color", etc.}
     # Rejoin immunity - temporary immunity to aggressive monsters when rejoining
     rejoin_immunity: bool = False
+    # Quest system
+    gold: int = 0  # Current gold balance
+    active_quest_id: Optional[str] = None  # Currently active quest
 
 class GameState(BaseModel):
     world_seed: str
@@ -156,3 +159,64 @@ class ActiveDuel(BaseModel):
     player2_max_vital: int = 5
     start_time: datetime = Field(default_factory=datetime.utcnow)
     is_active: bool = True
+
+# Quest System Models
+class Badge(BaseModel):
+    id: str
+    name: str
+    description: str
+    image_url: Optional[str] = None
+    image_status: str = "pending"  # pending, generating, ready, error
+    rarity: str = "common"  # common, rare, epic, legendary
+
+class QuestObjective(BaseModel):
+    id: str
+    quest_id: str
+    objective_type: str  # find_item, move_n_times, use_command, visit_biomes, talk_to_npc, win_combat, etc.
+    objective_data: Dict[str, Any]  # Flexible data for each type
+    order_index: int = 0
+    description: str
+
+class Quest(BaseModel):
+    id: str
+    name: str
+    description: str
+    storyline: str  # Narrative text shown in chat
+    gold_reward: int = 0
+    badge_id: Optional[str] = None
+    order_index: int = 0
+    is_daily: bool = False
+    is_active: bool = True
+
+class PlayerQuest(BaseModel):
+    id: str
+    player_id: str
+    quest_id: str
+    status: str = "available"  # available, in_progress, completed, claimed
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    storyline_shown: bool = False
+
+class PlayerQuestObjective(BaseModel):
+    id: str
+    player_quest_id: str
+    objective_id: str
+    is_completed: bool = False
+    progress_data: Optional[Dict[str, Any]] = None  # {"current": 2, "required": 3}
+    completed_at: Optional[datetime] = None
+
+class PlayerBadge(BaseModel):
+    id: str
+    player_id: str
+    badge_id: str
+    earned_at: datetime = Field(default_factory=datetime.utcnow)
+
+class GoldTransaction(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    player_id: str
+    amount: int  # Positive for credit, negative for debit
+    transaction_type: str  # quest_reward, purchase, sale, transfer
+    reference_id: Optional[str] = None
+    description: Optional[str] = None
+    balance_after: int
+    created_at: datetime = Field(default_factory=datetime.utcnow)

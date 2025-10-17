@@ -635,7 +635,41 @@ async def send_duel_results(
             }
             await manager.send_to_player(room_id, player1_id, outcome_message)
             await manager.send_to_player(room_id, player2_id, outcome_message)
-            
+
+            # Quest tracking for combat victory
+            try:
+                from .quest_manager import QuestManager
+                quest_manager = QuestManager(game_manager.db)
+
+                # Only track quest if winner is a player (not a monster)
+                if winner_id and not (isinstance(winner_id, str) and winner_id.startswith("monster_")):
+                    quest_result = await quest_manager.check_objectives(
+                        winner_id, "win combat", 'win_combat', {}
+                    )
+
+                    if quest_result and quest_result.get('type') == 'quest_completed':
+                        # Send quest completion notification to winner
+                        quest_name = quest_result.get('quest_name', 'Unknown Quest')
+                        gold_reward = quest_result.get('gold_reward', 0)
+                        badge_name = quest_result.get('badge_name', '')
+
+                        completion_text = f"\n\n🎉 **Quest Complete: {quest_name}**\n"
+                        completion_text += f"💰 Earned {gold_reward} gold"
+                        if badge_name:
+                            completion_text += f" and the '{badge_name}' badge!"
+                        else:
+                            completion_text += "!"
+
+                        await manager.send_to_player(room_id, winner_id, {
+                            "type": "system_message",
+                            "message": completion_text,
+                            "timestamp": datetime.now().isoformat()
+                        })
+
+                        logger.info(f"[Quest] Player {winner_id} completed quest after combat victory: {quest_name}")
+            except Exception as e:
+                logger.error(f"[Quest] Error tracking combat victory quest: {str(e)}")
+
             # Record combat history to prevent re-aggression
             try:
                 from .monster_behavior import monster_behavior_manager

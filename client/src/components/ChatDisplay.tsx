@@ -140,6 +140,15 @@ const ChatDisplay: React.FC<ChatDisplayProps> = ({ onScrollToTop }) => {
                     </div>
                 );
 
+            case 'quest_storyline':
+                return (
+                    <div className="mb-6 font-mono text-center px-4">
+                        <div className="text-2xl md:text-3xl font-bold bg-gradient-to-r from-amber-400 via-yellow-500 to-amber-400 bg-clip-text text-transparent leading-relaxed whitespace-pre-wrap">
+                            {message.message}
+                        </div>
+                    </div>
+                );
+
             default:
                 return null;
         }

@@ -194,13 +194,219 @@ class GameManager:
         )
         
         await self.db.set_player(player_id, player.dict())
-        
+
         # Add player to the starting room's player list
         await self.db.add_to_room_players(starting_room.id, player_id)
-        
+
+        # Assign tutorial quest to new player
+        try:
+            from .quest_manager import QuestManager
+            quest_manager = QuestManager(self.db)
+            quest_result = await quest_manager.assign_tutorial_quest(player_id)
+
+            if quest_result:
+                logger.info(f"[Quest] Assigned tutorial quest to new player {player_id}")
+
+                # Spawn quest items if quest has spawn config
+                quest_data = quest_result.get('quest')
+                if quest_data and quest_data.get('spawn_config'):
+                    await self.spawn_quest_items(player_id, starting_room.id, quest_data['spawn_config'])
+            else:
+                logger.warning(f"[Quest] Failed to assign tutorial quest to player {player_id}")
+        except Exception as e:
+            logger.error(f"[Quest] Error assigning tutorial quest: {str(e)}")
+            # Don't fail player creation if quest assignment fails
+
         elapsed = time.time() - start_time
         logger.info(f"[Performance] Player creation completed in {elapsed:.2f}s for {name}")
         return player
+
+    async def spawn_quest_items(self, player_id: str, starting_room_id: str, spawn_config: Dict[str, Any]):
+        """
+        Generic method to spawn quest items based on spawn configuration
+
+        Args:
+            player_id: The player's ID
+            starting_room_id: The player's starting room
+            spawn_config: Dictionary containing item spawn configurations with structure:
+                {
+                    "items": [
+                        {
+                            "name": "Item Name",
+                            "description": "Item description",
+                            "rarity": 2,
+                            "is_takeable": true,
+                            "properties": {...},
+                            "capabilities": [...],
+                            "spawn_location": {
+                                "type": "adjacent_room|nearby|starting_room|random_biome|specific_coordinates",
+                                "distance": 1,  # For nearby type
+                                "direction_preference": "any|north|south|east|west",
+                                "biome": "forest",  # For random_biome type
+                                "coordinates": {"x": 0, "y": 0},  # For specific_coordinates
+                                "visibility": "obvious|hidden"
+                            },
+                            "spawn_trigger": "quest_start|quest_objective"
+                        }
+                    ]
+                }
+        """
+        try:
+            if not spawn_config or 'items' not in spawn_config:
+                logger.warning(f"[Quest] No spawn config provided for quest items")
+                return
+
+            starting_room_data = await self.db.get_room(starting_room_id)
+            if not starting_room_data:
+                logger.error(f"[Quest] Starting room {starting_room_id} not found")
+                return
+
+            starting_room = Room(**starting_room_data)
+
+            for item_config in spawn_config.get('items', []):
+                # Only spawn items with quest_start trigger
+                if item_config.get('spawn_trigger') != 'quest_start':
+                    continue
+
+                # Determine spawn location
+                spawn_location = item_config.get('spawn_location', {})
+                target_room_id = await self._determine_spawn_room(
+                    starting_room_id,
+                    starting_room,
+                    spawn_location
+                )
+
+                if not target_room_id:
+                    logger.warning(f"[Quest] Could not determine spawn location for {item_config.get('name')}")
+                    continue
+
+                # Create item
+                item_id = f"item_{item_config.get('name', 'quest_item').lower().replace(' ', '_')}_{str(uuid.uuid4())}"
+
+                # Get properties and add player ownership for quest items
+                # Convert all property values to strings (Pydantic Item model requirement)
+                properties = {}
+                for key, value in item_config.get('properties', {}).items():
+                    properties[key] = str(value)
+
+                if properties.get('quest_item'):
+                    properties['spawned_for_player_id'] = player_id
+
+                item_data = {
+                    'id': item_id,
+                    'name': item_config.get('name', 'Quest Item'),
+                    'description': item_config.get('description', 'A quest item.'),
+                    'is_takeable': item_config.get('is_takeable', True),
+                    'rarity': item_config.get('rarity', 1),
+                    'properties': properties,
+                    'capabilities': item_config.get('capabilities', [])
+                }
+
+                await self.db.set_item(item_id, item_data)
+
+                # Add item to target room
+                target_room_data = await self.db.get_room(target_room_id)
+                if target_room_data:
+                    target_room = Room(**target_room_data)
+                    if item_id not in target_room.items:
+                        target_room.items.append(item_id)
+                        await self.db.set_room(target_room_id, target_room.dict())
+                        logger.info(f"[Quest] Successfully spawned '{item_data['name']}' for player {player_id} in room {target_room_id} ({target_room.title})")
+
+        except Exception as e:
+            logger.error(f"[Quest] Error spawning quest items: {str(e)}")
+
+    async def _determine_spawn_room(
+        self,
+        starting_room_id: str,
+        starting_room,
+        spawn_location: Dict[str, Any]
+    ) -> Optional[str]:
+        """
+        Determine which room to spawn an item in based on spawn location config
+
+        Args:
+            starting_room_id: The player's starting room ID
+            starting_room: The starting room object
+            spawn_location: Spawn location configuration
+
+        Returns:
+            Room ID where item should spawn, or None if no valid room found
+        """
+        location_type = spawn_location.get('type', 'adjacent_room')
+
+        try:
+            if location_type == 'starting_room':
+                return starting_room_id
+
+            elif location_type == 'adjacent_room':
+                # Find first connected room, with optional direction preference
+                direction_pref = spawn_location.get('direction_preference', 'any')
+
+                if starting_room and starting_room.connections:
+                    # Try preferred direction first
+                    if direction_pref != 'any' and direction_pref in starting_room.connections:
+                        connected_id = starting_room.connections[direction_pref]
+                        if connected_id:
+                            return connected_id
+
+                    # Otherwise pick first available
+                    for direction, connected_room_id in starting_room.connections.items():
+                        if connected_room_id:
+                            logger.info(f"[Quest] Spawning item in room {connected_room_id} ({direction} of starting room)")
+                            return connected_room_id
+
+                # Fallback to starting room if no connections
+                return starting_room_id
+
+            elif location_type == 'nearby':
+                # BFS search for room within distance
+                distance = spawn_location.get('distance', 2)
+                visited = set()
+                queue = [(starting_room_id, 0)]
+
+                while queue:
+                    room_id, depth = queue.pop(0)
+
+                    if room_id in visited:
+                        continue
+                    visited.add(room_id)
+
+                    # Don't spawn in starting room, and respect max distance
+                    if depth > 0 and depth <= distance:
+                        return room_id
+
+                    if depth < distance:
+                        room = await self.get_room(room_id)
+                        if room and room.connections:
+                            for connected_id in room.connections.values():
+                                if connected_id and connected_id not in visited:
+                                    queue.append((connected_id, depth + 1))
+
+                # Fallback to adjacent if nearby search fails
+                return await self._determine_spawn_room(
+                    starting_room_id,
+                    starting_room,
+                    {'type': 'adjacent_room'}
+                )
+
+            elif location_type == 'specific_coordinates':
+                # For future use - requires coordinate-based room lookup
+                logger.warning(f"[Quest] specific_coordinates spawn type not yet implemented")
+                return starting_room_id
+
+            elif location_type == 'random_biome':
+                # For future use - requires biome-based room search
+                logger.warning(f"[Quest] random_biome spawn type not yet implemented")
+                return starting_room_id
+
+            else:
+                logger.warning(f"[Quest] Unknown spawn location type: {location_type}")
+                return starting_room_id
+
+        except Exception as e:
+            logger.error(f"[Quest] Error determining spawn room: {str(e)}")
+            return starting_room_id
 
     def _validate_monster_data(self, monster_data: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
         """

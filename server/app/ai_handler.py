@@ -15,7 +15,13 @@ from .image_storage import upload_image_to_supabase
 setup_logging()
 logger = logging.getLogger(__name__)
 
-client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+# Initialize OpenAI client with native timeout support
+# The SDK handles timeout gracefully with proper defaults
+client = AsyncOpenAI(
+    api_key=settings.OPENAI_API_KEY,
+    timeout=60.0,  # 60 second timeout for all requests
+    max_retries=2  # SDK will retry failed requests up to 2 times
+)
 
 # Set up Replicate API token
 if settings.REPLICATE_API_TOKEN:
@@ -43,6 +49,12 @@ WORLD_CONFIG = {
     "starting_time": "dawn",
     "starting_weather": "clear",
     "starting_quest_stage": "beginning",
+
+    # Quest System
+    "quest_storyline_intro": "You awaken in an unfamiliar place, your memories hazy...",
+    "quest_narrative_style": "epic fantasy storytelling with dramatic flair",
+    "tutorial_quest_theme": "awakening and discovery in a medieval realm",
+    "badge_visual_style": "medieval heraldic shields, emblems, and crests with ornate details",
 
     # Content Restrictions (what to avoid)
     "avoid_themes": ["modern", "sci-fi", "futuristic"],  # Configurable per world

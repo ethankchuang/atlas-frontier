@@ -4,10 +4,36 @@ from .logger import setup_logging
 import logging
 import json
 import hashlib
+import asyncio
+from functools import wraps
 
 # Configure logging
 setup_logging()
 logger = logging.getLogger(__name__)
+
+def retry_on_timeout(max_retries=2, delay=0.1):
+    """Decorator to retry Supabase operations on timeout"""
+    def decorator(func):
+        @wraps(func)
+        async def wrapper(*args, **kwargs):
+            last_error = None
+            for attempt in range(max_retries + 1):
+                try:
+                    return await func(*args, **kwargs)
+                except Exception as e:
+                    last_error = e
+                    error_msg = str(e).lower()
+                    # Retry on timeout or connection errors
+                    if 'timeout' in error_msg or 'connection' in error_msg:
+                        if attempt < max_retries:
+                            logger.debug(f"Retry {attempt + 1}/{max_retries} for {func.__name__} after timeout")
+                            await asyncio.sleep(delay * (attempt + 1))  # Exponential backoff
+                            continue
+                    # For other errors or final attempt, raise immediately
+                    raise
+            raise last_error
+        return wrapper
+    return decorator
 
 class SupabaseDatabase:
     """
@@ -26,12 +52,13 @@ class SupabaseDatabase:
             raise ValueError(f"Failed to serialize data: {str(e)}")
 
     @staticmethod
+    @retry_on_timeout(max_retries=2, delay=0.1)
     async def get_room(room_id: str) -> Optional[Dict[str, Any]]:
         """Get room data from Supabase"""
         try:
             client = get_supabase_client()
             result = client.table('rooms').select('data').eq('id', room_id).execute()
-            
+
             if result.data and len(result.data) > 0:
                 return result.data[0]['data']
             return None
@@ -40,36 +67,33 @@ class SupabaseDatabase:
             raise
 
     @staticmethod
+    @retry_on_timeout(max_retries=3, delay=0.2)
     async def set_room(room_id: str, room_data: Dict[str, Any]) -> bool:
         """Save room data to Supabase"""
         try:
             logger.debug(f"Setting room {room_id} with data: {room_data}")
             client = get_supabase_client()
             serializable_data = SupabaseDatabase._serialize_data(room_data)
-            
+
             # Use upsert to insert or update
             result = client.table('rooms').upsert({
                 'id': room_id,
                 'data': serializable_data
             }).execute()
-            
+
             return len(result.data) > 0
         except Exception as e:
             logger.error(f"Error setting room {room_id}: {str(e)}")
             raise
 
     @staticmethod
+    @retry_on_timeout(max_retries=2, delay=0.1)
     async def get_player(player_id: str) -> Optional[Dict[str, Any]]:
         """Get player data from Supabase"""
         try:
-            # Skip guest players - they should be stored in Redis
-            if player_id.startswith('guest_'):
-                logger.debug(f"Skipping Supabase lookup for guest player: {player_id}")
-                return None
-                
             client = get_supabase_client()
             result = client.table('players').select('data').eq('id', player_id).execute()
-            
+
             if result.data and len(result.data) > 0:
                 return result.data[0]['data']
             return None
@@ -91,9 +115,9 @@ class SupabaseDatabase:
                 logger.error(f"Player data missing user_id: {player_data}")
                 return False
 
-            # Skip saving system/dummy/guest players to avoid foreign key constraint issues
-            if user_id == "system" or player_id == "dummy" or user_id == "guest" or player_id.startswith("guest_"):
-                logger.debug(f"Skipping save for system/dummy/guest player: {player_id}")
+            # Skip saving system/dummy players to avoid foreign key constraint issues
+            if user_id == "system" or player_id == "dummy":
+                logger.debug(f"Skipping save for system/dummy player: {player_id}")
                 return True  # Return success without actually saving
 
             # Verify user_id exists in user_profiles before attempting to save
@@ -142,12 +166,13 @@ class SupabaseDatabase:
             return []
 
     @staticmethod
+    @retry_on_timeout(max_retries=2, delay=0.1)
     async def get_npc(npc_id: str) -> Optional[Dict[str, Any]]:
         """Get NPC data from Supabase"""
         try:
             client = get_supabase_client()
             result = client.table('npcs').select('data').eq('id', npc_id).execute()
-            
+
             if result.data and len(result.data) > 0:
                 return result.data[0]['data']
             return None
@@ -156,30 +181,32 @@ class SupabaseDatabase:
             raise
 
     @staticmethod
+    @retry_on_timeout(max_retries=3, delay=0.2)
     async def set_npc(npc_id: str, npc_data: Dict[str, Any]) -> bool:
         """Save NPC data to Supabase"""
         try:
             logger.debug(f"Setting NPC {npc_id} with data: {npc_data}")
             client = get_supabase_client()
             serializable_data = SupabaseDatabase._serialize_data(npc_data)
-            
+
             result = client.table('npcs').upsert({
                 'id': npc_id,
                 'data': serializable_data
             }).execute()
-            
+
             return len(result.data) > 0
         except Exception as e:
             logger.error(f"Error setting NPC {npc_id}: {str(e)}")
             raise
 
     @staticmethod
+    @retry_on_timeout(max_retries=2, delay=0.1)
     async def get_item(item_id: str) -> Optional[Dict[str, Any]]:
         """Get item data from Supabase"""
         try:
             client = get_supabase_client()
             result = client.table('items').select('data').eq('id', item_id).execute()
-            
+
             if result.data and len(result.data) > 0:
                 return result.data[0]['data']
             return None
@@ -188,30 +215,32 @@ class SupabaseDatabase:
             raise
 
     @staticmethod
+    @retry_on_timeout(max_retries=3, delay=0.2)
     async def set_item(item_id: str, item_data: Dict[str, Any]) -> bool:
         """Save item data to Supabase"""
         try:
             logger.debug(f"Setting item {item_id} with data: {item_data}")
             client = get_supabase_client()
             serializable_data = SupabaseDatabase._serialize_data(item_data)
-            
+
             result = client.table('items').upsert({
                 'id': item_id,
                 'data': serializable_data
             }).execute()
-            
+
             return len(result.data) > 0
         except Exception as e:
             logger.error(f"Error setting item {item_id}: {str(e)}")
             raise
 
     @staticmethod
+    @retry_on_timeout(max_retries=2, delay=0.1)
     async def get_monster(monster_id: str) -> Optional[Dict[str, Any]]:
         """Get monster data from Supabase"""
         try:
             client = get_supabase_client()
             result = client.table('monsters').select('data').eq('id', monster_id).execute()
-            
+
             if result.data and len(result.data) > 0:
                 return result.data[0]['data']
             return None
@@ -220,18 +249,19 @@ class SupabaseDatabase:
             raise
 
     @staticmethod
+    @retry_on_timeout(max_retries=3, delay=0.2)
     async def set_monster(monster_id: str, monster_data: Dict[str, Any]) -> bool:
         """Save monster data to Supabase"""
         try:
             logger.debug(f"Setting monster {monster_id} with data: {monster_data}")
             client = get_supabase_client()
             serializable_data = SupabaseDatabase._serialize_data(monster_data)
-            
+
             result = client.table('monsters').upsert({
                 'id': monster_id,
                 'data': serializable_data
             }).execute()
-            
+
             return len(result.data) > 0
         except Exception as e:
             logger.error(f"Error setting monster {monster_id}: {str(e)}")
@@ -631,47 +661,47 @@ class SupabaseDatabase:
         """Clear all files from a Supabase Storage bucket"""
         try:
             logger.info(f"Clearing storage bucket: {bucket_name}")
-            
+
             # List all files in the bucket recursively, including subdirectories
             all_files = []
-            
+
             try:
                 # List files recursively (this gets all files in all subdirectories)
                 result = client.storage.from_(bucket_name).list('', {
                     'limit': 1000,
                     'sortBy': {'column': 'name', 'order': 'asc'}
                 })
-                
+
                 if result and len(result) > 0:
                     all_files.extend(result)
                     logger.info(f"Found {len(all_files)} items in bucket {bucket_name}")
                 else:
                     logger.info(f"Bucket {bucket_name} is already empty")
                     return
-                    
+
             except Exception as e:
                 logger.error(f"Error listing files in bucket {bucket_name}: {str(e)}")
                 return
-            
+
             # Delete files individually (more reliable than batch deletion)
             total_deleted = 0
-            
+
             for file_info in all_files:
                 try:
                     file_path = file_info['name']
-                    
+
                     # Check if this is a folder (directories don't have metadata)
                     if file_info.get('metadata') is None and file_info.get('id') is None:
                         # This is a folder, list its contents and delete them
                         logger.info(f"Found folder: {file_path}, clearing its contents...")
-                        
+
                         # List files in the folder
                         folder_files = client.storage.from_(bucket_name).list(file_path)
                         if folder_files and len(folder_files) > 0:
                             for folder_file in folder_files:
                                 folder_file_path = f"{file_path}/{folder_file['name']}"
                                 delete_result = client.storage.from_(bucket_name).remove([folder_file_path])
-                                
+
                                 if delete_result:
                                     total_deleted += 1
                                     logger.debug(f"Deleted file: {folder_file_path}")
@@ -680,18 +710,189 @@ class SupabaseDatabase:
                     else:
                         # This is a regular file
                         delete_result = client.storage.from_(bucket_name).remove([file_path])
-                        
+
                         if delete_result:
                             total_deleted += 1
                             logger.debug(f"Deleted file: {file_path}")
                         else:
                             logger.warning(f"Failed to delete file: {file_path}")
-                        
+
                 except Exception as e:
                     logger.error(f"Error deleting item {file_info.get('name', 'unknown')}: {str(e)}")
-            
+
             logger.info(f"Successfully cleared {total_deleted} files from bucket {bucket_name}")
-            
+
         except Exception as e:
             logger.error(f"Error clearing storage bucket {bucket_name}: {str(e)}")
             # Don't raise - storage clearing is not critical for world reset
+
+    # ============================================
+    # QUEST SYSTEM METHODS
+    # ============================================
+
+    @staticmethod
+    @retry_on_timeout(max_retries=3, delay=0.2)
+    async def get_quest(quest_id: str) -> Optional[Dict[str, Any]]:
+        """Get quest by ID from Supabase"""
+        try:
+            client = get_supabase_client()
+            result = client.table('quests').select('*').eq('id', quest_id).execute()
+
+            if result.data and len(result.data) > 0:
+                return result.data[0]
+            return None
+        except Exception as e:
+            logger.error(f"Error getting quest {quest_id}: {str(e)}")
+            return None
+
+    @staticmethod
+    async def get_quest_objectives(quest_id: str) -> List[Dict[str, Any]]:
+        """Get all objectives for a quest"""
+        try:
+            client = get_supabase_client()
+            result = client.table('quest_objectives').select('*').eq('quest_id', quest_id).order('order_index').execute()
+
+            return result.data if result.data else []
+        except Exception as e:
+            logger.error(f"Error getting quest objectives for {quest_id}: {str(e)}")
+            return []
+
+    @staticmethod
+    async def get_first_quest() -> Optional[Dict[str, Any]]:
+        """Get the first quest (tutorial quest with order_index = 0)"""
+        try:
+            client = get_supabase_client()
+            result = client.table('quests').select('*').eq('is_active', True).eq('order_index', 0).limit(1).execute()
+
+            if result.data and len(result.data) > 0:
+                return result.data[0]
+            return None
+        except Exception as e:
+            logger.error(f"Error getting first quest: {str(e)}")
+            return None
+
+    @staticmethod
+    async def get_next_quest(current_order_index: int) -> Optional[Dict[str, Any]]:
+        """Get the next quest in sequence"""
+        try:
+            client = get_supabase_client()
+            result = client.table('quests').select('*').eq('is_active', True).gt('order_index', current_order_index).order('order_index').limit(1).execute()
+
+            if result.data and len(result.data) > 0:
+                return result.data[0]
+            return None
+        except Exception as e:
+            logger.error(f"Error getting next quest after index {current_order_index}: {str(e)}")
+            return None
+
+    @staticmethod
+    async def get_player_quest(player_id: str, quest_id: str) -> Optional[Dict[str, Any]]:
+        """Get player quest record"""
+        try:
+            client = get_supabase_client()
+            result = client.table('player_quests').select('*').eq('player_id', player_id).eq('quest_id', quest_id).execute()
+
+            if result.data and len(result.data) > 0:
+                return result.data[0]
+            return None
+        except Exception as e:
+            logger.error(f"Error getting player quest for {player_id}, {quest_id}: {str(e)}")
+            return None
+
+    @staticmethod
+    async def get_all_player_quests(player_id: str) -> List[Dict[str, Any]]:
+        """Get all quests for a player"""
+        try:
+            client = get_supabase_client()
+            result = client.table('player_quests').select('*').eq('player_id', player_id).execute()
+
+            return result.data if result.data else []
+        except Exception as e:
+            logger.error(f"Error getting all player quests for {player_id}: {str(e)}")
+            return []
+
+    @staticmethod
+    async def save_player_quest(player_quest: Dict[str, Any]) -> bool:
+        """Save or update player quest"""
+        try:
+            client = get_supabase_client()
+            result = client.table('player_quests').upsert(player_quest).execute()
+
+            return len(result.data) > 0
+        except Exception as e:
+            logger.error(f"Error saving player quest: {str(e)}")
+            return False
+
+    @staticmethod
+    async def get_player_quest_objectives(player_quest_id: str) -> List[Dict[str, Any]]:
+        """Get all player objective records for a quest"""
+        try:
+            client = get_supabase_client()
+            result = client.table('player_quest_objectives').select('*').eq('player_quest_id', player_quest_id).execute()
+
+            return result.data if result.data else []
+        except Exception as e:
+            logger.error(f"Error getting player quest objectives for {player_quest_id}: {str(e)}")
+            return []
+
+    @staticmethod
+    async def save_player_quest_objective(objective: Dict[str, Any]) -> bool:
+        """Save or update player quest objective"""
+        try:
+            client = get_supabase_client()
+            result = client.table('player_quest_objectives').upsert(objective).execute()
+
+            return len(result.data) > 0
+        except Exception as e:
+            logger.error(f"Error saving player quest objective: {str(e)}")
+            return False
+
+    @staticmethod
+    async def get_badge(badge_id: str) -> Optional[Dict[str, Any]]:
+        """Get badge by ID"""
+        try:
+            client = get_supabase_client()
+            result = client.table('badges').select('*').eq('id', badge_id).execute()
+
+            if result.data and len(result.data) > 0:
+                return result.data[0]
+            return None
+        except Exception as e:
+            logger.error(f"Error getting badge {badge_id}: {str(e)}")
+            return None
+
+    @staticmethod
+    async def get_player_badges(player_id: str) -> List[Dict[str, Any]]:
+        """Get all badges for a player"""
+        try:
+            client = get_supabase_client()
+            result = client.table('player_badges').select('*').eq('player_id', player_id).execute()
+
+            return result.data if result.data else []
+        except Exception as e:
+            logger.error(f"Error getting player badges for {player_id}: {str(e)}")
+            return []
+
+    @staticmethod
+    async def save_player_badge(player_badge: Dict[str, Any]) -> bool:
+        """Save player badge"""
+        try:
+            client = get_supabase_client()
+            result = client.table('player_badges').upsert(player_badge).execute()
+
+            return len(result.data) > 0
+        except Exception as e:
+            logger.error(f"Error saving player badge: {str(e)}")
+            return False
+
+    @staticmethod
+    async def save_gold_transaction(transaction: Dict[str, Any]) -> bool:
+        """Save gold transaction"""
+        try:
+            client = get_supabase_client()
+            result = client.table('player_gold_ledger').insert(transaction).execute()
+
+            return len(result.data) > 0
+        except Exception as e:
+            logger.error(f"Error saving gold transaction: {str(e)}")
+            return False

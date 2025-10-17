@@ -363,7 +363,7 @@ class APIService {
                             if (data.updates?.room_generation) {
                                 const roomGen = data.updates.room_generation;
                                 console.log('[API] Room generation status:', roomGen);
-                                
+
                                 if (roomGen.is_generating) {
                                     console.log('[API] Room is being generated, showing loading spinner');
                                     store.setIsRoomGenerating(true);
@@ -403,6 +403,21 @@ class APIService {
                                     success: true,
                                     message: data.content,
                                     updates: data.updates || {}
+                                });
+                            }
+                        } else if (data.type === 'quest_complete') {
+                            // Handle quest completion as a separate message
+                            console.log('[API] Quest completed:', data);
+
+                            // Add quest completion as a new system message
+                            const store = useGameStore.getState();
+                            if (store.player && store.currentRoom) {
+                                store.addMessage({
+                                    player_id: 'system',
+                                    room_id: store.currentRoom.id,
+                                    message: data.content,
+                                    message_type: 'system',
+                                    timestamp: new Date().toISOString()
                                 });
                             }
                         }
@@ -592,6 +607,144 @@ class APIService {
         return this.request<{ success: boolean; message: string; cleared_duels: number }>(`/player/${playerId}/clear-combat-state`, {
             method: 'POST'
         });
+    }
+
+    // ===============================
+    // Quest System Methods
+    // ===============================
+
+    async getPlayerQuestStatus(playerId: string): Promise<{
+        quest: {
+            id: string;
+            name: string;
+            description: string;
+            gold_reward: number;
+            badge_name?: string;
+        };
+        objectives: Array<{
+            id: string;
+            quest_id: string;
+            objective_type: string;
+            description: string;
+            target_value: number;
+            order_index: number;
+            player_progress: {
+                id: string;
+                player_quest_id: string;
+                objective_id: string;
+                is_completed: boolean;
+                current_progress: number;
+            };
+        }>;
+        progress: {
+            completed: number;
+            total: number;
+        };
+    }> {
+        return this.request(`/player/${playerId}/quest-status`);
+    }
+
+    async getPlayerQuestLog(playerId: string): Promise<{
+        current_quests: Array<{
+            quest: {
+                id: string;
+                name: string;
+                description: string;
+                storyline: string;
+                gold_reward: number;
+                badge_id?: string;
+                badge_name?: string;
+                badge_description?: string;
+                order_index: number;
+            };
+            player_quest: {
+                id: string;
+                player_id: string;
+                quest_id: string;
+                is_completed: boolean;
+                completed_at?: string;
+                started_at: string;
+            };
+            objectives: Array<{
+                id: string;
+                quest_id: string;
+                objective_type: string;
+                description: string;
+                target_value: number;
+                order_index: number;
+                player_progress: {
+                    id: string;
+                    player_quest_id: string;
+                    objective_id: string;
+                    is_completed: boolean;
+                    current_progress: number;
+                };
+            }>;
+            progress: {
+                completed: number;
+                total: number;
+            };
+        }>;
+        completed_quests: Array<{
+            quest: {
+                id: string;
+                name: string;
+                description: string;
+                storyline: string;
+                gold_reward: number;
+                badge_id?: string;
+                badge_name?: string;
+                badge_description?: string;
+                order_index: number;
+            };
+            player_quest: {
+                id: string;
+                player_id: string;
+                quest_id: string;
+                is_completed: boolean;
+                completed_at?: string;
+                started_at: string;
+            };
+            objectives: Array<{
+                id: string;
+                quest_id: string;
+                objective_type: string;
+                description: string;
+                target_value: number;
+                order_index: number;
+                player_progress: {
+                    id: string;
+                    player_quest_id: string;
+                    objective_id: string;
+                    is_completed: boolean;
+                    current_progress: number;
+                };
+            }>;
+            progress: {
+                completed: number;
+                total: number;
+            };
+        }>;
+    }> {
+        return this.request(`/player/${playerId}/quest-log`);
+    }
+
+    async getPlayerBadges(playerId: string): Promise<{
+        badges: Array<{
+            id: string;
+            player_id: string;
+            badge_id: string;
+            earned_at: string;
+            badge: {
+                id: string;
+                name: string;
+                description: string;
+                image_url?: string;
+                rarity: number;
+            };
+        }>;
+    }> {
+        return this.request(`/player/${playerId}/badges`);
     }
 
     logout(): void {

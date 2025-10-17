@@ -245,7 +245,10 @@ class WebSocketService {
                 case 'system':
                     this.handleSystemMessage(data);
                     break;
-                
+                case 'quest_storyline':
+                    this.handleQuestStoryline(data);
+                    break;
+
                 case 'room_update':
                     console.log('[WebSocket] Received room update:', {
                         roomId: data.room?.id,
@@ -281,6 +284,18 @@ class WebSocketService {
             timestamp: data.timestamp
         };
         useGameStore.getState().addMessage(systemMessage);
+    }
+
+    private handleQuestStoryline(data: { message: string; timestamp?: string }) {
+        console.log('[WebSocket] Handling quest storyline:', data);
+        const questMessage: ChatMessage = {
+            player_id: 'system',
+            room_id: this.roomId || '',
+            message: data.message,
+            message_type: 'quest_storyline',
+            timestamp: data.timestamp || new Date().toISOString()
+        };
+        useGameStore.getState().addMessage(questMessage);
     }
 
     private handlePresenceUpdate(data: { player_id: string; status: 'joined' | 'disconnected' | 'left'; player_data?: Player }) {

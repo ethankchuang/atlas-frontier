@@ -3,7 +3,12 @@ import useGameStore from '@/store/gameStore';
 import InventoryList from './InventoryList';
 import GuestConversionModal from './GuestConversionModal';
 
-const PauseMenu: React.FC = () => {
+interface PauseMenuProps {
+    onOpenQuestLog?: () => void;
+    onOpenBadges?: () => void;
+}
+
+const PauseMenu: React.FC<PauseMenuProps> = ({ onOpenQuestLog, onOpenBadges }) => {
     const { isMenuOpen, setIsMenuOpen, player, user } = useGameStore();
     const [view, setView] = useState<'root' | 'inventory' | 'tutorial'>('root');
     const [showGuestConversion, setShowGuestConversion] = useState(false);
@@ -45,6 +50,24 @@ const PauseMenu: React.FC = () => {
                                     onClick={() => setView('inventory')}
                                 >
                                     Inventory
+                                </button>
+                                <button
+                                    className="w-full py-3 bg-yellow-900/40 hover:bg-yellow-800/50 border border-yellow-700 rounded text-yellow-200 text-2xl font-mono transition-colors"
+                                    onClick={() => {
+                                        setIsMenuOpen(false);
+                                        onOpenQuestLog?.();
+                                    }}
+                                >
+                                    📖 Quests
+                                </button>
+                                <button
+                                    className="w-full py-3 bg-purple-900/40 hover:bg-purple-800/50 border border-purple-700 rounded text-purple-200 text-2xl font-mono transition-colors"
+                                    onClick={() => {
+                                        setIsMenuOpen(false);
+                                        onOpenBadges?.();
+                                    }}
+                                >
+                                    🏅 Badges
                                 </button>
                                 <button
                                     className="w-full py-3 bg-blue-900/40 hover:bg-blue-800/50 border border-blue-700 rounded text-blue-200 text-2xl font-mono transition-colors"
