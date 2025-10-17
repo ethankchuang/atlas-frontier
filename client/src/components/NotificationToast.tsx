@@ -110,6 +110,33 @@ const NotificationToast: React.FC<NotificationToastProps> = ({
         );
     }
 
+    if (message.message_type === 'quest_completion') {
+        return (
+            <div 
+                className={`transition-all duration-300 transform ${
+                    isVisible ? 'opacity-100 translate-x-0 scale-100' : 'opacity-0 translate-x-8 scale-95'
+                }`}
+            >
+                <div className="bg-gradient-to-r from-yellow-900/90 to-amber-900/90 backdrop-blur-md border-2 border-yellow-400 rounded-lg p-3 md:p-4 shadow-2xl animate-bounce-once">
+                    <div className="flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-2">
+                            <span className="text-2xl">🎉</span>
+                            <div className="text-sm md:text-lg font-bold text-yellow-200 whitespace-pre-wrap">
+                                {message.message}
+                            </div>
+                        </div>
+                        <button
+                            onClick={handleDismiss}
+                            className="text-yellow-200 hover:text-white text-xl leading-none"
+                        >
+                            ×
+                        </button>
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
     return null;
 };
 

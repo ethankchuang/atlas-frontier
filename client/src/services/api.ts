@@ -112,6 +112,9 @@ class APIService {
     ): Promise<void> {
         const requestStart = performance.now();
 
+        // Track quest storyline accumulation
+        let questStorylineChunks: string[] = [];
+
         try {
             const store = useGameStore.getState();
 
@@ -411,22 +414,43 @@ class APIService {
                                 });
                             }
                         } else if (data.type === 'quest_complete') {
-                            // Handle quest completion as a separate message
+                            // Handle quest completion as a special message (toast + chat log)
                             console.log('[API] Quest completed:', data);
 
-                            // Add quest completion as a new system message
+                            // Add quest completion as a special message type
                             const store = useGameStore.getState();
                             if (store.player && store.currentRoom) {
                                 store.addMessage({
                                     player_id: 'system',
                                     room_id: store.currentRoom.id,
                                     message: data.content,
-                                    message_type: 'system',
-                                    timestamp: new Date().toISOString()
+                                    message_type: 'quest_completion',
+                                    timestamp: new Date().toISOString(),
+                                    quest_data: data.quest_data
                                 });
                             }
+                        } else if (data.type === 'quest_storyline') {
+                            // Accumulate quest storyline chunks (sent in pieces for typewriter effect)
+                            console.log('[API] Quest storyline chunk:', data.message);
+                            questStorylineChunks.push(data.message);
                         }
                     }
+                }
+            }
+
+            // After stream completes, add accumulated quest storyline as a single message
+            if (questStorylineChunks.length > 0) {
+                const store = useGameStore.getState();
+                if (store.player && store.currentRoom) {
+                    const fullStoryline = questStorylineChunks.join('');
+                    console.log('[API] Adding complete quest storyline:', fullStoryline);
+                    store.addMessage({
+                        player_id: 'system',
+                        room_id: store.currentRoom.id,
+                        message: fullStoryline,
+                        message_type: 'quest_storyline',
+                        timestamp: new Date().toISOString()
+                    });
                 }
             }
                     } catch (error) {

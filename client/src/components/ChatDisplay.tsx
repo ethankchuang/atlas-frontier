@@ -149,14 +149,22 @@ const ChatDisplay: React.FC<ChatDisplayProps> = ({ onScrollToTop }) => {
                     </div>
                 );
 
+            case 'quest_completion':
+                return (
+                    <div className="mb-3 text-yellow-300 font-mono text-base md:text-lg font-bold bg-yellow-900/30 px-3 md:px-4 py-2 rounded border border-yellow-500">
+                        {message.message}
+                    </div>
+                );
+
             default:
                 return null;
         }
     };
 
-    // Filter out important messages that are shown elsewhere (toasts/overlays)
+    // Filter out messages that are ONLY shown elsewhere (quest_storyline full overlay, room_description toast)
+    // Keep item_obtained and quest_completion in chat for history log
     const transientMessages = messages.filter(m => 
-        !['quest_storyline', 'room_description', 'item_obtained'].includes(m.message_type)
+        !['quest_storyline', 'room_description'].includes(m.message_type)
     );
 
     return (
