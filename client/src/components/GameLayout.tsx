@@ -359,30 +359,31 @@ const GameLayout: React.FC<GameLayoutProps> = ({ playerId }) => {
                 <RoomDisplay />
             </div>
 
-            {/* Menu button - positioned in top-left corner */}
-            <button
-                onClick={() => setIsMenuOpen(!isMenuOpen)}
-                className="absolute top-2 left-2 md:top-4 md:left-4 z-30 bg-black bg-opacity-80 p-2 md:p-3 border border-amber-900 rounded hover:bg-opacity-100 transition-all"
-                aria-label="Toggle menu"
-            >
-                <Bars3Icon className="w-5 h-5 md:w-6 md:h-6 text-amber-500" />
-            </button>
+            {/* Left sidebar - Menu, Players, Quest stack */}
+            <div className="absolute top-2 left-2 md:top-4 md:left-4 z-30 flex flex-col gap-2 items-start">
+                {/* Menu button */}
+                <button
+                    onClick={() => setIsMenuOpen(!isMenuOpen)}
+                    className="bg-black/80 border border-amber-500 rounded-lg px-2 py-1.5 hover:bg-black/90 transition-all w-auto"
+                    aria-label="Toggle menu"
+                >
+                    <Bars3Icon className="w-4 h-4 text-amber-500" />
+                </button>
+
+                {/* Players in Room */}
+                <PlayersInRoom />
+
+                {/* Quest Summary Panel */}
+                <QuestSummaryPanel
+                    playerId={playerId}
+                    onOpenQuestLog={() => setIsQuestLogOpen(true)}
+                />
+            </div>
 
             {/* Minimap with directional controls - positioned in top-right corner */}
             <div className="absolute top-2 right-2 md:top-4 md:right-4 z-20 bg-black bg-opacity-80 p-2 md:p-3 border border-green-700 rounded text-xs md:text-sm">
                 <Minimap />
                 <DirectionalControls />
-            </div>
-
-            {/* Players in Room - positioned below menu button */}
-            <PlayersInRoom />
-
-            {/* Quest Summary Panel - positioned below "Also here" on left side */}
-            <div className="absolute top-36 left-2 md:top-40 md:left-4 z-20 w-48">
-                <QuestSummaryPanel
-                    playerId={playerId}
-                    onOpenQuestLog={() => setIsQuestLogOpen(true)}
-                />
             </div>
 
             {/* Fullscreen Minimap */}
