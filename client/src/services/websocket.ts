@@ -286,16 +286,36 @@ class WebSocketService {
         useGameStore.getState().addMessage(systemMessage);
     }
 
+    private questStorylineChunks: string[] = [];
+    private questStorylineTimer: NodeJS.Timeout | null = null;
+
     private handleQuestStoryline(data: { message: string; timestamp?: string }) {
-        console.log('[WebSocket] Handling quest storyline:', data);
-        const questMessage: ChatMessage = {
-            player_id: 'system',
-            room_id: this.roomId || '',
-            message: data.message,
-            message_type: 'quest_storyline',
-            timestamp: data.timestamp || new Date().toISOString()
-        };
-        useGameStore.getState().addMessage(questMessage);
+        console.log('[WebSocket] Handling quest storyline chunk:', data.message);
+        this.questStorylineChunks.push(data.message);
+        
+        // Clear any existing timer
+        if (this.questStorylineTimer) {
+            clearTimeout(this.questStorylineTimer);
+        }
+        
+        // Set a new timer to combine chunks after a brief delay
+        this.questStorylineTimer = setTimeout(() => {
+            if (this.questStorylineChunks.length > 0) {
+                // Send all chunks as a special multi-chunk storyline message
+                console.log('[WebSocket] Adding quest storyline with chunks:', this.questStorylineChunks.length);
+                const questMessage: ChatMessage = {
+                    player_id: 'system',
+                    room_id: this.roomId || '',
+                    message: this.questStorylineChunks.join(''), // Full text for fallback
+                    message_type: 'quest_storyline',
+                    timestamp: data.timestamp || new Date().toISOString(),
+                    quest_data: { chunks: this.questStorylineChunks } // Store chunks separately
+                };
+                useGameStore.getState().addMessage(questMessage);
+                this.questStorylineChunks = []; // Clear chunks after adding
+            }
+            this.questStorylineTimer = null;
+        }, 500); // Wait 500ms for all chunks to arrive
     }
 
     private handlePresenceUpdate(data: { player_id: string; status: 'joined' | 'disconnected' | 'left'; player_data?: Player }) {

@@ -778,6 +778,9 @@ class APIService {
 
     logout(): void {
         this.clearAuthToken();
+        if (typeof window !== 'undefined') {
+            localStorage.removeItem('player_id');
+        }
     }
 
     isAuthenticated(): boolean {
