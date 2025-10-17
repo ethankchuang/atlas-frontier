@@ -48,6 +48,7 @@ const QuestSummaryPanel: React.FC<QuestSummaryPanelProps> = ({ playerId, onOpenQ
     const fadeTimerRef = useRef<NodeJS.Timeout | null>(null);
     const { messages } = useGameStore();
     const lastQuestCompletionRef = useRef<string | null>(null);
+    const lastQuestIdRef = useRef<string | null>(null);
 
     // Auto-fade after 10 seconds of inactivity
     useEffect(() => {
@@ -67,7 +68,23 @@ const QuestSummaryPanel: React.FC<QuestSummaryPanelProps> = ({ playerId, onOpenQ
                 clearTimeout(fadeTimerRef.current);
             }
         };
-    }, [questStatus, isExpanded]);
+    }, [isExpanded]); // Only reset on expansion toggle, not on quest status updates
+
+    // Reset fade timer when quest changes
+    useEffect(() => {
+        const currentQuestId = questStatus?.quest?.id;
+        if (currentQuestId && currentQuestId !== lastQuestIdRef.current) {
+            lastQuestIdRef.current = currentQuestId;
+            // Reset fade timer for new quest
+            if (fadeTimerRef.current) {
+                clearTimeout(fadeTimerRef.current);
+            }
+            setOpacity(1);
+            fadeTimerRef.current = setTimeout(() => {
+                setOpacity(0.3);
+            }, 10000);
+        }
+    }, [questStatus?.quest?.id]);
 
     // Watch for quest completion messages and refresh immediately
     useEffect(() => {

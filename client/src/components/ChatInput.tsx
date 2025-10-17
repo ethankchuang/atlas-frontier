@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import useGameStore from '@/store/gameStore';
 import apiService from '@/services/api';
 import websocketService from '@/services/websocket';
@@ -16,6 +17,7 @@ const ChatInput: React.FC = () => {
     const [showNPCAutocomplete, setShowNPCAutocomplete] = useState(false);
     const [autocompleteIndex, setAutocompleteIndex] = useState(0);
     const [filteredNPCs, setFilteredNPCs] = useState<NPC[]>([]);
+    const [autocompletePosition, setAutocompletePosition] = useState({ top: 0, left: 0, width: 0 });
     const streamMessageIdRef = useRef<string | null>(null);
     const npcLoadingMessageIdRef = useRef<string | null>(null);
     const inputRef = useRef<HTMLInputElement>(null);
@@ -41,10 +43,7 @@ const ChatInput: React.FC = () => {
         npcs
     } = useGameStore();
 
-    useEffect(() => {
-        // Focus input on mount
-        inputRef.current?.focus();
-    }, []);
+    // Removed auto-focus on mount to avoid interrupting user when expanding chat
 
     // Watch for chat input prefill (e.g., from clicking an NPC)
     useEffect(() => {
@@ -75,6 +74,16 @@ const ChatInput: React.FC = () => {
         setFilteredNPCs(filtered);
         setShowNPCAutocomplete(filtered.length > 0);
         setAutocompleteIndex(0);
+
+        // Calculate position for portal
+        if (filtered.length > 0 && inputRef.current) {
+            const rect = inputRef.current.getBoundingClientRect();
+            setAutocompletePosition({
+                top: rect.top,
+                left: rect.left,
+                width: rect.width
+            });
+        }
     }, [input, npcs]);
 
     // Animate spinner when streaming or waiting for NPC
@@ -611,12 +620,17 @@ const ChatInput: React.FC = () => {
     };
 
     return (
-        <div className="p-3 md:p-4 border-t border-amber-900/30 relative">
-            {/* NPC Autocomplete Dropdown */}
-            {showNPCAutocomplete && filteredNPCs.length > 0 && (
+        <>
+            {/* NPC Autocomplete Dropdown - Rendered via Portal */}
+            {showNPCAutocomplete && filteredNPCs.length > 0 && typeof window !== 'undefined' && createPortal(
                 <div 
                     ref={autocompleteRef}
-                    className="absolute bottom-full left-0 right-0 mb-2 bg-black/95 border border-cyan-500 rounded-lg shadow-2xl max-h-48 overflow-y-auto z-50"
+                    className="fixed bg-black/95 border border-cyan-500 rounded-lg shadow-2xl max-h-48 overflow-y-auto z-[100]"
+                    style={{
+                        bottom: `${window.innerHeight - autocompletePosition.top + 8}px`,
+                        left: `${autocompletePosition.left}px`,
+                        width: `${autocompletePosition.width}px`,
+                    }}
                 >
                     {filteredNPCs.map((npc, index) => (
                         <div
@@ -637,8 +651,11 @@ const ChatInput: React.FC = () => {
                             )}
                         </div>
                     ))}
-                </div>
+                </div>,
+                document.body
             )}
+
+        <div className="p-3 md:p-4 border-t border-amber-900/30 relative">
 
             {/* Condition Display for Duels */}
             {/* Removed duel condition overlay above input while in battle mode */}
@@ -691,6 +708,7 @@ const ChatInput: React.FC = () => {
             </button>
         </form>
         </div>
+        </>
     );
 };
 
