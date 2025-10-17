@@ -135,12 +135,12 @@ const PlayersInRoom: React.FC = () => {
         >
             <div className="flex items-center justify-between gap-2 mb-1">
                 <div className="flex items-center gap-1">
-                    <UserCircleIcon className="h-3 w-3 text-amber-500" />
-                    <span className="text-amber-500 font-bold text-xs">Also here:</span>
+                    <UserCircleIcon className="h-4 w-4 text-amber-500" />
+                    <span className="text-amber-500 font-bold text-sm">Also here:</span>
                 </div>
                 <button
                     onClick={() => setIsExpanded(false)}
-                    className="text-amber-400 hover:text-amber-300 text-xs font-bold"
+                    className="text-amber-400 hover:text-amber-300 text-sm font-bold"
                     title="Minimize"
                 >
                     ✕
@@ -151,11 +151,11 @@ const PlayersInRoom: React.FC = () => {
                 {npcs.map(npc => (
                     <div
                         key={npc.id}
-                        className="flex items-center bg-cyan-900 bg-opacity-50 rounded px-2 py-0.5 border border-cyan-600"
+                        className="flex items-center bg-cyan-900 bg-opacity-50 rounded px-2 py-1 border border-cyan-600"
                         title={npc.description || 'An NPC'}
                     >
-                        <UserCircleIcon className="h-3 w-3 mr-1 text-cyan-400" />
-                        <span className="text-cyan-100 text-xs font-medium">{npc.name}</span>
+                        <UserCircleIcon className="h-3.5 w-3.5 mr-1 text-cyan-400" />
+                        <span className="text-cyan-100 text-sm font-medium">{npc.name}</span>
                     </div>
                 ))}
 
@@ -164,11 +164,11 @@ const PlayersInRoom: React.FC = () => {
                     <div
                         key={player.id}
                         ref={(el) => { playerRefs.current[player.id] = el; }}
-                        className="flex items-center bg-amber-900 bg-opacity-50 rounded px-2 py-0.5 border border-amber-700 cursor-pointer hover:bg-amber-800 hover:border-amber-600 transition-colors"
+                        className="flex items-center bg-amber-900 bg-opacity-50 rounded px-2 py-1 border border-amber-700 cursor-pointer hover:bg-amber-800 hover:border-amber-600 transition-colors"
                         onClick={(e) => handlePlayerClick(e, player.id)}
                     >
-                        <UserCircleIcon className="h-3 w-3 mr-1 text-amber-500" />
-                        <span className="text-amber-100 text-xs font-medium">{player.name}</span>
+                        <UserCircleIcon className="h-3.5 w-3.5 mr-1 text-amber-500" />
+                        <span className="text-amber-100 text-sm font-medium">{player.name}</span>
                     </div>
                 ))}
             </div>

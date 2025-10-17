@@ -42,7 +42,7 @@ interface QuestSummaryPanelProps {
 const QuestSummaryPanel: React.FC<QuestSummaryPanelProps> = ({ playerId, onOpenQuestLog }) => {
     const [questStatus, setQuestStatus] = useState<QuestStatus | null>(null);
     const [isInitialLoad, setIsInitialLoad] = useState(true);
-    const [isExpanded, setIsExpanded] = useState(false);
+    const [isExpanded, setIsExpanded] = useState(true); // Start expanded for new players
     const [opacity, setOpacity] = useState(1);
     const fadeTimerRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -148,14 +148,14 @@ const QuestSummaryPanel: React.FC<QuestSummaryPanelProps> = ({ playerId, onOpenQ
         >
             {/* Header with quest name and progress */}
             <div className="flex items-center justify-between mb-1">
-                <div className="text-amber-400 text-xs font-bold flex items-center gap-1">
-                    <BookOpenIcon className="w-3 h-3" />
+                <div className="text-amber-400 text-sm font-bold flex items-center gap-1">
+                    <BookOpenIcon className="w-4 h-4" />
                     <span>Quest</span>
                 </div>
                 <div className="flex items-center gap-1">
                     <button
                         onClick={onOpenQuestLog}
-                        className="text-xs text-cyan-400 hover:text-cyan-300 transition-colors"
+                        className="text-sm text-cyan-400 hover:text-cyan-300 transition-colors"
                     >
                         View
                     </button>
@@ -164,7 +164,7 @@ const QuestSummaryPanel: React.FC<QuestSummaryPanelProps> = ({ playerId, onOpenQ
                             e.stopPropagation();
                             setIsExpanded(false);
                         }}
-                        className="text-amber-400 hover:text-amber-300 text-xs font-bold ml-1"
+                        className="text-amber-400 hover:text-amber-300 text-sm font-bold ml-1"
                         title="Minimize"
                     >
                         ✕
@@ -173,19 +173,19 @@ const QuestSummaryPanel: React.FC<QuestSummaryPanelProps> = ({ playerId, onOpenQ
             </div>
 
             {/* Quest Name and Progress */}
-            <div className="text-green-400 text-xs font-bold mb-1 truncate">
+            <div className="text-green-400 text-sm font-bold mb-1 truncate">
                 {questStatus.quest.name}
             </div>
 
             {/* Compact Progress Bar */}
-            <div className="flex items-center gap-2 text-xs mb-2">
-                <div className="flex-1 h-1.5 bg-gray-700 rounded overflow-hidden">
+            <div className="flex items-center gap-2 text-sm mb-2">
+                <div className="flex-1 h-2 bg-gray-700 rounded overflow-hidden">
                     <div
                         className="h-full bg-gradient-to-r from-amber-500 to-yellow-500 transition-all duration-500"
                         style={{ width: `${(questStatus.progress.completed / questStatus.progress.total) * 100}%` }}
                     />
                 </div>
-                <span className="text-xs whitespace-nowrap text-amber-300">
+                <span className="text-sm whitespace-nowrap text-amber-300">
                     {questStatus.progress.completed}/{questStatus.progress.total}
                 </span>
             </div>
@@ -193,7 +193,7 @@ const QuestSummaryPanel: React.FC<QuestSummaryPanelProps> = ({ playerId, onOpenQ
             {/* Objectives List */}
             <div className="space-y-1 border-t border-amber-900/30 pt-2">
                 {questStatus.objectives.map((objective) => (
-                    <div key={objective.id} className="flex items-start gap-1.5 text-xs">
+                    <div key={objective.id} className="flex items-start gap-1.5 text-sm">
                         <div className={`mt-0.5 ${objective.player_progress.is_completed ? 'text-green-400' : 'text-amber-400/50'}`}>
                             {objective.player_progress.is_completed ? '✓' : '○'}
                         </div>

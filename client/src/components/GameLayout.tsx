@@ -321,8 +321,8 @@ const GameLayout: React.FC<GameLayoutProps> = ({ playerId }) => {
                 return;
             }
 
-            // Handle room descriptions and item obtained as toasts
-            if (['room_description', 'item_obtained'].includes(message.message_type)) {
+            // Handle room descriptions, item obtained, and quest completion as toasts
+            if (['room_description', 'item_obtained', 'quest_completion'].includes(message.message_type)) {
                 const isAlreadyInToasts = activeToasts.some(
                     t => `${t.timestamp}-${t.message_type}` === messageId
                 );
@@ -345,17 +345,16 @@ const GameLayout: React.FC<GameLayoutProps> = ({ playerId }) => {
 
     if (!player || !currentRoom) {
         return (
-            <div className="flex items-center justify-center h-screen bg-black">
-                <div className="text-green-500 text-xl font-mono">Loading game...</div>
+            <div className="flex items-center justify-center h-screen bg-[url('/images/background/a.png')] bg-cover bg-center">
+                <div className="text-white text-xl drop-shadow-lg">Loading...</div>
             </div>
         );
     }
 
     return (
         <div className="h-screen bg-black text-green-500 font-['VT323',monospace] relative overflow-hidden" style={{ height: '100vh' }}>
-            {/* Full-screen Room Display with border */}
+            {/* Full-screen Room Display */}
             <div className="absolute inset-0">
-                <div className="absolute inset-0 border-4 md:border-8 border-double border-amber-900 pointer-events-none z-10" />
                 <RoomDisplay />
             </div>
 
@@ -480,16 +479,16 @@ const GameLayout: React.FC<GameLayoutProps> = ({ playerId }) => {
                 </div>
             </div>
 
-            {/* Item Obtained Toasts - Right Side */}
+            {/* Item Obtained & Quest Completion Toasts - Right Side */}
             <div className="fixed top-16 right-4 z-40 pointer-events-none">
                 <div className="space-y-3">
                     {activeToasts.map((toast, index) => (
-                        toast.message_type === 'item_obtained' && (
+                        (toast.message_type === 'item_obtained' || toast.message_type === 'quest_completion') && (
                             <div key={`${toast.timestamp}-${index}`} className="pointer-events-auto">
                                 <NotificationToast
                                     message={toast}
                                     onDismiss={() => handleDismissToast(toast)}
-                                    autoDismissMs={5000}
+                                    autoDismissMs={toast.message_type === 'quest_completion' ? 8000 : 5000}
                                 />
                             </div>
                         )
@@ -500,7 +499,7 @@ const GameLayout: React.FC<GameLayoutProps> = ({ playerId }) => {
             {/* Chat Display - Minimized or Expanded */}
             {isChatExpanded ? (
                 <div
-                    className="absolute top-16 bottom-0 left-0 right-0 flex flex-col z-20 transition-all duration-300"
+                    className="absolute top-16 bottom-0 left-0 right-0 flex flex-col z-50 transition-all duration-300"
                     style={{
                         paddingLeft: typeof window !== 'undefined' && window.innerWidth >= 768 ? '1.5rem' : '0.75rem',
                         paddingRight: typeof window !== 'undefined' && window.innerWidth >= 768 ? '1.5rem' : '0.75rem',
