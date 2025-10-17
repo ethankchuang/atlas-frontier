@@ -18,7 +18,7 @@ import apiService from '@/services/api';
 import websocketService from '@/services/websocket';
 import { ChatMessage, Room } from '@/types/game';
 import PauseMenu from '@/components/PauseMenu';
-import { ChevronUpIcon, ChevronDownIcon, Bars3Icon } from '@heroicons/react/24/solid';
+import { ChevronDownIcon, Bars3Icon } from '@heroicons/react/24/solid';
 
 interface GameLayoutProps {
     playerId: string;

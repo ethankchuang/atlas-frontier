@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { ChatMessage } from '@/types/game';
 
 interface QuestStorylineOverlayProps {
@@ -8,6 +8,11 @@ interface QuestStorylineOverlayProps {
 
 const QuestStorylineOverlay: React.FC<QuestStorylineOverlayProps> = ({ message, onDismiss }) => {
     const [isVisible, setIsVisible] = useState(false);
+
+    const handleDismiss = useCallback(() => {
+        setIsVisible(false);
+        setTimeout(onDismiss, 500);
+    }, [onDismiss]);
 
     useEffect(() => {
         // Fade in animation
@@ -19,12 +24,7 @@ const QuestStorylineOverlay: React.FC<QuestStorylineOverlayProps> = ({ message, 
         }, 10000);
 
         return () => clearTimeout(timer);
-    }, []);
-
-    const handleDismiss = () => {
-        setIsVisible(false);
-        setTimeout(onDismiss, 500);
-    };
+    }, [handleDismiss]);
 
     return (
         <div 
