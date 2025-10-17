@@ -409,10 +409,10 @@ const ChatInput: React.FC = () => {
                     // Handle quest completion if it occurred
                     if (response.quest_completion) {
                         console.log('[NPC] Quest completed via NPC interaction:', response.quest_completion);
-                        const quest_data = response.quest_completion.quest || {};
-                        const quest_name = quest_data.name || 'Unknown Quest';
-                        const gold_reward = response.quest_completion.gold_reward || 0;
-                        const badge_name = response.quest_completion.badge_id || '';
+                        const quest_data = response.quest_completion.quest as Record<string, unknown> | undefined;
+                        const quest_name = (quest_data?.name as string) || 'Unknown Quest';
+                        const gold_reward = (response.quest_completion.gold_reward as number) || 0;
+                        const badge_name = (response.quest_completion.badge_id as string) || '';
                         
                         let completion_text = `🎉 **Quest Complete: ${quest_name}**\n`;
                         completion_text += `💰 Earned ${gold_reward} gold`;
@@ -544,12 +544,13 @@ const ChatInput: React.FC = () => {
                         if (response.updates?.quest_item_found) {
                             console.log('[ChatInput] Quest item found:', response.updates.quest_item_found);
                             const store = useGameStore.getState();
-                            const questItem = response.updates.quest_item_found as any;
+                            const questItemData = response.updates.quest_item_found as Record<string, unknown>;
 
                             // Add the quest item data to the items store
-                            if (questItem.id && questItem.name) {
-                                store.upsertItems([questItem]);
-                                console.log('[ChatInput] Loaded quest item data into store:', questItem.name);
+                            if (questItemData.id && questItemData.name) {
+                                // Cast to unknown first, then to the expected type for upsertItems
+                                store.upsertItems([questItemData as unknown as { id: string; name: string; description: string; properties: Record<string, string> }]);
+                                console.log('[ChatInput] Loaded quest item data into store:', questItemData.name);
                             }
                         }
 
