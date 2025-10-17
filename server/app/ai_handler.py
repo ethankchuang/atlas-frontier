@@ -482,9 +482,10 @@ class AIHandler:
             "NPC DIALOGUE GUIDELINES:",
             " If the player clearly speaks to an NPC (e.g., greets them, asks them something, tries to converse):",
             "  - Describe the player's attempt to communicate with the NPC in your narrative response",
-            "  - The NPC will respond based on their personality, dialogue style, and knowledge areas",
-            "  - NPCs are friendly by default and will engage in conversation",
-            "  - Players can ask NPCs about quests, local knowledge, or just chat",
+            "  - The NPC will respond with 1-2 punchy, engaging sentences based on their personality and knowledge",
+            "  - NPCs are chatty and personable - they have opinions and unique ways of speaking",
+            "  - NPCs will include direct dialogue in quotes and show character through their responses",
+            "  - Players can ask NPCs about quests, local knowledge, or just chat - NPCs will respond enthusiastically",
             "  - Example: player says 'talk to the merchant' → 'You approach the merchant, who looks up from their wares with a welcoming smile'",
             "",
             f"{WORLD_CONFIG['creature_term'].upper()} DIALOGUE GUIDELINES:",
@@ -845,7 +846,7 @@ class AIHandler:
 
         json_template = '''
 {
-    "response": "The NPC's concise response (1-2 sentences max)",
+    "response": "The NPC's engaging response (1-2 sentences). Be chatty, add personality, and make dialogue feel natural and immersive with direct quotes.",
     "memory": "A brief memory to store about this interaction"
 }
 '''
@@ -868,10 +869,19 @@ IMPORTANT:
 - Reference your backstory when appropriate: {npc_backstory}
 - If the player asks about quests or hints, you may subtly incorporate: {npc_quest_hint}
 - Speak according to your current mood: {npc_mood}
+- Be conversational and engaging - NPCs should feel alive and have personality!
+- Include actual dialogue in quotes when appropriate
+- Add personality flourishes, reactions, and character details
 
 Context: {json.dumps(context)}
 
-CRITICAL: Keep NPC responses to 1-2 sentences maximum. Focus only on the most important information. Remove all fluff and unnecessary elaboration. Stay in character as the NPC with their unique personality.
+DIALOGUE GUIDELINES:
+- Keep responses to 1-2 sentences but make them count!
+- Include direct speech in quotes (e.g., "Well now," she says with a grin, "...")
+- Add character actions and reactions (e.g., *adjusts their spectacles*, *leans in closer*)
+- Let the NPC's personality shine through their word choice and manner
+- Make conversations feel natural and immersive, not robotic
+- NPCs can ask questions back, express opinions, or share brief insights
 
 Return a JSON object with this exact structure:
 {json_template}
@@ -880,10 +890,10 @@ Return a JSON object with this exact structure:
         response = await client.chat.completions.create(
             model="gpt-4.1-nano-2025-04-14",
             messages=[
-                {"role": "system", "content": f"You are {npc_name}, an NPC in a {WORLD_CONFIG['setting_primary']} {WORLD_CONFIG['setting_secondary']} {WORLD_CONFIG['game_type']}. Your dialogue style is: {npc_dialogue_style}. Your knowledge areas are: {npc_knowledge}. Keep responses concise (1-2 sentences maximum). Stay in character and use your unique personality traits. Focus only on essential information and remove all fluff. Always return clean JSON without any comments."},
+                {"role": "system", "content": f"You are {npc_name}, an NPC in a {WORLD_CONFIG['setting_primary']} {WORLD_CONFIG['setting_secondary']} {WORLD_CONFIG['game_type']}. Your dialogue style is: {npc_dialogue_style}. Your knowledge areas are: {npc_knowledge}. Be chatty and engaging! Use 1-2 punchy sentences to bring your personality to life. Include direct dialogue in quotes, character actions, and personality details. Make conversations feel natural and immersive. Stay in character and let your unique personality shine through. Always return clean JSON without any comments."},
                 {"role": "user", "content": prompt}
             ],
-            temperature=0.7
+            temperature=0.8
         )
 
         # Clean the response content to handle potential control characters

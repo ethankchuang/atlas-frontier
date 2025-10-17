@@ -2538,23 +2538,83 @@ async def process_action_stream(
 
                                 # Track NPC interactions (talk to, speak with, etc.)
                                 npc_interaction_keywords = ['talk', 'speak', 'chat', 'converse', 'ask', 'tell', 'greet']
+                                npc_dialogue_generated = False
                                 if any(keyword in action_request.action.lower() for keyword in npc_interaction_keywords):
-                                    # Check if there's an NPC in the response (can be 'npc' or 'npcs')
+                                    # Check if there's an NPC in the room that matches the interaction
+                                    target_npc = None
+
+                                    # First, check if AI identified an NPC in updates
                                     npc_data = None
                                     if chunk.get('updates', {}).get('npc'):
                                         npc_data = chunk['updates']['npc']
                                     elif chunk.get('updates', {}).get('npcs') and len(chunk['updates']['npcs']) > 0:
                                         npc_data = chunk['updates']['npcs'][0]  # Get first NPC
 
-                                    if npc_data:
+                                    # If AI identified an NPC, find it in the room's NPCs
+                                    if npc_data and npc_data.get('name'):
                                         npc_name = npc_data.get('name', '')
-                                        if npc_name:
-                                            quest_result = await quest_manager.check_objectives(
-                                                action_request.player_id, action_request.action, 'talk_npc', {'npc_name': npc_name}
+                                        for room_npc in npcs:
+                                            if room_npc.name.lower() == npc_name.lower():
+                                                target_npc = room_npc
+                                                break
+
+                                    # If no NPC identified by AI, but action contains talk keywords and there's only one NPC in room
+                                    if not target_npc and len(npcs) == 1:
+                                        target_npc = npcs[0]
+
+                                    # If we found an NPC to talk to, generate their dialogue
+                                    if target_npc:
+                                        try:
+                                            from .ai_handler import AIHandler
+
+                                            # Get NPC's relevant memories (last 5 interactions)
+                                            relevant_memories = target_npc.memory_log[-5:] if hasattr(target_npc, 'memory_log') and target_npc.memory_log else []
+
+                                            # Generate NPC dialogue
+                                            npc_response, npc_memory = await AIHandler.process_npc_interaction(
+                                                message=action_request.action,
+                                                npc=target_npc,
+                                                player=player,
+                                                room=room,
+                                                relevant_memories=relevant_memories
                                             )
-                                            if quest_result and quest_result.get('type') == 'quest_completed':
-                                                quest_completion_message = quest_result
-                                            logger.info(f"[Quest] Tracked NPC interaction with '{npc_name}' for player {action_request.player_id}")
+
+                                            # Update NPC's memory and dialogue history
+                                            if hasattr(target_npc, 'memory_log'):
+                                                target_npc.memory_log.append(npc_memory)
+                                            else:
+                                                target_npc.memory_log = [npc_memory]
+
+                                            if hasattr(target_npc, 'dialogue_history'):
+                                                target_npc.dialogue_history.append({
+                                                    'player_id': action_request.player_id,
+                                                    'player_message': action_request.action,
+                                                    'npc_response': npc_response,
+                                                    'timestamp': datetime.now().isoformat()
+                                                })
+
+                                            # Save updated NPC
+                                            await game_manager.db.set_npc(target_npc.id, target_npc.dict())
+
+                                            # Append NPC dialogue to the response
+                                            if chunk.get("response"):
+                                                chunk["response"] += f"\n\n{npc_response}"
+                                            else:
+                                                chunk["response"] = npc_response
+
+                                            npc_dialogue_generated = True
+                                            logger.info(f"[NPC Dialogue] Generated dialogue from {target_npc.name} for player {action_request.player_id}")
+
+                                        except Exception as e:
+                                            logger.error(f"[NPC Dialogue] Error generating NPC dialogue: {str(e)}")
+
+                                        # Track quest objectives
+                                        quest_result = await quest_manager.check_objectives(
+                                            action_request.player_id, action_request.action, 'talk_npc', {'npc_name': target_npc.name}
+                                        )
+                                        if quest_result and quest_result.get('type') == 'quest_completed':
+                                            quest_completion_message = quest_result
+                                        logger.info(f"[Quest] Tracked NPC interaction with '{target_npc.name}' for player {action_request.player_id}")
 
                                 # Track item taken (check if item was awarded and variables exist)
                                 if 'item_id' in locals() and 'item_data' in locals() and item_id and item_data:
