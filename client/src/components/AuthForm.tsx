@@ -189,59 +189,86 @@ const AuthForm: React.FC<AuthFormProps> = ({ onSuccess }) => {
     };
 
     return (
-        <div className="w-[448px] p-6 bg-gray-800/60 backdrop-blur-md rounded-lg shadow-xl">
-            <h1 className="text-3xl font-bold text-white text-center mb-2">
-                Eternal Engine
-            </h1>
-            <p className="text-center text-gray-300 mb-8">
-                Inifinite AI-Powered Multiplayer World
-            </p>
+        <div className="w-full max-w-md mx-4 p-6 bg-black/70 backdrop-blur-xl rounded-2xl shadow-2xl border-2 border-amber-500/30">
+            {/* Hero Title */}
+            <div className="text-center mb-6">
+                <h1 className="text-4xl md:text-5xl font-bold mb-2 bg-gradient-to-r from-amber-400 via-yellow-300 to-amber-400 bg-clip-text text-transparent drop-shadow-[0_0_30px_rgba(251,191,36,0.5)]">
+                    Eternal Engine
+                </h1>
+                <div className="h-1 w-32 mx-auto bg-gradient-to-r from-transparent via-amber-500 to-transparent rounded-full mb-3" />
+                <p className="text-base text-amber-200/90 font-medium">
+                    Infinite AI-Powered Adventure Awaits
+                </p>
+            </div>
 
-            <div className="flex mb-6">
+            {/* Tab Navigation */}
+            <div className="flex gap-2 mb-6">
                 <button
                     type="button"
                     onClick={() => setMode('guest')}
-                    className={`flex-1 py-2 px-4 rounded-l-lg font-medium transition-colors ${
-                        mode === 'guest' 
-                            ? 'bg-green-600 text-white' 
-                            : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                    className={`flex-1 py-3 px-4 rounded-xl font-bold leading-none cursor-pointer text-center ${
+                        mode === 'guest'
+                            ? 'bg-gradient-to-r from-emerald-600 to-green-600 text-white shadow-lg shadow-green-500/30'
+                            : 'bg-gray-800/60 text-gray-300 hover:bg-gray-700/60'
                     }`}
                 >
-                    Play Now
+                    🎮 Play Now
                 </button>
                 <button
                     type="button"
                     onClick={() => setMode('login')}
-                    className={`flex-1 py-2 px-4 font-medium transition-colors ${
-                        mode === 'login' 
-                            ? 'bg-blue-600 text-white' 
-                            : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                    className={`flex-1 py-3 px-4 rounded-xl font-bold leading-none cursor-pointer text-center ${
+                        mode === 'login'
+                            ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg shadow-blue-500/30'
+                            : 'bg-gray-800/60 text-gray-300 hover:bg-gray-700/60'
                     }`}
                 >
-                    Login
+                    🔐 Login
                 </button>
                 <button
                     type="button"
                     onClick={() => setMode('register')}
-                    className={`flex-1 py-2 px-4 rounded-r-lg font-medium transition-colors ${
-                        mode === 'register' 
-                            ? 'bg-blue-600 text-white' 
-                            : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                    className={`flex-1 py-3 px-4 rounded-xl font-bold leading-none cursor-pointer text-center ${
+                        mode === 'register'
+                            ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg shadow-blue-500/30'
+                            : 'bg-gray-800/60 text-gray-300 hover:bg-gray-700/60'
                     }`}
                 >
-                    Register
+                    ⚡ Register
                 </button>
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-4">
                 {mode === 'guest' && (
-                    <div className="text-center py-4">
-                        <p className="text-gray-300 mb-4">
-                            Play as guest. No account required.
-                        </p>
-                        <p className="text-sm text-gray-300">
-                            Create a free account later to save your progress.
-                        </p>
+                    <div className="space-y-4">
+                        {/* Feature highlights */}
+                        <div className="grid grid-cols-3 gap-3 text-center py-1">
+                            <div className="flex flex-col items-center gap-1">
+                                <div className="text-3xl">✨</div>
+                                <div className="text-xs text-amber-300 font-semibold">AI Powered</div>
+                            </div>
+                            <div className="flex flex-col items-center gap-1">
+                                <div className="text-3xl">🗺️</div>
+                                <div className="text-xs text-amber-300 font-semibold">Infinite Worlds</div>
+                            </div>
+                            <div className="flex flex-col items-center gap-1">
+                                <div className="text-3xl">🤝</div>
+                                <div className="text-xs text-amber-300 font-semibold">Meet Players</div>
+                            </div>
+                        </div>
+
+                        {/* Guest mode benefits */}
+                        <div className="bg-emerald-900/30 border border-emerald-500/30 rounded-lg p-3">
+                            <div className="flex items-start gap-2">
+                                <div className="text-xl">✨</div>
+                                <div>
+                                    <h3 className="text-emerald-300 font-bold text-base mb-1">Jump Right In!</h3>
+                                    <p className="text-emerald-200/80 text-sm">
+                                        No sign-up needed. Start your adventure instantly. Create an account anytime to save your progress.
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 )}
                 
@@ -324,25 +351,54 @@ const AuthForm: React.FC<AuthFormProps> = ({ onSuccess }) => {
                             usernameAvailable === false // block only if explicitly taken
                         ))
                     }
-                    className={`w-full py-3 px-4 text-white rounded-lg transition-colors focus:outline-none focus:ring-2 disabled:opacity-50 disabled:cursor-not-allowed ${
-                        mode === 'guest' 
-                            ? 'bg-green-600 hover:bg-green-700 focus:ring-green-500' 
-                            : 'bg-blue-600 hover:bg-blue-700 focus:ring-blue-500'
-                    }`}
+                    className={`
+                        w-full py-4 px-6
+                        text-xl font-bold text-white leading-none
+                        rounded-xl
+                        cursor-pointer
+                        focus:outline-none
+                        disabled:opacity-50 disabled:cursor-not-allowed
+                        shadow-lg
+                        ${mode === 'guest'
+                            ? 'bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-500 hover:to-green-500 shadow-green-500/30'
+                            : 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 shadow-blue-500/30'
+                        }
+                    `}
                 >
-                    {isLoading ? 'Please wait...' : 
-                     mode === 'register' ? 'Create Free Account' : 
-                     mode === 'guest' ? 'Start Playing for Free' : 'Login'}
+                    {isLoading ? (
+                        <span className="flex items-center justify-center gap-2">
+                            <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
+                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                            </svg>
+                            {mode === 'guest' ? 'Entering World...' : 'Please wait...'}
+                        </span>
+                    ) : mode === 'register' ? (
+                        <span className="flex items-center justify-center gap-2">
+                            ⚡ Create Free Account
+                        </span>
+                    ) : mode === 'guest' ? (
+                        <span className="flex items-center justify-center gap-2">
+                            🚀 Start Playing Now
+                        </span>
+                    ) : (
+                        'Login'
+                    )}
                 </button>
             </form>
 
-            <div className="mt-6 text-sm text-gray-300 text-center">
-                <p className="mt-2">
-                    {mode === 'register' 
-                        ? 'Create an account to save your progress and begin your adventure.'
+            {/* Footer text */}
+            <div className="mt-4 pt-4 border-t border-amber-500/20">
+                <p className="text-sm text-amber-200/80 text-center leading-relaxed">
+                    {mode === 'register'
+                        ? 'Create an account to save your progress and unlock the full adventure.'
                         : mode === 'guest'
-                        ? 'Join thousands of players online in the infinite sandbox.'
-                        : 'Login to continue your adventure.'
+                        ? (
+                            <>
+                                Join you friends in exploring infinite AI-generated worlds. Every quest is unique, every story is yours.
+                            </>
+                        )
+                        : 'Welcome back! Your adventure continues...'
                     }
                 </p>
             </div>

@@ -248,53 +248,98 @@ export default function Home() {
     // If authenticated but not in game, show join game screen
     if ((isAuthenticated || user?.is_anonymous) && user) {
         const isAnonymous = user.is_anonymous;
-        
+
         return (
             <BackgroundContainer>
-                <div className="max-w-md w-full p-6 bg-gray-800/40 backdrop-blur-md rounded-lg shadow-xl">
-                    <div className="text-center mb-6">
-                        <h1 className="text-3xl font-bold text-white mb-4">
-                            {isAnonymous ? `Welcome, ${user.username}!` : `Welcome, ${user.username}!`}
-                        </h1>
-                        <p className="text-gray-300">
-                            {isAnonymous ? 'Ready to try the game as a guest?' : 'Ready to begin your adventure?'}
-                        </p>
-                        {isAnonymous && (
-                            <p className="text-sm text-yellow-400 mt-2">
-                                Playing as guest - create an account to save your progress
-                            </p>
-                        )}
-                    </div>
-
-                    {error && (
-                        <div className="mb-4 p-3 bg-red-600/20 border border-red-500 rounded-lg">
-                            <p className="text-red-400 text-sm">{error}</p>
+                <div className="max-w-md w-full mx-4">
+                    {/* Main game card */}
+                    <div className="bg-black/60 backdrop-blur-xl rounded-2xl border-2 border-amber-500/30 shadow-2xl shadow-amber-500/20 p-6">
+                        {/* Glowing title card */}
+                        <div className="text-center mb-6 animate-fadeIn">
+                            <div className="inline-block">
+                                <h1 className="text-4xl md:text-5xl font-bold mb-2 bg-gradient-to-r from-amber-400 via-yellow-300 to-amber-400 bg-clip-text text-transparent drop-shadow-[0_0_30px_rgba(251,191,36,0.5)]">
+                                    {isAnonymous ? `Welcome, ${user.username}` : `Welcome, ${user.username}`}
+                                </h1>
+                                <div className="h-1 bg-gradient-to-r from-transparent via-amber-500 to-transparent rounded-full" />
+                            </div>
                         </div>
-                    )}
+                        {/* Game features */}
+                        <div className="grid grid-cols-3 gap-3 mb-4 text-center">
+                            <div className="flex flex-col items-center gap-1">
+                                <div className="text-2xl">✨</div>
+                                <div className="text-xs text-amber-300 font-semibold">AI Powered</div>
+                            </div>
+                            <div className="flex flex-col items-center gap-1">
+                                <div className="text-2xl">🗺️</div>
+                                <div className="text-xs text-amber-300 font-semibold">Infinite Worlds</div>
+                            </div>
+                            <div className="flex flex-col items-center gap-1">
+                                <div className="text-2xl">🤝</div>
+                                <div className="text-xs text-amber-300 font-semibold">Meet Players</div>
+                            </div>
+                        </div>
 
-                    <div className="space-y-4">
+                        {error && (
+                            <div className="mb-4 p-3 bg-red-900/40 border-2 border-red-500/50 rounded-lg backdrop-blur-sm">
+                                <p className="text-red-300 text-sm font-medium text-center">{error}</p>
+                            </div>
+                        )}
+
+                        {/* CTA Button */}
                         <button
                             onClick={handleJoinGame}
                             disabled={isLoading}
-                            className={`w-full py-3 px-4 text-white rounded-lg transition-colors focus:outline-none focus:ring-2 disabled:opacity-50 ${
-                                isAnonymous
-                                    ? 'bg-green-600 hover:bg-green-700 focus:ring-green-500'
-                                    : 'bg-blue-600 hover:bg-blue-700 focus:ring-blue-500'
-                            }`}
+                            className={`
+                                w-full py-4 px-6 mb-4
+                                text-xl font-bold text-white leading-none
+                                rounded-xl
+                                cursor-pointer
+                                focus:outline-none
+                                disabled:opacity-50 disabled:cursor-not-allowed
+                                shadow-lg
+                                ${isAnonymous
+                                    ? 'bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-500 hover:to-green-500 shadow-green-500/30'
+                                    : 'bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 shadow-amber-500/30'
+                                }
+                            `}
                         >
-                            {isLoading ? 'Entering world...' : isAnonymous ? 'Continue Playing as Guest' : 'Begin Adventure'}
+                            {isLoading ? (
+                                <span className="flex items-center justify-center gap-2">
+                                    <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
+                                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                                    </svg>
+                                    Entering World...
+                                </span>
+                            ) : (
+                                <span className="flex items-center justify-center gap-2">
+                                    🎮 {isAnonymous ? 'Start Playing' : 'Enter the World'}
+                                </span>
+                            )}
                         </button>
-                        
+
+                        {isAnonymous && (
+                            <div className="mb-3 p-2 bg-yellow-900/30 border border-yellow-500/30 rounded-lg">
+                                <p className="text-yellow-300 text-sm text-center">
+                                    💡 <span className="font-semibold">Guest Mode:</span> Create an account to save your progress!
+                                </p>
+                            </div>
+                        )}
+
+                        {/* Secondary button */}
                         <button
                             onClick={handleLogout}
-                            className="w-full py-2 px-4 bg-gray-700 text-gray-300 rounded-lg hover:bg-gray-600 transition-colors focus:outline-none focus:ring-2 focus:ring-gray-500"
+                            className="w-full py-2.5 px-4 bg-gray-800/60 text-gray-300 rounded-lg hover:bg-gray-700/60 cursor-pointer focus:outline-none focus:ring-2 focus:ring-gray-500/50 border border-gray-600/30"
                         >
-                            {isAnonymous ? 'Back to Login' : 'Logout'}
+                            {isAnonymous ? '← Back to Login' : 'Logout'}
                         </button>
-                    </div>
 
-                    <div className="mt-6 text-sm text-gray-400 text-center">
-                        <p>Explore a dynamic world generated completely by AI, interact with other players, and create your own adventures.</p>
+                        {/* Flavor text */}
+                        <div className="mt-4 pt-4 border-t border-amber-500/20">
+                            <p className="text-amber-200/80 text-sm text-center leading-relaxed">
+                                Embark on an <span className="text-amber-400 font-semibold">AI-generated adventure</span> where every quest is unique, every battle is strategic, and your choices shape the world.
+                            </p>
+                        </div>
                     </div>
                 </div>
             </BackgroundContainer>
