@@ -12,16 +12,11 @@ const PauseMenu: React.FC<PauseMenuProps> = ({ onOpenQuestLog, onOpenBadges }) =
     const { isMenuOpen, setIsMenuOpen, player, user, setPlayer } = useGameStore();
     const [view, setView] = useState<'root' | 'inventory' | 'tutorial'>('root');
     const [showGuestConversion, setShowGuestConversion] = useState(false);
-    const [isFirstTime, setIsFirstTime] = useState(false);
 
-    // Reset to root or tutorial each time menu opens
+    // Reset to root each time menu opens
     useEffect(() => {
         if (isMenuOpen) {
-            const hasSeenTutorial = localStorage.getItem('tutorial_seen');
-            const firstTime = !hasSeenTutorial;
-            setIsFirstTime(firstTime);
-            // If first time, show tutorial; otherwise show root
-            setView(firstTime ? 'tutorial' : 'root');
+            setView('root');
         }
     }, [isMenuOpen]);
 
@@ -148,18 +143,9 @@ const PauseMenu: React.FC<PauseMenuProps> = ({ onOpenQuestLog, onOpenBadges }) =
                                 <h2 className="text-xl sm:text-2xl text-blue-400 font-bold font-mono">Tutorial</h2>
                                 <button
                                     className="px-2 sm:px-3 py-1 sm:py-1.5 bg-blue-900/40 hover:bg-blue-800/50 border border-blue-700 rounded text-blue-200 text-sm sm:text-base font-mono"
-                                    onClick={() => {
-                                        if (isFirstTime) {
-                                            // First time user - close menu and start playing
-                                            localStorage.setItem('tutorial_seen', 'true');
-                                            setIsFirstTime(false);
-                                            setIsMenuOpen(false);
-                                        } else {
-                                            setView('root');
-                                        }
-                                    }}
+                                    onClick={() => setView('root')}
                                 >
-                                    {isFirstTime ? 'Start Playing' : 'Back'}
+                                    Back
                                 </button>
                             </div>
                             <div className="space-y-2 sm:space-y-3 text-blue-200 font-mono max-h-96 overflow-y-auto pr-2">
