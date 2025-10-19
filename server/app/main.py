@@ -87,6 +87,7 @@ async def api_key_middleware(request: Request, call_next):
 class ConnectionManager:
     def __init__(self):
         self.active_connections: Dict[str, Dict[str, WebSocket]] = {}  # room_id -> {player_id: websocket}
+        self.player_last_seen: Dict[str, float] = {}  # player_id -> timestamp
 
     async def connect(self, websocket: WebSocket, room_id: str, player_id: str):
         logger.info(f"[WebSocket] New connection request - room: {room_id}, player: {player_id}")
@@ -110,6 +111,19 @@ class ConnectionManager:
         for room_id, connections in self.active_connections.items():
             summary[room_id] = len(connections)
         return str(summary)
+
+    def update_player_activity(self, player_id: str):
+        """Update the last seen timestamp for a player"""
+        import time
+        self.player_last_seen[player_id] = time.time()
+        logger.debug(f"[Heartbeat] Updated activity for player {player_id}")
+
+    def is_player_active(self, player_id: str, timeout_seconds: int = 120) -> bool:
+        """Check if a player has been active within the timeout period"""
+        import time
+        if player_id not in self.player_last_seen:
+            return False
+        return (time.time() - self.player_last_seen[player_id]) < timeout_seconds
 
     async def broadcast_to_room(self, room_id: str, message: dict, exclude_player: Optional[str] = None):
         logger.info(f"[WebSocket] Broadcasting to room {room_id} - message type: {message.get('type')}")
@@ -135,6 +149,47 @@ class ConnectionManager:
                 logger.error(f"[WebSocket] Failed to send message to player {player_id}: {str(e)}")
         else:
             logger.warning(f"[WebSocket] Player {player_id} not found in room {room_id}")
+
+    async def cleanup_inactive_players(self, game_manager):
+        """Background task to clean up inactive players from room lists"""
+        import time
+        logger.info("[Cleanup] Starting inactive player cleanup")
+        
+        current_time = time.time()
+        inactive_players = []
+        
+        # Find inactive players
+        for room_id, connections in self.active_connections.items():
+            for player_id in list(connections.keys()):
+                if not self.is_player_active(player_id, timeout_seconds=120):  # 2 minutes
+                    inactive_players.append((room_id, player_id))
+                    logger.info(f"[Cleanup] Player {player_id} in room {room_id} is inactive")
+        
+        # Remove inactive players
+        for room_id, player_id in inactive_players:
+            try:
+                # Remove from room player list in database
+                await game_manager.db.remove_from_room_players(room_id, player_id)
+                logger.info(f"[Cleanup] Removed inactive player {player_id} from room {room_id} player list")
+                
+                # Disconnect WebSocket
+                self.disconnect(room_id, player_id)
+                
+                # Broadcast disconnect to other players
+                await self.broadcast_to_room(
+                    room_id=room_id,
+                    message={"type": "presence", "player_id": player_id, "status": "disconnected"}
+                )
+                
+                # Remove from activity tracking
+                if player_id in self.player_last_seen:
+                    del self.player_last_seen[player_id]
+                    
+            except Exception as e:
+                logger.error(f"[Cleanup] Error removing inactive player {player_id}: {str(e)}")
+        
+        if inactive_players:
+            logger.info(f"[Cleanup] Cleaned up {len(inactive_players)} inactive players")
 
     async def send_personal_message(self, message: dict, player_id: str):
         """Send a personal message to a specific player (finds their room automatically)"""
@@ -540,6 +595,9 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, player_id: str)
     logger.info(f"[WebSocket] New connection request from player {player_id} for room {room_id}")
     await manager.connect(websocket, room_id, player_id)
     
+    # Update player activity on connection
+    manager.update_player_activity(player_id)
+    
     # Ensure player is in the room's player list
     try:
         room_players = await game_manager.db.get_room_players(room_id)
@@ -675,7 +733,12 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, player_id: str)
             if message is None:
                 continue
 
-            if message.get('type') == 'action':
+            if message.get('type') == 'ping':
+                logger.debug(f"[WebSocket] Received heartbeat ping from player {player_id}")
+                # Update player activity and send pong
+                manager.update_player_activity(player_id)
+                await websocket.send_json({"type": "pong"})
+            elif message.get('type') == 'action':
                 logger.info(f"[WebSocket] Received action from player {player_id}: {message['action']}")
                 # Actions are now processed only through the streaming endpoint
                 # WebSocket just acknowledges receipt but doesn't process
@@ -3201,6 +3264,24 @@ async def update_rate_limit_config(
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+# Background cleanup task
+async def cleanup_task():
+    """Background task to clean up inactive players every 2 minutes"""
+    import asyncio
+    while True:
+        try:
+            await asyncio.sleep(120)  # Wait 2 minutes
+            await manager.cleanup_inactive_players(game_manager)
+        except Exception as e:
+            logger.error(f"[Cleanup] Background cleanup task error: {str(e)}")
+
+@app.on_event("startup")
+async def startup_event():
+    """Start background tasks on server startup"""
+    import asyncio
+    logger.info("[Startup] Starting background cleanup task")
+    asyncio.create_task(cleanup_task())
 
 if __name__ == "__main__":
     import uvicorn
