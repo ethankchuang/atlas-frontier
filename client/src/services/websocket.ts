@@ -10,6 +10,7 @@ class WebSocketService {
     private nextRoomId: string | null = null;
     private isReconnecting: boolean = false;
     private playerListUpdateTimeout: NodeJS.Timeout | null = null;
+    private heartbeatInterval: NodeJS.Timeout | null = null;
 
     setNextRoom(roomId: string) {
         console.log('[WebSocket] Setting next room:', roomId);
@@ -101,6 +102,9 @@ class WebSocketService {
             playerId: this.playerId
         });
 
+        // Stop heartbeat
+        this.stopHeartbeat();
+
         if (this.socket) {
             this.socket.close();
             this.socket = null;
@@ -120,6 +124,26 @@ class WebSocketService {
         }
     }
 
+    private startHeartbeat() {
+        // Clear any existing heartbeat
+        this.stopHeartbeat();
+        
+        // Send ping every 30 seconds
+        this.heartbeatInterval = setInterval(() => {
+            if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+                console.log('[WebSocket] Sending heartbeat ping');
+                this.socket.send(JSON.stringify({ type: 'ping' }));
+            }
+        }, 30000); // 30 seconds
+    }
+
+    private stopHeartbeat() {
+        if (this.heartbeatInterval) {
+            clearInterval(this.heartbeatInterval);
+            this.heartbeatInterval = null;
+        }
+    }
+
     private setupEventListeners() {
         if (!this.socket) {
             console.error('[WebSocket] Cannot setup listeners - no socket');
@@ -134,6 +158,9 @@ class WebSocketService {
             });
             useGameStore.getState().setIsConnected(true);
             useGameStore.getState().setError(null);
+
+            // Start heartbeat
+            this.startHeartbeat();
 
             // If we have a pending update, apply it now
             if (this.pendingRoomUpdate && this.pendingRoomUpdate.id === this.roomId) {
@@ -206,6 +233,9 @@ class WebSocketService {
 
             console.log('[WebSocket] Processing message type:', type);
             switch (type) {
+                case 'pong':
+                    console.log('[WebSocket] Received heartbeat pong');
+                    break;
                 case 'chat':
                     this.handleChatMessage(data);
                     break;
