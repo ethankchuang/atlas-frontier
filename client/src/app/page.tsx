@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { useSearchParams } from 'next/navigation';
 import GameLayout from '@/components/GameLayout';
 import AuthForm from '@/components/AuthForm';
 import useGameStore from '@/store/gameStore';
@@ -38,7 +39,9 @@ export default function Home() {
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [randomBgImage, setRandomBgImage] = useState(BACKGROUND_IMAGES[0]);
+    const [autoGuestLogin, setAutoGuestLogin] = useState(false);
     
+    const searchParams = useSearchParams();
     const { 
         user, 
         player, 
@@ -52,6 +55,17 @@ export default function Home() {
     useEffect(() => {
         setRandomBgImage(BACKGROUND_IMAGES[Math.floor(Math.random() * BACKGROUND_IMAGES.length)]);
     }, []);
+
+    // Check for auto-guest login query parameter
+    useEffect(() => {
+        const playParam = searchParams.get('play');
+        const guestParam = searchParams.get('guest');
+        const autoPlay = playParam === 'true' || guestParam === 'true' || playParam === '' || guestParam === '';
+        
+        if (autoPlay) {
+            setAutoGuestLogin(true);
+        }
+    }, [searchParams]);
 
     // Check for existing auth token and player session on page load
     useEffect(() => {
@@ -349,7 +363,7 @@ export default function Home() {
     // Not authenticated, show login/register form
     return (
         <BackgroundContainer>
-            <AuthForm onSuccess={handleAuthSuccess} />
+            <AuthForm onSuccess={handleAuthSuccess} autoGuestLogin={autoGuestLogin} />
         </BackgroundContainer>
     );
 }
