@@ -8,11 +8,12 @@ import { supabase } from '@/lib/supabase';
 
 interface AuthFormProps {
     onSuccess: () => void;
+    autoGuestLogin?: boolean;
 }
 
 type FormMode = 'login' | 'register' | 'guest';
 
-const AuthForm: React.FC<AuthFormProps> = ({ onSuccess }) => {
+const AuthForm: React.FC<AuthFormProps> = ({ onSuccess, autoGuestLogin = false }) => {
     const [mode, setMode] = useState<FormMode>('guest');
     const [formData, setFormData] = useState({
         email: '',
@@ -25,6 +26,14 @@ const AuthForm: React.FC<AuthFormProps> = ({ onSuccess }) => {
     const [usernameCheckLoading, setUsernameCheckLoading] = useState(false);
 
     const { setUser, setIsAuthenticated, setPlayer } = useGameStore();
+
+    // Auto-guest login effect
+    useEffect(() => {
+        if (autoGuestLogin && !isLoading) {
+            // Automatically trigger guest login
+            handleSubmit(new Event('submit') as any);
+        }
+    }, [autoGuestLogin, isLoading]);
 
     // Username validation
     const validateUsername = (username: string): string | null => {
