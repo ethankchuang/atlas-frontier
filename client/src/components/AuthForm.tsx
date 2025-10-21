@@ -30,10 +30,58 @@ const AuthForm: React.FC<AuthFormProps> = ({ onSuccess, autoGuestLogin = false }
     // Auto-guest login effect
     useEffect(() => {
         if (autoGuestLogin && !isLoading) {
-            // Automatically trigger guest login
-            handleSubmit(new Event('submit') as any);
+            // Automatically trigger guest login by calling the guest authentication directly
+            const performGuestLogin = async () => {
+                setIsLoading(true);
+                setError(null);
+
+                try {
+                    // Sign in anonymously with Supabase
+                    const { data, error } = await supabase.auth.signInAnonymously();
+                    
+                    if (error) {
+                        throw new Error(`Anonymous sign-in failed: ${error.message}`);
+                    }
+                    
+                    if (!data.user) {
+                        throw new Error('Anonymous sign-in failed: No user data returned');
+                    }
+                    
+                    // Create a guest player using the anonymous user ID
+                    const guestResponse = await apiService.createGuestPlayer(data.user.id);
+                    
+                    // Store the Supabase session token
+                    if (data.session?.access_token) {
+                        localStorage.setItem('auth_token', data.session.access_token);
+                    }
+                    
+                    // Store player ID for session restoration
+                    localStorage.setItem('player_id', guestResponse.player.id);
+                    console.log('[Session] Saved guest player on creation:', guestResponse.player.id);
+                    
+                    setUser({
+                        id: data.user.id,
+                        username: guestResponse.player.name,
+                        email: data.user.email || 'anonymous@example.com',
+                        is_anonymous: true
+                    });
+                    setPlayer(guestResponse.player); // Set the player in the store
+                    setIsAuthenticated(true); // Anonymous users are authenticated in Supabase
+                    onSuccess();
+                } catch (error) {
+                    if (error instanceof Error) {
+                        setError(error.message);
+                    } else {
+                        setError('An unexpected error occurred');
+                    }
+                } finally {
+                    setIsLoading(false);
+                }
+            };
+
+            performGuestLogin();
         }
-    }, [autoGuestLogin, isLoading]);
+    }, [autoGuestLogin, isLoading, setUser, setPlayer, setIsAuthenticated, onSuccess]);
 
     // Username validation
     const validateUsername = (username: string): string | null => {
