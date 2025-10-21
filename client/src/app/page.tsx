@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import GameLayout from '@/components/GameLayout';
 import AuthForm from '@/components/AuthForm';
@@ -35,7 +35,8 @@ const TikTokIcon = () => (
     </svg>
 );
 
-export default function Home() {
+// Component that uses useSearchParams - needs to be wrapped in Suspense
+function HomeContent() {
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [randomBgImage, setRandomBgImage] = useState(BACKGROUND_IMAGES[0]);
@@ -365,5 +366,18 @@ export default function Home() {
         <BackgroundContainer>
             <AuthForm onSuccess={handleAuthSuccess} autoGuestLogin={autoGuestLogin} />
         </BackgroundContainer>
+    );
+}
+
+// Main Home component with Suspense boundary
+export default function Home() {
+    return (
+        <Suspense fallback={
+            <div className="flex items-center justify-center relative overflow-hidden" style={{ height: '100lvh' }}>
+                <div className="text-white text-xl">Loading...</div>
+            </div>
+        }>
+            <HomeContent />
+        </Suspense>
     );
 }
