@@ -2344,3 +2344,157 @@ class GameManager:
                 "message": f"Error combining items: {str(e)}",
                 "updates": {}
             }
+
+    # ==================== 3D Model Generation ====================
+
+    async def trigger_3d_generation(self, room_id: str) -> bool:
+        """
+        Trigger 3D model generation for a room if not already in progress.
+        Called when a player first visits a room with a ready 2D image.
+
+        Args:
+            room_id: The room ID to generate a 3D model for
+
+        Returns:
+            True if generation was triggered, False otherwise
+        """
+        from .fal_service import FALService
+        from .config import settings
+
+        if not settings.MODEL_3D_GENERATION_ENABLED:
+            return False
+
+        try:
+            room_data = await self.db.get_room(room_id)
+            if not room_data:
+                logger.warning(f"[3D Gen] Room {room_id} not found")
+                return False
+
+            # Check if 3D model already exists or is in progress
+            model_status = room_data.get('model_3d_status', 'none')
+            if model_status in ['ready', 'generating', 'pending']:
+                logger.info(f"[3D Gen] Room {room_id} already has 3D status: {model_status}")
+                return False
+
+            # Need a ready image to generate from
+            image_url = room_data.get('image_url')
+            image_status = room_data.get('image_status')
+            if not image_url or image_status != 'ready':
+                logger.info(f"[3D Gen] Room {room_id} image not ready for 3D generation (status: {image_status})")
+                return False
+
+            # Check if the image URL is a temporary one (not stored in Supabase yet)
+            if is_temporary_image_url(image_url):
+                logger.info(f"[3D Gen] Room {room_id} has temporary image URL, skipping 3D generation")
+                return False
+
+            # Submit job to FAL
+            logger.info(f"[3D Gen] Triggering 3D generation for room {room_id}")
+            request_id, error = await FALService.submit_3d_generation(image_url, room_id)
+
+            if request_id:
+                # Update room with generating status and job ID
+                room_data['model_3d_status'] = 'generating'
+                room_data['model_3d_job_id'] = request_id
+                await self.db.set_room(room_id, room_data)
+
+                # Start background polling task
+                asyncio.create_task(self._poll_3d_job(room_id, request_id))
+                logger.info(f"[3D Gen] Started 3D generation for room {room_id}, job: {request_id}")
+                return True
+            else:
+                logger.error(f"[3D Gen] Failed to submit 3D job for room {room_id}: {error}")
+                room_data['model_3d_status'] = 'error'
+                await self.db.set_room(room_id, room_data)
+                return False
+
+        except Exception as e:
+            logger.error(f"[3D Gen] Error triggering 3D generation for room {room_id}: {str(e)}")
+            import traceback
+            logger.error(f"[3D Gen] Traceback: {traceback.format_exc()}")
+            return False
+
+    async def _poll_3d_job(self, room_id: str, request_id: str, max_polls: int = 120, poll_interval: int = 10):
+        """
+        Background task to poll FAL job status until completion.
+        Polls every 10 seconds for up to 20 minutes.
+
+        Args:
+            room_id: The room ID
+            request_id: The FAL job request ID
+            max_polls: Maximum number of poll attempts (default 120 = 20 minutes)
+            poll_interval: Seconds between polls (default 10)
+        """
+        from .fal_service import FALService
+        from .model_storage import upload_model_to_supabase
+
+        logger.info(f"[3D Poll] Starting poll loop for room {room_id}, job: {request_id}")
+
+        for i in range(max_polls):
+            await asyncio.sleep(poll_interval)
+
+            try:
+                status_result = await FALService.poll_job_status(request_id)
+                status = status_result.get('status')
+
+                if i % 6 == 0:  # Log every minute
+                    logger.info(f"[3D Poll] Room {room_id} poll {i+1}/{max_polls}: {status}")
+
+                if status == 'completed':
+                    # Download and upload to Supabase
+                    result_url = status_result.get('result_url')
+                    file_size = status_result.get('file_size', 0)
+                    logger.info(f"[3D Poll] Room {room_id} job completed, file size: {file_size} bytes")
+
+                    if result_url:
+                        permanent_url = await upload_model_to_supabase(result_url, room_id)
+
+                        room_data = await self.db.get_room(room_id)
+                        if room_data:
+                            if permanent_url:
+                                room_data['model_3d_url'] = permanent_url
+                                room_data['model_3d_status'] = 'ready'
+                                logger.info(f"[3D Poll] Room {room_id} 3D model ready: {permanent_url}")
+                            else:
+                                room_data['model_3d_status'] = 'error'
+                                logger.error(f"[3D Poll] Room {room_id} failed to upload 3D model")
+                            room_data['model_3d_job_id'] = None
+                            await self.db.set_room(room_id, room_data)
+
+                            # Notify connected clients via WebSocket
+                            if self.connection_manager:
+                                try:
+                                    await self.connection_manager.broadcast_to_room(room_id, {
+                                        "type": "room_3d_update",
+                                        "room_id": room_id,
+                                        "model_3d_url": room_data.get('model_3d_url'),
+                                        "model_3d_status": room_data.get('model_3d_status')
+                                    })
+                                except Exception as ws_error:
+                                    logger.warning(f"[3D Poll] WebSocket broadcast failed: {ws_error}")
+                    return
+
+                elif status == 'failed':
+                    error = status_result.get('error', 'Unknown error')
+                    logger.error(f"[3D Poll] Room {room_id} job failed: {error}")
+
+                    room_data = await self.db.get_room(room_id)
+                    if room_data:
+                        room_data['model_3d_status'] = 'error'
+                        room_data['model_3d_job_id'] = None
+                        await self.db.set_room(room_id, room_data)
+                    return
+
+                # For 'queued' and 'in_progress', continue polling
+
+            except Exception as e:
+                logger.error(f"[3D Poll] Error polling job {request_id}: {str(e)}")
+                # Continue polling on transient errors
+
+        # Timeout - mark as error
+        logger.error(f"[3D Poll] Room {room_id} job timed out after {max_polls * poll_interval} seconds")
+        room_data = await self.db.get_room(room_id)
+        if room_data:
+            room_data['model_3d_status'] = 'error'
+            room_data['model_3d_job_id'] = None
+            await self.db.set_room(room_id, room_data)

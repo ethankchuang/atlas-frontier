@@ -19,3 +19,4 @@ aiohttp>=3.9.5
 certifi>=2024.0.0
 noise==1.2.2
 replicate==1.0.7
+fal-client>=0.5.0

@@ -79,7 +79,7 @@ app.add_middleware(
 @app.middleware("http")
 async def api_key_middleware(request: Request, call_next):
     # Check API key before processing request
-    api_key_auth(request)
+    await api_key_auth(request)
     response = await call_next(request)
     return response
 
@@ -2938,7 +2938,12 @@ async def get_room_info(room_id: str, request: Request, game_manager: GameManage
             raise HTTPException(status_code=404, detail="Room not found")
         
         room = Room(**room_data)
-        
+
+        # Trigger 3D generation if not already done (async, non-blocking)
+        # Only trigger if image is ready and 3D model doesn't exist yet
+        if room_data.get('model_3d_status', 'none') == 'none' and room_data.get('image_status') == 'ready':
+            asyncio.create_task(game_manager.trigger_3d_generation(room_id))
+
         # Get players in room
         players = []
         for player_id in room.players:

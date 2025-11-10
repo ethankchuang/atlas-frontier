@@ -59,6 +59,10 @@ class Room(BaseModel):
     players: List[str] = Field(default_factory=list)  # List of Player IDs
     visited: bool = False
     properties: Dict[str, Any] = Field(default_factory=dict)
+    # 3D Model fields (optional feature)
+    model_3d_url: Optional[str] = None
+    model_3d_status: Optional[str] = "none"  # "none", "pending", "generating", "ready", "error"
+    model_3d_job_id: Optional[str] = None  # FAL request_id for polling
 
 class Player(BaseModel):
     id: str  # Keep the existing player ID system
