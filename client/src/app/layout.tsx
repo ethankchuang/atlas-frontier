@@ -28,10 +28,6 @@ export const metadata: Metadata = {
     statusBarStyle: "black-translucent",
     title: "Eternal Engine - Infinite AI-Powered Multiplayer World",
   },
-  themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#000000" },
-    { media: "(prefers-color-scheme: dark)", color: "#000000" },
-  ],
 };
 
 export const viewport: Viewport = {
@@ -41,6 +37,10 @@ export const viewport: Viewport = {
   userScalable: false,
   viewportFit: "cover", // Allows content to extend under iOS UI
   interactiveWidget: "resizes-visual",
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#000000" },
+    { media: "(prefers-color-scheme: dark)", color: "#000000" },
+  ],
 };
 
 export default function RootLayout({

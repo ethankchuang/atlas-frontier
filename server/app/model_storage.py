@@ -137,24 +137,31 @@ async def upload_model_to_supabase(
                     zip_contents = zf.namelist()
                     logger.info(f"[Model Storage] ZIP contents: {zip_contents}")
 
-                    # Check if it contains the expected hunyuan_world structure (PLY + PNG)
-                    has_ply = any(f.endswith('.ply') for f in zip_contents)
+                    # Check what's in the ZIP
+                    glb_files = [f for f in zip_contents if f.endswith('.glb')]
+                    drc_files = [f for f in zip_contents if f.endswith('.drc')]
+                    ply_files = [f for f in zip_contents if f.endswith('.ply')]
 
-                    if has_ply:
-                        # Store the full ZIP for complete layered scene with textures
+                    logger.info(f"[Model Storage] ZIP analysis - GLB: {glb_files}, DRC: {drc_files}, PLY: {len(ply_files)} files")
+
+                    # Prefer Draco-compressed GLB if available (from export_drc=True)
+                    if glb_files:
+                        model_data = zf.read(glb_files[0])
+                        file_ext = 'glb'
+                        logger.info(f"[Model Storage] Using GLB: {glb_files[0]} ({len(model_data) / 1024 / 1024:.2f} MB)")
+                    elif drc_files:
+                        # DRC is raw Draco - would need different viewer support
+                        model_data = zf.read(drc_files[0])
+                        file_ext = 'drc'
+                        logger.info(f"[Model Storage] Using DRC: {drc_files[0]} ({len(model_data) / 1024 / 1024:.2f} MB)")
+                    elif ply_files:
+                        # Fall back to full ZIP with PLY layers (for layered scene support)
                         model_data = downloaded_data
                         file_ext = 'zip'
-                        logger.info(f"[Model Storage] Storing full ZIP ({len(model_data) / 1024 / 1024:.2f} MB)")
+                        logger.info(f"[Model Storage] No GLB/DRC found, storing full ZIP with PLY ({len(model_data) / 1024 / 1024:.2f} MB)")
                     else:
-                        # Try to find GLB
-                        glb_files = [f for f in zip_contents if f.endswith('.glb')]
-                        if glb_files:
-                            model_data = zf.read(glb_files[0])
-                            file_ext = 'glb'
-                            logger.info(f"[Model Storage] Extracted GLB: {glb_files[0]}")
-                        else:
-                            logger.error("[Model Storage] No supported 3D files found in ZIP")
-                            return None
+                        logger.error("[Model Storage] No supported 3D files found in ZIP")
+                        return None
 
             except zipfile.BadZipFile as e:
                 logger.error(f"[Model Storage] Invalid ZIP file: {str(e)}")

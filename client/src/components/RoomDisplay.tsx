@@ -247,12 +247,12 @@ const RoomDisplay: React.FC = () => {
                     </div>
                 )}
 
-                {/* 3D loading indicator - shows over 2D image while 3D loads */}
+                {/* 3D loading indicator - subtle, positioned well above messages area */}
                 {show3D && is3DLoading && (
-                    <div className="absolute inset-0 flex items-center justify-center z-30 pointer-events-none">
-                        <div className="bg-black bg-opacity-40 px-4 py-2 rounded-full flex items-center gap-2">
-                            <div className="animate-spin rounded-full h-4 w-4 border border-white border-t-transparent opacity-60"></div>
-                            <span className="text-white text-sm opacity-60">Loading 3D...</span>
+                    <div className="absolute bottom-48 left-1/2 -translate-x-1/2 z-30 pointer-events-none">
+                        <div className="bg-black/30 backdrop-blur-sm px-3 py-1 rounded text-xs text-white/40 flex items-center gap-1.5">
+                            <div className="animate-spin rounded-full h-2.5 w-2.5 border border-white/30 border-t-transparent"></div>
+                            <span>Loading 3D</span>
                         </div>
                     </div>
                 )}

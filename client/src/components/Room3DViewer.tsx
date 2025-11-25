@@ -1,8 +1,9 @@
 'use client';
 
 import React, { Suspense, useRef, useEffect, useState, useCallback } from 'react';
-import { Canvas, useFrame } from '@react-three/fiber';
-import { OrbitControls, useGLTF, PerspectiveCamera } from '@react-three/drei';
+import ReactDOM from 'react-dom';
+import { Canvas, useFrame, useThree } from '@react-three/fiber';
+import { useGLTF, PerspectiveCamera } from '@react-three/drei';
 import * as THREE from 'three';
 import { PLYLoader } from 'three/examples/jsm/loaders/PLYLoader.js';
 import JSZip from 'jszip';
@@ -21,6 +22,248 @@ interface ModelProps {
 
 interface LayeredSceneData {
     meshLayers: { name: string; geometry: THREE.BufferGeometry }[];
+}
+
+// View angle indicator that shows current look direction
+// Appears in center, fades out 2 seconds after user stops moving
+function ViewAngleIndicator({ angleRef }: { angleRef: React.MutableRefObject<number> }) {
+    const [angle, setAngle] = useState(0);
+    const [visible, setVisible] = useState(false);
+    const lastAngleRef = useRef(0);
+    const hideTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+    useEffect(() => {
+        const interval = setInterval(() => {
+            const currentAngle = angleRef.current;
+            setAngle(currentAngle);
+
+            // Check if angle changed (user is moving)
+            if (Math.abs(currentAngle - lastAngleRef.current) > 0.001) {
+                setVisible(true);
+                lastAngleRef.current = currentAngle;
+
+                // Clear existing timeout and set new one
+                if (hideTimeoutRef.current) {
+                    clearTimeout(hideTimeoutRef.current);
+                }
+                hideTimeoutRef.current = setTimeout(() => {
+                    setVisible(false);
+                }, 2000);
+            }
+        }, 50);
+
+        return () => {
+            clearInterval(interval);
+            if (hideTimeoutRef.current) {
+                clearTimeout(hideTimeoutRef.current);
+            }
+        };
+    }, [angleRef]);
+
+    // Negate angle: euler.y is negative when looking right, but SVG rotation is positive clockwise
+    const angleDeg = -(angle * 180) / Math.PI;
+
+    return (
+        <div className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 pointer-events-none transition-opacity duration-300 ${visible ? 'opacity-100' : 'opacity-0'}`}>
+            <div className="bg-black/40 backdrop-blur-sm rounded-full p-2">
+                <svg width="48" height="48" viewBox="0 0 48 48">
+                    {/* Background circle */}
+                    <circle cx="24" cy="24" r="22" fill="none" stroke="white" strokeOpacity="0.15" strokeWidth="1" />
+
+                    {/* View direction cone/fan */}
+                    <g transform={`rotate(${angleDeg}, 24, 24)`}>
+                        {/* Fan shape showing ~60° FOV */}
+                        <path
+                            d="M 24 24 L 10 6 A 22 22 0 0 1 38 6 Z"
+                            fill="white"
+                            fillOpacity="0.25"
+                        />
+                        {/* Center direction line */}
+                        <line x1="24" y1="24" x2="24" y2="4" stroke="white" strokeOpacity="0.5" strokeWidth="1.5" />
+                    </g>
+
+                    {/* Center dot */}
+                    <circle cx="24" cy="24" r="2" fill="white" fillOpacity="0.4" />
+                </svg>
+            </div>
+        </div>
+    );
+}
+
+// FPS-style camera controls matching the official Hunyuan viewer
+// - Mouse drag to look around (rotation)
+// - WASD keys to move (constrained to 0.3 units from origin)
+function FPSControls({ onAngleChange }: { onAngleChange?: (angle: number) => void }) {
+    const { camera, gl } = useThree();
+    const isPointerDown = useRef(false);
+    const previousPointer = useRef({ x: 0, y: 0 });
+    const euler = useRef(new THREE.Euler(0, 0, 0, 'YXZ'));
+    const keys = useRef({ w: false, a: false, s: false, d: false });
+
+    const MOVE_SPEED = 0.01;
+    const MAX_DISTANCE = 0.3; // Max distance from origin (matches official viewer)
+    const ROTATION_SPEED = 0.003;
+
+    useEffect(() => {
+        // Initialize camera looking forward (negative Z)
+        camera.position.set(0, 0, 0);
+        euler.current.setFromQuaternion(camera.quaternion);
+
+        const domElement = gl.domElement;
+
+        const onPointerDown = (e: PointerEvent) => {
+            isPointerDown.current = true;
+            previousPointer.current = { x: e.clientX, y: e.clientY };
+            domElement.style.cursor = 'grabbing';
+        };
+
+        const onPointerUp = () => {
+            isPointerDown.current = false;
+            domElement.style.cursor = 'grab';
+        };
+
+        const onPointerMove = (e: PointerEvent) => {
+            if (!isPointerDown.current) return;
+
+            const deltaX = e.clientX - previousPointer.current.x;
+            const deltaY = e.clientY - previousPointer.current.y;
+            previousPointer.current = { x: e.clientX, y: e.clientY };
+
+            // Rotate camera based on mouse movement
+            euler.current.y -= deltaX * ROTATION_SPEED;
+            euler.current.x -= deltaY * ROTATION_SPEED;
+
+            // Clamp vertical rotation to avoid flipping
+            euler.current.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, euler.current.x));
+            // Clamp horizontal rotation to 180° view (±90° from center)
+            euler.current.y = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, euler.current.y));
+
+            camera.quaternion.setFromEuler(euler.current);
+            onAngleChange?.(euler.current.y);
+        };
+
+        const onPointerLeave = () => {
+            isPointerDown.current = false;
+            domElement.style.cursor = 'grab';
+        };
+
+        const isInputFocused = () => {
+            const active = document.activeElement;
+            if (!active) return false;
+            const tag = active.tagName.toLowerCase();
+            return tag === 'input' || tag === 'textarea' || (active as HTMLElement).isContentEditable;
+        };
+
+        const onKeyDown = (e: KeyboardEvent) => {
+            if (isInputFocused()) return; // Don't capture WASD when typing in chat
+            const key = e.key.toLowerCase();
+            if (key in keys.current) {
+                keys.current[key as keyof typeof keys.current] = true;
+            }
+        };
+
+        const onKeyUp = (e: KeyboardEvent) => {
+            const key = e.key.toLowerCase();
+            if (key in keys.current) {
+                keys.current[key as keyof typeof keys.current] = false;
+            }
+        };
+
+        // Touch support for mobile
+        const onTouchStart = (e: TouchEvent) => {
+            if (e.touches.length === 1) {
+                isPointerDown.current = true;
+                previousPointer.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+            }
+        };
+
+        const onTouchEnd = () => {
+            isPointerDown.current = false;
+        };
+
+        const onTouchMove = (e: TouchEvent) => {
+            if (!isPointerDown.current || e.touches.length !== 1) return;
+
+            const touch = e.touches[0];
+            const deltaX = touch.clientX - previousPointer.current.x;
+            const deltaY = touch.clientY - previousPointer.current.y;
+            previousPointer.current = { x: touch.clientX, y: touch.clientY };
+
+            euler.current.y -= deltaX * ROTATION_SPEED;
+            euler.current.x -= deltaY * ROTATION_SPEED;
+            euler.current.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, euler.current.x));
+            euler.current.y = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, euler.current.y));
+
+            camera.quaternion.setFromEuler(euler.current);
+            onAngleChange?.(euler.current.y);
+        };
+
+        domElement.style.cursor = 'grab';
+        domElement.addEventListener('pointerdown', onPointerDown);
+        domElement.addEventListener('pointerup', onPointerUp);
+        domElement.addEventListener('pointermove', onPointerMove);
+        domElement.addEventListener('pointerleave', onPointerLeave);
+        domElement.addEventListener('touchstart', onTouchStart, { passive: true });
+        domElement.addEventListener('touchend', onTouchEnd);
+        domElement.addEventListener('touchmove', onTouchMove, { passive: true });
+        window.addEventListener('keydown', onKeyDown);
+        window.addEventListener('keyup', onKeyUp);
+
+        return () => {
+            domElement.removeEventListener('pointerdown', onPointerDown);
+            domElement.removeEventListener('pointerup', onPointerUp);
+            domElement.removeEventListener('pointermove', onPointerMove);
+            domElement.removeEventListener('pointerleave', onPointerLeave);
+            domElement.removeEventListener('touchstart', onTouchStart);
+            domElement.removeEventListener('touchend', onTouchEnd);
+            domElement.removeEventListener('touchmove', onTouchMove);
+            window.removeEventListener('keydown', onKeyDown);
+            window.removeEventListener('keyup', onKeyUp);
+        };
+    }, [camera, gl]);
+
+    // Handle WASD movement each frame
+    useFrame(() => {
+        const { w, a, s, d } = keys.current;
+        if (!w && !a && !s && !d) return;
+
+        // Get forward and right vectors from camera orientation
+        const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+        const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+
+        // Keep movement horizontal (no flying up/down)
+        forward.y = 0;
+        forward.normalize();
+        right.y = 0;
+        right.normalize();
+
+        const movement = new THREE.Vector3();
+        if (w) movement.add(forward);
+        if (s) movement.sub(forward);
+        if (d) movement.add(right);
+        if (a) movement.sub(right);
+
+        if (movement.length() > 0) {
+            movement.normalize().multiplyScalar(MOVE_SPEED);
+
+            // Calculate new position
+            const newPos = camera.position.clone().add(movement);
+
+            // Constrain to MAX_DISTANCE from origin (horizontal plane only)
+            const horizontalDist = Math.sqrt(newPos.x * newPos.x + newPos.z * newPos.z);
+            if (horizontalDist <= MAX_DISTANCE) {
+                camera.position.copy(newPos);
+            } else {
+                // Clamp to max distance
+                const scale = MAX_DISTANCE / horizontalDist;
+                newPos.x *= scale;
+                newPos.z *= scale;
+                camera.position.copy(newPos);
+            }
+        }
+    });
+
+    return null;
 }
 
 // Detect file type from URL (no logging - called frequently during render)
@@ -354,6 +597,7 @@ function LoadingSpinner() {
 const Room3DViewer: React.FC<Room3DViewerProps> = ({ modelUrl, onLoadError, onLoadSuccess }) => {
     const [hasError, setHasError] = useState(false);
     const [isLoading, setIsLoading] = useState(true);
+    const viewAngleRef = useRef(0);
 
     // Log on mount
     useEffect(() => {
@@ -400,8 +644,8 @@ const Room3DViewer: React.FC<Room3DViewerProps> = ({ modelUrl, onLoadError, onLo
                     handleError();
                 }}
             >
-                {/* Camera at origin looking forward */}
-                <PerspectiveCamera makeDefault position={[0, 0, 0]} fov={75} />
+                {/* Camera at origin - matches official Hunyuan viewer settings */}
+                <PerspectiveCamera makeDefault position={[0, 0, 0]} fov={75} near={0.1} far={1000} />
 
                 {/* Model with loading fallback - no lighting needed for MeshBasicMaterial */}
                 <Suspense fallback={<LoadingSpinner />}>
@@ -412,24 +656,23 @@ const Room3DViewer: React.FC<Room3DViewerProps> = ({ modelUrl, onLoadError, onLo
                     />
                 </Suspense>
 
-                {/* Orbit controls - for looking around from inside the scene */}
-                <OrbitControls
-                    enableDamping
-                    dampingFactor={0.05}
-                    enableZoom={false}
-                    enablePan={false}
-                    rotateSpeed={0.5}
-                    target={[0, 0, -1]}
-                />
+                {/* FPS-style controls - drag to look, WASD to move (like official viewer) */}
+                <FPSControls onAngleChange={(angle) => { viewAngleRef.current = angle; }} />
             </Canvas>
 
+            {/* View angle indicator - positioned below minimap, uses portal to escape z-index */}
+            {!isLoading && typeof document !== 'undefined' && ReactDOM.createPortal(
+                <ViewAngleIndicator angleRef={viewAngleRef} />,
+                document.body
+            )}
 
-            {/* Hint overlay */}
+
+            {/* Hint overlay - same level as loader, shown after loaded */}
             {!isLoading && (
-                <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2
-                                bg-black bg-opacity-60 text-white text-xs px-3 py-1 rounded
+                <div className="absolute bottom-48 left-1/2 transform -translate-x-1/2
+                                bg-black/30 backdrop-blur-sm text-white/50 text-xs px-3 py-1 rounded
                                 pointer-events-none transition-opacity duration-500">
-                    Drag to look around
+                    Drag to look around • WASD to move
                 </div>
             )}
         </div>
