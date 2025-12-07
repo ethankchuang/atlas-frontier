@@ -25,6 +25,11 @@ class Settings(BaseSettings):
     REPLICATE_IMAGE_WIDTH: int = 1024
     REPLICATE_IMAGE_HEIGHT: int = 576  # 16:9 aspect ratio (landscape)
 
+    # FAL API Settings (for 3D model generation)
+    FAL_KEY: str = ""
+    FAL_MODEL: str = "fal-ai/hunyuan_world/image-to-world"
+    MODEL_3D_GENERATION_ENABLED: bool = True
+
     # Server Settings
     HOST: str = "0.0.0.0"
     PORT: int = 8000

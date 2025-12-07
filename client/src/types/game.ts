@@ -39,6 +39,9 @@ export interface Room {
     players: string[];
     visited: boolean;
     properties: Record<string, unknown>;
+    // 3D Model fields (optional feature)
+    model_3d_url?: string;
+    model_3d_status?: 'none' | 'pending' | 'generating' | 'ready' | 'error';
 }
 
 export interface Player {

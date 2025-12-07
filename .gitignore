@@ -25,6 +25,7 @@ wheels/
 .pytest_cache/
 .coverage
 htmlcov/
+.claude/
 
 # Next.js
 .next/
