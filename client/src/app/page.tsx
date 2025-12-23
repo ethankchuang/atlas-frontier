@@ -214,7 +214,7 @@ function HomeContent() {
                     <span className="sm:hidden">follow & contact:</span>
                     <div className="flex gap-2">
                         <a
-                            href="https://twitter.com/EternalEngineGG"
+                            href="https://twitter.com/AtlasFrontierIO"
                             target="_blank"
                             rel="noopener noreferrer"
                             className="text-gray-400 hover:text-blue-400 transition-colors"
@@ -223,7 +223,7 @@ function HomeContent() {
                             <TwitterIcon />
                         </a>
                         <a
-                            href="https://instagram.com/eternalengine.gg"
+                            href="https://instagram.com/atlasfrontier.io"
                             target="_blank"
                             rel="noopener noreferrer"
                             className="text-gray-400 hover:text-pink-400 transition-colors"
@@ -232,7 +232,7 @@ function HomeContent() {
                             <InstagramIcon />
                         </a>
                         <a
-                            href="https://tiktok.com/@eternalengine.gg"
+                            href="https://tiktok.com/@atlasfrontier.io"
                             target="_blank"
                             rel="noopener noreferrer"
                             className="text-gray-400 hover:text-white transition-colors"
