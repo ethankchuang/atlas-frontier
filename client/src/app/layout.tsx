@@ -22,7 +22,52 @@ const vt323 = VT323({
 
 export const metadata: Metadata = {
   title: "Atlas Frontier - Infinite AI-Powered Multiplayer World",
-  description: "The Infinite AI-Powered Multiplayer World and Sandbox Game",
+  description: "Atlas Frontier is the infinite AI-powered multiplayer world and sandbox game. Explore, build, and play in an endless procedurally generated universe with friends.",
+  keywords: ["Atlas Frontier", "AI-powered game", "multiplayer world", "sandbox game", "infinite world", "procedural generation", "online multiplayer", "browser game", "AI game"],
+  authors: [{ name: "Atlas Frontier Team" }],
+  creator: "Atlas Frontier",
+  publisher: "Atlas Frontier",
+  applicationName: "Atlas Frontier",
+  generator: "Next.js",
+  metadataBase: new URL("https://atlasfrontier.app"),
+  alternates: {
+    canonical: "/",
+  },
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+      "max-video-preview": -1,
+      "max-image-preview": "large",
+      "max-snippet": -1,
+    },
+  },
+  openGraph: {
+    type: "website",
+    locale: "en_US",
+    url: "https://atlasfrontier.app",
+    siteName: "Atlas Frontier",
+    title: "Atlas Frontier - Infinite AI-Powered Multiplayer World",
+    description: "Atlas Frontier is the infinite AI-powered multiplayer world and sandbox game. Explore, build, and play in an endless procedurally generated universe with friends.",
+    images: [
+      {
+        url: "/og-image.png",
+        width: 1200,
+        height: 630,
+        alt: "Atlas Frontier - Infinite AI-Powered Multiplayer World",
+      },
+    ],
+  },
+  twitter: {
+    card: "summary_large_image",
+    site: "@atlasfrontier",
+    creator: "@atlasfrontier",
+    title: "Atlas Frontier - Infinite AI-Powered Multiplayer World",
+    description: "Atlas Frontier is the infinite AI-powered multiplayer world and sandbox game. Explore, build, and play in an endless procedurally generated universe with friends.",
+    images: ["/og-image.png"],
+  },
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
