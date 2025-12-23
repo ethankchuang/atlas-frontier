@@ -452,7 +452,7 @@ const AuthForm: React.FC<AuthFormProps> = ({ onSuccess, autoGuestLogin = false }
                         : mode === 'guest'
                         ? (
                             <>
-                                Join you friends in exploring infinite AI-generated worlds. Every quest is unique, every story is yours.
+                                Join your friends in exploring infinite AI-generated worlds. Every quest is unique, every story is yours.
                             </>
                         )
                         : 'Welcome back! Your adventure continues...'
