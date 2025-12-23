@@ -250,7 +250,7 @@ const AuthForm: React.FC<AuthFormProps> = ({ onSuccess, autoGuestLogin = false }
             {/* Hero Title */}
             <div className="text-center mb-6">
                 <h1 className="text-4xl md:text-5xl font-bold mb-2 bg-gradient-to-r from-amber-400 via-yellow-300 to-amber-400 bg-clip-text text-transparent drop-shadow-[0_0_30px_rgba(251,191,36,0.5)]">
-                    Eternal Engine
+                    Atlas Frontier
                 </h1>
                 <div className="h-1 w-32 mx-auto bg-gradient-to-r from-transparent via-amber-500 to-transparent rounded-full mb-3" />
                 <p className="text-base text-amber-200/90 font-medium">
