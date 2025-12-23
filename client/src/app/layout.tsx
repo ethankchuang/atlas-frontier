@@ -21,12 +21,12 @@ const vt323 = VT323({
 });
 
 export const metadata: Metadata = {
-  title: "Eternal Engine - Infinite AI-Powered Multiplayer World",
+  title: "Atlas Frontier - Infinite AI-Powered Multiplayer World",
   description: "The Infinite AI-Powered Multiplayer World and Sandbox Game",
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
-    title: "Eternal Engine - Infinite AI-Powered Multiplayer World",
+    title: "Atlas Frontier - Infinite AI-Powered Multiplayer World",
   },
   themeColor: [
     { media: "(prefers-color-scheme: light)", color: "#000000" },
