@@ -52,6 +52,8 @@ Before you begin, ensure you have the following installed:
 - **Python** (v3.11 or higher)
 - **Redis** (v7.0 or higher)
 - **OpenAI API Key** ([Get one here](https://platform.openai.com/api-keys))
+- **Replicate API Token** ([Get one here](https://replicate.com/account/api-tokens))
+- **Supabase Project** ([Create one here](https://supabase.com/dashboard))
 
 ### Installation
 
@@ -83,13 +85,30 @@ pip install -r requirements.txt
 Create a `.env` file in the `server` directory:
 
 ```env
+# AI Services
 OPENAI_API_KEY=your_openai_api_key_here
+REPLICATE_API_TOKEN=your_replicate_api_token_here
+
+# Database
 REDIS_URL=redis://localhost:6379
+SUPABASE_URL=your_supabase_project_url
+SUPABASE_ANON_KEY=your_supabase_anon_key
+SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key
+
+# Image Generation
+IMAGE_GENERATION_ENABLED=True
+IMAGE_PROVIDER=replicate
+
+# Security
 SECRET_KEY=your_secret_key_here
 DEBUG=True
 ```
 
-> **Note:** Replace `your_openai_api_key_here` with your actual OpenAI API key and generate a secure random string for `SECRET_KEY`.
+> **Note:**
+> - Get your OpenAI API key from the [OpenAI Platform](https://platform.openai.com/api-keys)
+> - Get your Replicate API token from [Replicate Settings](https://replicate.com/account/api-tokens)
+> - Get your Supabase credentials from your [Supabase Dashboard](https://supabase.com/dashboard) under Project Settings > API
+> - Generate a secure random string for `SECRET_KEY` (e.g., `openssl rand -hex 32`)
 
 #### 4. Frontend Setup
 
@@ -187,10 +206,12 @@ http://localhost:3000
 | Technology | Purpose |
 |------------|---------|
 | **FastAPI** | High-performance Python web framework |
+| **Supabase (PostgreSQL)** | Primary database for persistent game data |
+| **Supabase Storage** | Permanent image storage with CDN delivery |
 | **Redis** | Real-time state management and caching |
 | **ChromaDB** | Vector storage for AI memory and context |
-| **OpenAI GPT-4** | Natural language processing and game narration |
-| **DALL-E 3** | Dynamic scene image generation |
+| **OpenAI GPT-4.1 Nano** | Natural language processing and game narration |
+| **Flux 1.1 Pro Ultra** | AI image generation via Replicate API |
 | **WebSocket** | Real-time bidirectional communication |
 | **Pydantic** | Data validation and settings management |
 
@@ -322,7 +343,9 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 🙏 Acknowledgments
 
-- Powered by OpenAI's GPT-4 and DALL-E 3
+- Powered by OpenAI's GPT-4.1 Nano for intelligent narrative generation
+- Image generation by Black Forest Labs' Flux 1.1 Pro Ultra via Replicate
+- Data persistence by Supabase (PostgreSQL + Storage)
 - Built with modern web technologies
 - Inspired by classic MUD games and modern AI capabilities
 
