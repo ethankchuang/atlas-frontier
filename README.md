@@ -1,6 +1,6 @@
 <div align="center">
 
-![Atlas Frontier Banner](assets/banner.png)
+![Atlas Frontier Banner](assets/atlas_frontier_banner.png)
 
 # **ATLAS FRONTIER**
 
