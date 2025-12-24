@@ -13,6 +13,8 @@
 
 **A groundbreaking multiplayer text-based adventure game where AI breathes life into every interaction, creating a dynamic, ever-evolving world of limitless possibilities.**
 
+**[🎮 Play Atlas Frontier](https://www.atlasfrontier.io)**
+
 [Get Started](#-getting-started) • [Features](#-features) • [Tech Stack](#-tech-stack) • [Documentation](#-documentation)
 
 </div>
@@ -355,7 +357,15 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 **Ready to embark on your adventure?**
 
-[Start Playing](#-getting-started) • [Report Issues](https://github.com/your-repo/issues) • [Join Discussion](https://github.com/your-repo/discussions)
+**[🎮 Play Atlas Frontier](https://www.atlasfrontier.io)**
+
+[Get Started](#-getting-started) • [Report Issues](https://github.com/your-repo/issues) • [Join Discussion](https://github.com/your-repo/discussions)
+
+---
+
+**Follow Us:**
+
+[X (Twitter)](https://twitter.com/AtlasFrontierIO) • [Instagram](https://instagram.com/atlasfrontier.io) • [TikTok](https://tiktok.com/@atlasfrontier.io)
 
 ---
 
