@@ -29,7 +29,11 @@ class APIKeyAuth:
         # Skip API key check for health endpoint
         if request.url.path == "/health":
             return
-            
+
+        # Skip API key check for CORS preflight requests
+        if request.method == "OPTIONS":
+            return
+
         # Check for API key header
         api_key = request.headers.get("X-API-Key")
         
