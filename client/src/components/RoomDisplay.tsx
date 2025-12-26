@@ -49,7 +49,7 @@ const RoomDisplay: React.FC = () => {
             willRender: shouldShow3D ? '3D Viewer' : '2D Image'
         });
 
-        setShow3D(shouldShow3D);
+        setShow3D(!!shouldShow3D);
     }, [currentRoom?.model_3d_status, currentRoom?.model_3d_url, model3DError, is3DLoading]);
 
     // Reset error state when room changes
