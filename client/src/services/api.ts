@@ -792,10 +792,19 @@ class APIService {
     // ===============================
 
     async createGuestPlayer(anonymousUserId: string): Promise<{ player: Player; message: string }> {
-        return this.request<{ player: Player; message: string }>('/auth/guest', {
+        // Use the Next.js API proxy route which adds the API key server-side
+        const response = await fetch('/api/auth/guest', {
             method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ anonymous_user_id: anonymousUserId }),
         });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Failed to create guest player');
+        }
+
+        return response.json();
     }
 
     async convertGuestToUser(data: {
@@ -805,10 +814,19 @@ class APIService {
         guest_player_id: string;
         new_user_id: string;
     }): Promise<AuthResponse & { guest_converted: boolean; message: string }> {
-        return this.request<AuthResponse & { guest_converted: boolean; message: string }>('/auth/guest-to-user', {
+        // Use the Next.js API proxy route which adds the API key server-side
+        const response = await fetch('/api/auth/guest-to-user', {
             method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(data),
         });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Failed to convert guest to user');
+        }
+
+        return response.json();
     }
 }
 
