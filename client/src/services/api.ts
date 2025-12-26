@@ -51,7 +51,8 @@ class APIService {
             (headers as Record<string, string>)['Authorization'] = `Bearer ${token}`;
         }
 
-        const response = await fetch(`${API_URL}${endpoint}`, {
+        // Route all requests through the Next.js API proxy which adds the API key server-side
+        const response = await fetch(`/api/game${endpoint}`, {
             ...options,
             headers,
         });

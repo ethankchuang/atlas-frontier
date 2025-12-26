@@ -84,10 +84,16 @@ async def api_key_middleware(request: Request, call_next):
         await api_key_auth(request)
     except HTTPException as exc:
         # HTTPException raised in middleware won't be handled by FastAPI's exception handlers
-        # so we need to return a proper response here
+        # We need to return a proper response with CORS headers since this bypasses the CORS middleware
+        origin = request.headers.get("origin", "")
+        headers = {}
+        if origin and (allowed_origins == ["*"] or origin in allowed_origins):
+            headers["Access-Control-Allow-Origin"] = origin
+            headers["Access-Control-Allow-Credentials"] = "true"
         return JSONResponse(
             status_code=exc.status_code,
-            content={"detail": exc.detail}
+            content={"detail": exc.detail},
+            headers=headers
         )
     response = await call_next(request)
     return response
