@@ -26,6 +26,7 @@ wheels/
 .coverage
 htmlcov/
 .claude/
+server/data/chroma/
 
 # Next.js
 .next/
