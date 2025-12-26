@@ -2,8 +2,6 @@ import { ActionRequest, ActionResponse, ChatMessage, GameState, Item, NPCInterac
 import { AuthResponse, RegisterRequest, LoginRequest, RegisterResponse, User, UsernameAvailability } from '@/types/auth';
 import useGameStore from '@/store/gameStore';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-
 class APIService {
     private getAuthToken(): string | null {
         if (typeof window === 'undefined') return null;
