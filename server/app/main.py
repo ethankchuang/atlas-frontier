@@ -1,4 +1,5 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Request, status
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Dict, List, Optional, Any
 import json
@@ -79,7 +80,15 @@ app.add_middleware(
 @app.middleware("http")
 async def api_key_middleware(request: Request, call_next):
     # Check API key before processing request
-    await api_key_auth(request)
+    try:
+        await api_key_auth(request)
+    except HTTPException as exc:
+        # HTTPException raised in middleware won't be handled by FastAPI's exception handlers
+        # so we need to return a proper response here
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"detail": exc.detail}
+        )
     response = await call_next(request)
     return response
 
