@@ -29,7 +29,7 @@ export const metadata: Metadata = {
   publisher: "Atlas Frontier",
   applicationName: "Atlas Frontier",
   generator: "Next.js",
-  metadataBase: new URL("https://atlasfrontier.app"),
+  metadataBase: new URL("https://atlasfrontier.io"),
   alternates: {
     canonical: "/",
   },
@@ -47,7 +47,7 @@ export const metadata: Metadata = {
   openGraph: {
     type: "website",
     locale: "en_US",
-    url: "https://atlasfrontier.app",
+    url: "https://atlasfrontier.io",
     siteName: "Atlas Frontier",
     title: "Atlas Frontier - Infinite AI-Powered Multiplayer World",
     description: "Atlas Frontier is the infinite AI-powered multiplayer world and sandbox game. Explore, build, and play in an endless procedurally generated universe with friends.",
@@ -95,6 +95,19 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
+      <head>
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{
+            __html: JSON.stringify({
+              "@context": "https://schema.org",
+              "@type": "WebSite",
+              "name": "Atlas Frontier",
+              "url": "https://atlasfrontier.io"
+            })
+          }}
+        />
+      </head>
       <body
         className={`${geistSans.variable} ${geistMono.variable} ${vt323.variable} antialiased`}
       >
