@@ -207,12 +207,6 @@ function HomeContent() {
             <div className="relative z-10">
                 {children}
             </div>
-            {/* Name change note at bottom left */}
-            <div className="fixed left-4 z-20" style={{ bottom: 'max(1rem, env(safe-area-inset-bottom))' }}>
-                <div className="text-xs text-gray-400 bg-black/60 backdrop-blur-sm px-3 py-2 rounded-lg border border-gray-700/50">
-                    <span className="italic">Formerly known as Eternal Engine</span>
-                </div>
-            </div>
             {/* Footer with social links */}
             <div className="fixed right-4 z-20" style={{ bottom: 'max(1rem, env(safe-area-inset-bottom))' }}>
                 <div className="flex items-center gap-2 text-xs text-gray-400 bg-black/60 backdrop-blur-sm px-3 py-2 rounded-lg border border-gray-700/50">
@@ -224,27 +218,33 @@ function HomeContent() {
                             target="_blank"
                             rel="noopener noreferrer"
                             className="text-gray-400 hover:text-blue-400 transition-colors"
-                            aria-label="Twitter"
+                            aria-label="Atlas Frontier on Twitter"
+                            title="Atlas Frontier on Twitter"
                         >
                             <TwitterIcon />
+                            <span className="sr-only">Atlas Frontier on Twitter</span>
                         </a>
                         <a
                             href="https://instagram.com/atlasfrontier.io"
                             target="_blank"
                             rel="noopener noreferrer"
                             className="text-gray-400 hover:text-pink-400 transition-colors"
-                            aria-label="Instagram"
+                            aria-label="Atlas Frontier on Instagram"
+                            title="Atlas Frontier on Instagram"
                         >
                             <InstagramIcon />
+                            <span className="sr-only">Atlas Frontier on Instagram</span>
                         </a>
                         <a
                             href="https://tiktok.com/@atlasfrontier.io"
                             target="_blank"
                             rel="noopener noreferrer"
                             className="text-gray-400 hover:text-white transition-colors"
-                            aria-label="TikTok"
+                            aria-label="Atlas Frontier on TikTok"
+                            title="Atlas Frontier on TikTok"
                         >
                             <TikTokIcon />
+                            <span className="sr-only">Atlas Frontier on TikTok</span>
                         </a>
                     </div>
                 </div>
