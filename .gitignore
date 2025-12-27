@@ -26,7 +26,12 @@ wheels/
 .coverage
 htmlcov/
 .claude/
-server/data/chroma/
+
+# Data files - don't commit databases or exported data
+**/data/chroma/
+data/
+*.sqlite3
+*_export.json
 
 # Next.js
 .next/
